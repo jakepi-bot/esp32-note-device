@@ -46,7 +46,7 @@
 
 Save the report while the problem is happening, before you turn the board off. A restart keeps the log, but losing power clears it.
 
-The [browser installer](https://adolanium.github.io/hermes-gadget-sdk/installer.html) can save a report under **Troubleshooting**, **Something else**, **Save a diagnostics report**. If you already use the SDK's serial tools, run `hermes-gadget diag --port COM5`, replacing `COM5` with your board's port. Attach the saved file and the steps to reproduce the problem to a [bug report](https://github.com/Adolanium/hermes-gadget-sdk/issues).
+The [browser installer](https://jakepi-bot.github.io/esp32-note-device/installer.html) can save a report under **Troubleshooting**, **Something else**, **Save a diagnostics report**. If you already use the SDK's serial tools, run `hermes-gadget diag --port COM5`, replacing `COM5` with your board's port. Attach the saved file and the steps to reproduce the problem to a [bug report](https://github.com/jakepi-bot/esp32-note-device/issues).
 
 A gadget that is connected to Hermes can send its report without a USB cable. On the computer that runs the Hermes gateway, run:
 
@@ -72,7 +72,7 @@ To add detail to the log, raise one tag's log level from the console (`hermes-ga
 
 When the firmware crashes, it saves a short core dump, and `diag` reports it under `crash`. The dump includes the crashed task, its program counter (`pc`) and, on the ESP32 and ESP32-S3, its backtrace. `this_build` says whether the dump came from the firmware that is running now. The next crash replaces the dump.
 
-A board updated over the air keeps the partition table it was flashed with, so `crash.state` may be `no partition`. To add the core dump partition, install the firmware once with the [browser installer](https://adolanium.github.io/hermes-gadget-sdk/), which keeps the settings. Writing the full release image with `esptool` at `0x0` also adds it, but erases the settings.
+A board updated over the air keeps the partition table it was flashed with, so `crash.state` may be `no partition`. To add the core dump partition, install the firmware once with the [browser installer](https://jakepi-bot.github.io/esp32-note-device/), which keeps the settings. Writing the full release image with `esptool` at `0x0` also adds it, but erases the settings.
 
 To turn the addresses into function names and lines, use the `firmware.elf` of the build that crashed. For a release, download it from the **firmware-elf** artifact of that release's **Release** workflow run; maintainers have access to it for 90 days. For a local build, use `.pio/build/<board>/firmware.elf`. Then run:
 

@@ -10,7 +10,7 @@
   <meta property="og:type" content="website">
   <meta property="og:title" content="Set up a Hermes Gadget">
   <meta property="og:description" content="Install the firmware, connect to Wi-Fi and pair with your Hermes, from your browser.">
-  <meta property="og:image" content="https://adolanium.github.io/hermes-gadget-sdk/img/logo.png">
+  <meta property="og:image" content="https://jakepi-bot.github.io/esp32-note-device/img/logo.png">
   <link rel="icon" href="img/logo.png" type="image/png">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="installer.css">
@@ -27,7 +27,7 @@
       </a>
       <nav aria-label="Project">
         <a href="docs/getting-started.html">Docs</a>
-        <a href="https://github.com/Adolanium/hermes-gadget-sdk">GitHub</a>
+        <a href="https://github.com/jakepi-bot/esp32-note-device">GitHub</a>
       </nav>
     </div>
   </header>
@@ -50,7 +50,7 @@
         <div class="step-body">
           <p class="hint">Match the exact model printed on your board. Check its wiring guide before continuing.</p>
           <div class="boards" id="boards" role="radiogroup" aria-label="Board"></div>
-          <p class="hint other-board">Board not listed? See <a href="docs/porting.html">what a port involves</a>, or <a href="https://github.com/Adolanium/hermes-gadget-sdk/issues/new?template=new_board.yml">ask for it</a>.</p>
+          <p class="hint other-board">Board not listed? See <a href="docs/porting.html">what a port involves</a>, or <a href="https://github.com/jakepi-bot/esp32-note-device/issues/new?template=new_board.yml">ask for it</a>.</p>
           <div class="notice" id="no-firmware" hidden>
             <p>No firmware has been published here yet. You can <a href="docs/hardware.html#build-and-flash">build and flash it yourself</a>, then come back to connect it to Wi-Fi.</p>
           </div>
@@ -68,8 +68,8 @@
       <summary>First time? Set up Hermes</summary>
       <p>On the computer that runs Hermes, install the plugin, then add Hermes Gadget to the gateway:</p>
       <div class="command">
-        <code>hermes plugins install https://github.com/Adolanium/hermes-gadget-sdk/tree/main/plugin --enable</code>
-        <button class="button small" type="button" data-copy="hermes plugins install https://github.com/Adolanium/hermes-gadget-sdk/tree/main/plugin --enable">Copy</button>
+        <code>hermes plugins install https://github.com/jakepi-bot/esp32-note-device/tree/main/plugin --enable</code>
+        <button class="button small" type="button" data-copy="hermes plugins install https://github.com/jakepi-bot/esp32-note-device/tree/main/plugin --enable">Copy</button>
       </div>
       <div class="command">
         <code>hermes gateway setup</code>
@@ -234,7 +234,7 @@
       </details>
       <details id="diag-help">
         <summary>Something else</summary>
-        <p>With the board plugged in, save its diagnostics report, then <a href="https://github.com/Adolanium/hermes-gadget-sdk/issues/new?template=bug_report.yml">open an issue</a> with the file attached.</p>
+        <p>With the board plugged in, save its diagnostics report, then <a href="https://github.com/jakepi-bot/esp32-note-device/issues/new?template=bug_report.yml">open an issue</a> with the file attached.</p>
         <div class="actions">
           <button class="button" id="diag-save" type="button">Save a diagnostics report</button>
         </div>
@@ -249,8 +249,8 @@
     <div class="wrap footer-inner">
       <p>Hermes Gadget SDK is an independent community project, not affiliated with Nous Research. <span id="firmware-version"></span> <a id="firmware-licenses" hidden>Firmware licenses</a></p>
       <p>
-        <a href="https://github.com/Adolanium/hermes-gadget-sdk">Source</a> ·
-        <a href="https://github.com/Adolanium/hermes-gadget-sdk/blob/main/LICENSE">MIT license</a> ·
+        <a href="https://github.com/jakepi-bot/esp32-note-device">Source</a> ·
+        <a href="https://github.com/jakepi-bot/esp32-note-device/blob/main/LICENSE">MIT license</a> ·
         Flashing by <a href="https://github.com/espressif/esptool-js">esptool-js</a> (<a href="vendor/esptool-js-LICENSE.txt">Apache 2.0</a>)
       </p>
     </div>

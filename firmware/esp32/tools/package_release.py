@@ -42,8 +42,10 @@ from check_size import TYPE_APP, partitions  # noqa: E402
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 PROJECT_NAME = "hermes_gadget"      # esp_app_desc_t.project_name of every Hermes Gadget image
 BOARD_TAG = b"HGBOARD="             # the board name the firmware reports (main/board.cpp)
-INSTALLER_URL = "https://adolanium.github.io/hermes-gadget-sdk/"
-GIT_URL = "https://github.com/Adolanium/hermes-gadget-sdk.git"
+# This repository, which publishes its own release files and installer site.
+REPO_SLUG = "jakepi-bot/esp32-note-device"
+INSTALLER_URL = f"https://{REPO_SLUG.split('/')[0]}.github.io/{REPO_SLUG.split('/')[1]}/"
+GIT_URL = f"https://github.com/{REPO_SLUG}.git"
 TYPE_DATA, SUBTYPE_OTA, SUBTYPE_NVS = 0x01, 0x00, 0x02
 # Where the second-stage bootloader goes; the other chips after the ESP32-S2 start at 0.
 BOOTLOADER_OFFSET = {"esp32": 0x1000, "esp32s2": 0x1000, "esp32p4": 0x2000}
@@ -298,7 +300,7 @@ hermes-gadget-<board>-{version}.bin`. This also erases the device's settings, so
 **Update a running device:** `hermes gadget update <device> hermes-gadget-<board>-{version}-app.bin`.
 {plugin}
 Checksums are in `SHA256SUMS`. License texts and notices are in `hermes-gadget-{version}-licenses.zip`.
-Every file has a GitHub build provenance attestation. Check a download with `gh attestation verify <file> --repo Adolanium/hermes-gadget-sdk`.
+Every file has a GitHub build provenance attestation. Check a download with `gh attestation verify <file> --repo {REPO_SLUG}`.
 """
 
 

@@ -197,6 +197,7 @@ class NotesModeImpl final : public NotesMode {
   notes::RetentionPolicy retention_{};
   notes::RetentionResult retention_last_{};
   uint32_t next_retention_ms_ = 0;
+  bool retention_logged_ = false;  // the first pass after boot logs at info
   bool low_space_ = false;
   bool low_space_error_ = false;  // the Error on screen is the retention message
   // Why the last `notes stop` stored nothing (empty: it did). finish_note runs

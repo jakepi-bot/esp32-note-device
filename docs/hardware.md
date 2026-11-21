@@ -105,7 +105,7 @@ The USB-C port is the S3's own USB Serial/JTAG, so flashing and the serial conso
 
 ## Waveshare ESP32-S3-ePaper-1.54
 
-Board option `waveshare-epaper-154`, for Waveshare's ESP32-S3-ePaper-1.54 (V2): an ESP32-S3PICO-1-N8R8 (8 MB octal PSRAM) with 8 MB flash, a 1.54" 200×200 e-paper panel on SPI, one ES8311 carrying both the speaker and the microphone, an NS4150B amplifier, a microSD slot and the BOOT / PWR keys. This port is experimental. The pin table comes from Waveshare's demo and schematic for this board; the port has not been run on one.
+Board option `waveshare-epaper-154`, for Waveshare's ESP32-S3-ePaper-1.54 (V2): an ESP32-S3PICO-1-N8R8 (8 MB octal PSRAM) with 8 MB flash, a 1.54" 200×200 e-paper panel on SPI, one ES8311 carrying both the speaker and the microphone, an NS4150B amplifier, a microSD slot and the BOOT / PWR keys. The pin table comes from Waveshare's demo and schematic for this board. One desk unit runs this firmware (0.7.1) with its panel, keys, codecs and card verified; battery-only behaviour and a real phone over Bluetooth are still owed, see the [hardware checklist](hardware-validation.md).
 
 | Part | Chip | Connection |
 |---|---|---|
@@ -118,7 +118,9 @@ Board option `waveshare-epaper-154`, for Waveshare's ESP32-S3-ePaper-1.54 (V2): 
 
 The e-paper keeps its image with no power at all; GPIO 6 only gates the supply the controller needs to refresh, and the driver opens it before the first transfer. Waveshare's demo drives both peripheral rails LOW to conduct, so the audio rail on GPIO 42 goes low before the codec starts (`power_rails`), and the battery latch on GPIO 17 goes high to stay on. The panel's SPI lines and rail keep their level through light sleep.
 
-A short press on PWR is the voice-note key (a tap under 1.5 s reaches the notes module, see [firmware module interfaces](firmware-modules.md#buttons-who-owns-what)); holding it for 2.5 s releases the latch and powers the board off on battery, as on the LCD-1.54. BOOT is TALK. The display has no backlight: `set_backlight` and the power key's screen on/off do nothing, and the screen timeout never darkens it.
+A short press on PWR goes Home; a tap on BOOT records a note and holding it talks (2 s or more asks to cancel a turn once one is running, see [buttons: who owns what](firmware-modules.md#buttons-who-owns-what)); holding PWR for 2.5 s releases the latch and powers the board off on battery, as on the LCD-1.54. The display has no backlight: `set_backlight` and the power key's screen on/off do nothing, and the screen timeout never darkens it. Because a bistable panel keeps its frame with no power, a resting status screen is this board's dark state, and the chip light-sleeps on battery while it stands there.
+
+**Touch.** Waveshare also sells a touch variant, whose FT6336 answers at I2C 0x38 behind `EPD_TP_RST` on GPIO 7 (`EPD_TP_INT` is GPIO 21). The probe drives that reset line low for 10 ms and releases it, then checks 0x38, 0x5D and 0x14. On the desk unit nothing answers and a scan of the only I2C bus finds just `0x18` (ES8311), `0x51` (PCF85063) and `0x70`, so that unit has no touch glass connected; `diag` reports `"touch":false` and the home strip is not drawn. The boot log keeps one line naming the scan result.
 
 **Build and flash it** with PlatformIO (`pio run -e waveshare-epaper-154 -t upload -t monitor`) or with `idf.py`:
 

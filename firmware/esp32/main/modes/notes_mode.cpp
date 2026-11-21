@@ -543,8 +543,17 @@ void NotesModeImpl::run_retention(uint32_t now, bool force) {
              notes::human_bytes(result.deleted_bytes).c_str());
     refresh_counts(true);
   } else if (result.evaluated) {
-    ESP_LOGD(TAG, "retention: nothing to delete (%d%% free, %u unsynced kept)", result.free_pct_before,
-             static_cast<unsigned>(result.unsynced_left));
+    // The first pass after boot says out loud that the rule ran and found
+    // nothing; later quiet passes stay at debug so a day of them cannot push the
+    // boot lines out of the log ring.
+    if (!retention_logged_) {
+      retention_logged_ = true;
+      ESP_LOGI(TAG, "retention: nothing to delete (%d%% free, %u unsynced kept)",
+               result.free_pct_before, static_cast<unsigned>(result.unsynced_left));
+    } else {
+      ESP_LOGD(TAG, "retention: nothing to delete (%d%% free, %u unsynced kept)", result.free_pct_before,
+               static_cast<unsigned>(result.unsynced_left));
+    }
   }
 
   // The rule works on the sizes it removed; the card is the authority on what

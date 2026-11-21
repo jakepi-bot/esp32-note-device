@@ -16,6 +16,10 @@ tools/                  make_logo.py (the logo), check_versions.py (the release 
 assets/mascot/          The mascot master image and its attribution
 ```
 
+## The firmware tree of record
+
+`github.com/jakepi-bot/esp32-note-device` (this repository) is the single source of truth for the firmware and the host-side plugin: retention, the low-power and Bluetooth radio windows, the key map and the home screen all land here and nowhere else. `github.com/NousResearch/hermes-gadget-sdk` is the SDK the project started from; a long-lived checkout of it is useful as reference material and as the place the other boards came from, but it is not where device firmware changes are made, built for the desk unit, or flashed from. If a change exists in both trees, this one wins on the device.
+
 ## Test suites
 
 | Suite | Command | Needs |

@@ -92,6 +92,32 @@ check_size: app 1984 KB in the 3968 KB 'ota_0' slot, 50% free
 `web/ble-note-relay/selftest.mjs` (11 cases) pass on that tree; re-running
 `hg_ble_capture` reproduces the committed relay fixture byte for byte.
 
+## Third verification: the GATT table fix
+
+Recorded 2026-11-20 on the commit that fixes the null `access_cb` the
+[hardware QA pass](qa-report-0588422.md) found (D1), with `.pio/build/waveshare-epaper-154`
+and the generated `sdkconfig.waveshare-epaper-154` deleted first — the stale
+`sdkconfig` from the earlier tree is what `check_config` refuses, and a clean
+clone does not have one:
+
+```
+Flash: [=====     ]  50.0% (used 2030671 bytes from 4063232 bytes)
+RAM:   [===       ]  26.4% (used 86492 bytes from 327680 bytes)
+======================== [SUCCESS] Took 104.83 seconds ========================
+```
+
+| Fact | Value |
+|---|---|
+| App image | 2 030 671 B — +4 B on `0588422`: one `access_cb` initialiser |
+| `firmware.bin` | 2 031 184 B, SHA-256 `63346524acc991e7f450cd91f71e97fcb7f8f47e11926ae75b86b2ddf36a38d8` |
+| RAM | 86 492 B static (26.4%), unchanged |
+| Upload | `Wrote 2031184 bytes … Hash of data verified` over USB Serial/JTAG |
+| Host tests | `ctest` 8/8 (the new `hg_ble_gatt_table_tests` included), relay `selftest.mjs` 11/11, `site` 32/32 |
+
+The size, RAM and slot figures reproduce the earlier run to within the added
+pointer; the binary is not bit-reproducible because ESP-IDF stamps the build
+time into `app_desc`.
+
 ## Consequence worth knowing before adding features
 
 The board now builds against `partitions-epaper-8mb.csv`, not `partitions.csv`,

@@ -16,6 +16,11 @@ Status (2026-11-20): firmware 0.6.0 builds from a clean checkout, is flashed on 
 physical board, and has been validated end to end over Wi-Fi — pairing to a live
 Hermes hub, live assistant turns (record → stream → reply → spoken reply), and
 offline voice notes recorded to the card and uploaded to the notes endpoint.
+Bluetooth note sync now initialises on the board: the GATT table registers, the
+`phone` and `notes ble` commands answer, and pairing opens advertising. No phone
+has completed a transfer yet, so that half is unverified — see
+[docs/ble-note-sync.md §11](docs/ble-note-sync.md#11-what-has-been-verified-and-what-has-not)
+and the [hardware QA report](docs/qa-report-0588422.md).
 Hardware detail and assumptions are in [docs/audit.md](docs/audit.md).
 
 ## Hardware
@@ -90,6 +95,19 @@ and the hardware validation used.
 4. The notes endpoint is derived from the hub's host on port 8766. Override it
    with `set notes_url http://<host>:<port>/notes/v1` if the hub sits behind a
    proxy or another port.
+5. Set the two defaults an out-of-the-box screen gets wrong. Both are off/unset
+   by design, so nothing guesses at hardware that may not be fitted:
+
+   ```sh
+   set timezone "CST6CDT,M3.2.0,M11.1.0"   # POSIX TZ; unset shows UTC (default UTC0)
+   set battery_estimate liion              # only with a single-cell Li-ion pack fitted
+   ```
+
+   Until `timezone` is set the clock is UTC, and until `battery_estimate` is set
+   the footer reads `NO BATTERY` even with a pack fitted (the board has no fuel
+   gauge; the percentage is a voltage estimate). See
+   [battery indicator settings](docs/using-gadget.md#device-settings-and-hardware-checks)
+   and QA report [D2](docs/qa-report-0588422.md).
 
 ## Notes: what the device does
 

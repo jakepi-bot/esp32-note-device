@@ -309,13 +309,28 @@ the BLE link itself — pairing, the MTU, a dropped connection.
 
 Verified:
 
-- The firmware builds clean for the board with Bluetooth on: 2,030,667 B (1,984 KB)
-  in the 3,968 KB `ota_0` slot, 50% free, 86,492 B static RAM (26.4%), 107 s from
+- The firmware builds clean for the board with Bluetooth on: 2,030,671 B (1,984 KB)
+  in the 3,968 KB `ota_0` slot, 50% free, 86,492 B static RAM (26.4%), 105 s from
   an empty `.pio/build` (`pio run -e waveshare-epaper-154`).
 - The partition table in the built image is the 8 MB one (ota_0 at `0x20000`,
   ota_1 at `0x400000`, 3,968 KB each), read back out of `partitions.bin`.
+- The GATT table registers on real NimBLE, on the board: the boot log has
+  `I hg.phone: Bluetooth ready` at 1282 ms and no `E (` line at all, `phone`
+  answers `@phone {"paired":0,"connected":false,"pairing":false}`, `notes ble`
+  answers `@notes ble link down mtu 23 idle`, `notes status` ends `| ble away`,
+  and `phone pair` answers `@ok phone pairing open` with `GAP procedure
+  initiated: advertise`. This one is new: `0588422` failed it — the data
+  characteristic had no `access_cb`, NimBLE rejected the table with
+  `ble_gatts_count_resources rc=3` and no service registered at all
+  ([QA report](qa-report-0588422.md), D1).
 - The protocol: 16 host cases (windows, resume, rewind, per-block CRC, empty
   notes, no card, unknown id, timeouts, MTU refusal, `done` moving the note).
+- The GATT tables themselves: 3 host cases over `port_ble.cpp` — every
+  characteristic that names a UUID names an access callback (NimBLE's own rule),
+  the note data characteristic is notify-only behind `on_note_access`, and the
+  test fails loudly if it stops recognising the tables. `port_ble.cpp` needs the
+  ESP-IDF to compile, so this reads the source rather than linking it; it is what
+  would have caught D1 before the board did.
 - The phone's half, against a packet stream captured from the firmware itself:
   11 cases, including the SHA-256 of the rebuilt WAV. Re-running
   `hg_ble_capture` reproduces the committed fixture byte for byte, so the two
@@ -324,16 +339,21 @@ Verified:
   own protocol into 970 blocks, reassembled and signed by `relay.mjs`, posted to
   the plugin's real `POST /notes/v1` — `202 accepted`, transcribed, markdown in the
   vault, job in `notes/done/` (steps in §10).
-- The whole repository test set on this tree: `ctest` 7/7 (core, board, e-paper
-  mode, BLE protocol, notes, tailnet), `node --test web/ble-note-relay/selftest.mjs`
-  11/11, `npm test` in `site/` 32/32.
+- The whole repository test set on this tree: `ctest` 8/8 (core, board, e-paper
+  mode, BLE protocol, GATT table, notes, tailnet), `node --test
+  web/ble-note-relay/selftest.mjs` 11/11, `npm test` in `site/` 32/32.
 
-Not yet verified (needs the board and a phone, and is what the QA pass is for):
+Not yet verified (needs a phone with `web/ble-note-relay/` open in Bluefy; no
+iPhone and no BLE central was available to any pass so far):
 
-- The service registering on real NimBLE, the MTU iOS negotiates, real
-  throughput, and the e-paper screen during a transfer.
+- Pairing from an iPhone, the passkey entry, the MTU iOS negotiates, real
+  throughput and resumption, a note actually pulled and posted from a phone, and
+  the e-paper screen during a transfer. The board's half is proven to initialise
+  and advertise; nothing past the radio handshake has been run against a phone.
 - Pairing once more after the USB flash: the NVS partition keeps its offset, so
-  paired phones *should* survive; that has not been observed on hardware yet.
-- Wi-Fi and Bluetooth together (the board sets
-  `CONFIG_ESP_COEX_SW_COEXIST_ENABLE`): a note uploading over Wi-Fi while a phone
-  is connected.
+  paired phones *should* survive, but no phone has been paired, so bond survival
+  has not been observed (settings in NVS did survive two USB flashes).
+- Wi-Fi and Bluetooth together during a transfer (the board sets
+  `CONFIG_ESP_COEX_SW_COEXIST_ENABLE`): both radios were up at once with no
+  errors, and a note uploaded over Wi-Fi after the fix, but no note was sent over
+  Bluetooth while Wi-Fi was transferring.

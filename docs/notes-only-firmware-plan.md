@@ -398,12 +398,14 @@ the device carries on instead of sitting dead with no card.
 
 ### Numbers, measured
 
-`pio run -e notes` on this tree, clean build, ESP-IDF 6.1.0, 2026-11-21:
+`pio run -e notes` on this tree, clean build, ESP-IDF 6.1.0, 2026-11-21 (re-measured
+after the UI refresh fixes of t_38a92826, which add 740 B to the notes image and
+take 96 B off its static RAM against the numbers first recorded here):
 
-| | Hermes app (`waveshare-epaper-154`) | Notes app with the runtime (and the screens card's files) |
+| | Hermes app (`waveshare-epaper-154`) | Notes app with the runtime and the screens |
 |---|---|---|
-| Image | 2,050,799 B | 1,460,155 B |
-| Static RAM | 87,836 B | 63,136 B |
+| Image | 2,052,223 B | 1,464,915 B |
+| Static RAM | 87,948 B | 63,040 B |
 
 The parent's skeleton was 731,603 B only because nothing referenced the notes
 path: `nm` found no `hg::App`, but the uploader, the station and the setup page
@@ -411,7 +413,7 @@ were unreachable, so `--gc-sections` dropped them. Wiring the runtime in is what
 links `esp_http_client` (via `notes_uploader.cpp`), the Wi-Fi station/AP stack
 (`esp_wifi`, net80211, wpa_supplicant, the mesh objects), `esp_http_server` and
 the mbedTLS X.509 bundle; that is most of the difference, and it is the price of
-the upload, the setup page and SNTP. The notes image is still 577 KB (28%)
+the upload, the setup page and SNTP. The notes image is still 574 KiB (28%)
 smaller than the Hermes app in flash and 28% smaller in static RAM.
 
 ### On the desk unit (2026-11-21)

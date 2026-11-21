@@ -6,7 +6,7 @@ import { DeviceConsole, consoleSafe, redact } from "./lib/console.js";
 import { reportFileName, reportText } from "./lib/diagnostics.js";
 import { openConsole, reopen } from "./lib/serial.js";
 
-const REPO = "https://github.com/Adolanium/hermes-gadget-sdk";
+const REPO = "https://github.com/jakepi-bot/esp32-note-device";
 const STEPS = ["step-board", "step-hermes", "step-install", "step-wifi", "step-pair"];
 const POLL_MS = 1500;
 const WIFI_PATIENCE_MS = 25000;

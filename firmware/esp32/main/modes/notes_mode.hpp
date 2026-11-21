@@ -52,6 +52,11 @@ struct NoteStatus {
   uint32_t recording_s = 0;  // whole seconds recorded so far
   uint32_t pending = 0, synced = 0, failed = 0, stored = 0;
   bool sd_ready = false;
+  // What is left on the card, measured when the counts are scanned (every 5 s)
+  // and once per state change. sd_free_known is false until a card answers, so
+  // the screen never prints a zero it did not measure.
+  uint64_t sd_free_bytes = 0, sd_total_bytes = 0;
+  bool sd_free_known = false;
   // The note the uploader holds, while it does.
   bool uploading_valid = false;
   uint32_t uploading_bytes = 0;
@@ -115,6 +120,7 @@ class NotesModeImpl final : public NotesMode {
   void step_sync(uint32_t now_ms);
   void step_ble(uint32_t now_ms);
   void refresh_counts(bool publish);
+  void refresh_space();
   void refresh_newest();
   void publish_status();
   bool ensure_sd();
@@ -167,6 +173,10 @@ class NotesModeImpl final : public NotesMode {
   bool retry_waiting_ = false;  // the backoff stands until retry_at_ms_
 
   bool sd_ready_ = false;
+  // The card's own answer to "how much is left", read with the counts scan and
+  // never guessed when the card is not there.
+  uint64_t sd_free_bytes_ = 0, sd_total_bytes_ = 0;
+  bool sd_free_known_ = false;
   uint32_t sd_probe_ms_ = 0;
   std::string sd_error_;
   // Why the last `notes stop` stored nothing (empty: it did). finish_note runs

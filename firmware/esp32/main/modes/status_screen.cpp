@@ -137,20 +137,61 @@ void draw_masthead(hg::Canvas& c, const StatusView& v) {
 }
 
 // --------------------------------------------------------------- the words
-// A percentage and one fact, in 14 columns. The fact never gets truncated: the
-// level is what is dropped when both do not fit, because the masthead icon
-// still carries the level and "2 QUEUED" is the line a user acts on.
-std::string footer(const StatusView& v, std::string_view fact) {
+// "SD 3.1G": what is left on the card, in four to seven columns, because the
+// footer has seventeen for a level, a fact and this. One decimal of a gigabyte:
+// the byte is noise on a 32 GB card, and an exact number would repaint the panel
+// for every kilobyte a note adds. "SD" and no "FREE" is what fits beside a
+// queue count; the docs and the tests say the number is the free space.
+std::string space_text(uint64_t free_bytes) {
+  char buf[20];
+  if (free_bytes >= 1000000000ull) {
+    std::snprintf(buf, sizeof buf, "SD %.1fG", static_cast<double>(free_bytes) / 1e9);
+  } else if (free_bytes >= 1000000ull) {
+    std::snprintf(buf, sizeof buf, "SD %lluM", static_cast<unsigned long long>(free_bytes / 1000000ull));
+  } else {
+    std::snprintf(buf, sizeof buf, "SD %lluK", static_cast<unsigned long long>(free_bytes / 1000ull));
+  }
+  return buf;
+}
+
+// The footer is one line, and the card's free space is the fact the product asks
+// it to carry (the request's "free space on the home screen"). kFootCols is 14,
+// so the candidates are tried in order of readability: the level, the fact and
+// the space spelled out; then the space as its bare number ("3.1G") when the
+// left needs the columns; then a tight separator with no spaces around it. The
+// level is what goes first -- its masthead icon still shows it -- and a number
+// with no room for even "3.1G" is dropped rather than truncated into a lie.
+std::string footer_line(const StatusView& v, std::string_view fact, bool space_known, uint64_t free_bytes) {
   const std::string pct = v.battery_pct >= 0 ? std::to_string(v.battery_pct) + "%" : std::string("NO BATTERY");
-  if (fact.empty()) return pct;
-  const std::string both = pct + " \xC2\xB7 " + std::string(fact);
-  if (cols(both) <= kFootCols) return both;
-  // "100%" plus a word is one column too long. The masthead's bolt already says
-  // external power, so that fact gives way to the level; a count or a fault is
-  // worth more than the level and keeps the line.
-  if (fact == "ON POWER") return pct;
-  if (cols(fact) <= kFootCols) return std::string(fact);
-  return pct;
+  auto join = [](std::string_view a, std::string_view b, const char* sep) {
+    if (a.empty()) return std::string(b);
+    if (b.empty()) return std::string(a);
+    return std::string(a) + sep + std::string(b);
+  };
+  auto fits = [](const std::string& s) { return s.size() && cols(s) <= kFootCols; };
+
+  if (!space_known) {
+    // Mounted but not yet measured, or no card at all: no number is claimed.
+    std::string both = join(pct, fact, " \xC2\xB7 ");
+    if (fits(both)) return both;
+    if (fits(std::string(fact))) return std::string(fact);
+    return fits(pct) ? pct : status_fit(pct, kFootCols);
+  }
+
+  const std::string full = space_text(free_bytes);                         // "SD 3.1G"
+  const std::string short_form = full.size() > 3 ? full.substr(3) : full;  // "3.1G"
+  const std::string lefts[] = {join(pct, fact, " \xC2\xB7 "), std::string(fact), pct};
+  const std::string spans[] = {full, short_form};
+  for (const std::string& left : lefts) {
+    for (const std::string& span : spans) {
+      for (const char* sep : {" \xC2\xB7 ", "\xC2\xB7"}) {
+        std::string line = join(left, span, sep);
+        if (fits(line)) return line;
+      }
+    }
+  }
+  // Nothing readable fits beside the number: the number alone is the promise.
+  return status_fit(full, kFootCols);
 }
 
 // "12 s" / "1:05": a note's length, the only duration the copy prints.
@@ -159,6 +200,48 @@ std::string duration(uint32_t seconds) {
   if (seconds < 60) std::snprintf(buf, sizeof buf, "%u s", static_cast<unsigned>(seconds));
   else std::snprintf(buf, sizeof buf, "%u:%02u", static_cast<unsigned>(seconds / 60), static_cast<unsigned>(seconds % 60));
   return buf;
+}
+
+// The strip's boxes, in panel pixels: one box for TALK, two for the pairing
+// question. The renderer and the hit test both read these, so a box drawn and a
+// box that answers a tap cannot disagree.
+struct PanelBoxes {
+  int count = 0;                    // 0, 1 or 2
+  int x[2] = {kMarginX, 0};
+  int w[2] = {kRightEdge - kMarginX, 0};
+};
+
+PanelBoxes panel_boxes(const StatusView& v) {
+  PanelBoxes b;
+  if (v.panel == TouchPanel::Talk) b.count = 1;
+  if (v.panel == TouchPanel::Ask) {
+    // Two boxes with a gap wide enough that a finger cannot straddle them: NO
+    // left, YES right, each 83 px (11.5 mm).
+    b.count = 2;
+    b.w[0] = b.w[1] = (kRightEdge - kMarginX - kPanelGap) / 2;
+    b.x[0] = kMarginX;
+    b.x[1] = kMarginX + b.w[0] + kPanelGap;
+  }
+  return b;
+}
+
+void draw_panel(hg::Canvas& c, const StatusView& v) {
+  if (v.panel == TouchPanel::None) return;
+  const PanelBoxes boxes = panel_boxes(v);
+  // A talking face names its word (TALK / STOP); the ask's two boxes are fixed,
+  // so the label cannot drift away from the hit test that answers it.
+  const char* labels[2] = {v.panel == TouchPanel::Ask ? "NO" : (v.button.empty() ? "TALK" : v.button.c_str()),
+                           "YES"};
+  for (int i = 0; i < boxes.count; ++i) {
+    // An outline, never a fill: the panel is black ink on paper, and a filled box
+    // would cost a full refresh's worth of ink for a button.
+    c.rect(boxes.x[i], kPanelTop, boxes.w[i], kPanelH, kInk);
+    c.rect(boxes.x[i] + 1, kPanelTop + 1, boxes.w[i] - 2, kPanelH - 2, kInk);
+    const std::string label = labels[i];
+    const int tw = hg::Canvas::text_width(label, kScaleBody);
+    const int th = hg::font::kGlyphHeight * kScaleBody;
+    c.text(boxes.x[i] + (boxes.w[i] - tw) / 2, kPanelTop + (kPanelH - th) / 2, label, kScaleBody, kInk);
+  }
 }
 
 // "443 KB" / "1.2 MB": the WAV on the card, rounded for reading.
@@ -191,16 +274,35 @@ StatusView compose_status(const StatusInputs& in) {
   v.battery_pct = in.battery_pct;
   v.external_power = in.external_power;
 
+  // The card's free space is on every face, and on none of them is it a guess: a
+  // card that has not answered contributes nothing rather than a zero.
+  const bool space_known = in.sd_ready && in.sd_free_known;
+  auto set_foot = [&](std::string fact) { v.foot = footer_line(v, fact, space_known, in.sd_free_bytes); };
+
+  // The touch strip belongs to the resting face. Only a unit whose glass has a
+  // controller draws it: a box nobody can press would be a lie about the hardware.
+  if (in.touch) {
+    v.panel = TouchPanel::Talk;
+    v.button = in.talk_live ? "STOP" : "TALK";
+  }
+
+  // What the keys do, in the words the keys are printed with. BOOT is the second
+  // key (the request calls it the brightness key; this panel has no backlight, so
+  // nothing dims), PWR goes home. Three wrapped lines is all the note block has,
+  // so the copy is short enough to survive a wrap at 17 columns.
+  const char* add = "Tap BOOT to add.";
+  const char* stop = in.touch ? "tap STOP below" : "tap BOOT to stop";
+
   char note[96];
   // The order is the user's: what is happening now, then what is broken, then
   // the link, then the cell, then the clock, then the notes.
   if (in.notes == NotesPhase::Recording) {
     const uint32_t s = in.recording_s;
-    std::snprintf(note, sizeof note, "%02u:%02u  tap PWR to stop", static_cast<unsigned>(s / 60),
-                  static_cast<unsigned>(s % 60));
+    std::snprintf(note, sizeof note, "%02u:%02u  %s", static_cast<unsigned>(s / 60),
+                  static_cast<unsigned>(s % 60), stop);
     v.hero = "RECORDING";
     v.note = note;
-    v.foot = footer(v, in.external_power ? "ON POWER" : "");
+    set_foot(in.external_power ? "ON POWER" : "");
   } else if (in.notes == NotesPhase::Uploading) {
     if (in.uploading_valid)
       std::snprintf(note, sizeof note, "note %02d:%02d  \xC2\xB7  %s", in.uploading_hour, in.uploading_minute,
@@ -209,54 +311,56 @@ StatusView compose_status(const StatusInputs& in) {
       std::snprintf(note, sizeof note, "note  \xC2\xB7  %s", size_text(in.uploading_bytes).c_str());
     v.hero = "UPLOADING";
     v.note = note;
-    v.foot = footer(v, in.pending > 1 ? "1 OF " + std::to_string(in.pending) : "");
+    set_foot(in.pending > 1 ? "1 OF " + std::to_string(in.pending) : "");
   } else if (in.notes == NotesPhase::Error || !in.error.empty()) {
     v.error = true;
     v.hero = "ERROR";
     v.note = in.error.empty() ? std::string("Something went wrong. See the log.") : in.error;
-    v.foot = footer(v, in.sd_ready ? "" : "NO CARD");
+    set_foot(in.sd_ready ? "" : "NO CARD");
   } else if (!in.sd_ready) {
     // No card is the one fault the mode cannot recover from on its own, and it
     // is not an "error" in the sense of a failed action: it is a missing part.
     v.error = true;
     v.hero = "NO CARD";
-    v.note = "Recording needs a card. Anything on it is safe.";
-    v.foot = footer(v, "NO CARD");
+    v.note = "Needs a card. Nothing on it is lost.";
+    set_foot("NO CARD");
   } else if (v.wifi != WifiState::Online) {
     v.hero = "OFFLINE";
-    v.note = "Notes save to the card, upload when back";
-    v.foot = footer(v, in.pending ? std::to_string(in.pending) + " QUEUED" : "");
+    v.note = "Notes save to the card, then upload.";
+    set_foot(in.pending ? std::to_string(in.pending) + " QUEUED" : "");
   } else if (in.battery_pct >= 0 && in.battery_pct <= 20 && !in.external_power) {
     v.hero = "LOW POWER";
-    v.note = "Plug in soon. Recording stops if it dies.";
-    v.foot = footer(v, "");
+    v.note = "Plug in soon or recording stops.";
+    set_foot("");
   } else if (!in.time_valid) {
     v.hero = "NO TIME";
     v.note = "The clock sets itself once online.";
-    v.foot = footer(v, "");
+    set_foot("");
   } else if (!in.has_newest) {
     v.hero = "NO NOTES";
-    v.note = "Hold PWR and speak to record one.";
-    v.foot = footer(v, in.external_power ? "ON POWER" : "");
+    // The one hint the panel cannot show by itself: on a unit without the touch
+    // glass, holding this same key is how the live mode is reached.
+    v.note = in.touch ? std::string("Tap BOOT to record, TALK to talk.")
+                      : std::string("Tap BOOT to record. Hold it to talk.");
+    set_foot(in.external_power ? "ON POWER" : "");
   } else {
     char hero[24];
     std::snprintf(hero, sizeof hero, "%u NOTE%s", static_cast<unsigned>(in.stored), in.stored == 1 ? "" : "S");
     v.hero = status_fit(hero, kHeroCols);
     if (in.newest_valid)
-      std::snprintf(note, sizeof note, "Newest note %02d:%02d, %s. Tap PWR to add another.", in.newest_hour,
-                    in.newest_minute, duration(in.newest_duration_s).c_str());
+      std::snprintf(note, sizeof note, "Newest %02d:%02d, %s. %s", in.newest_hour, in.newest_minute,
+                    duration(in.newest_duration_s).c_str(), add);
     else
       // The note's own stamp is not a time (it was recorded before the clock
       // was ever set), so the line prints only what is true: the length. It
       // used to say "no clock yet", which contradicted a clock already on the
       // masthead (the hardware QA's D5).
-      std::snprintf(note, sizeof note, "Newest note, %s. Tap PWR to add another.",
-                    duration(in.newest_duration_s).c_str());
+      std::snprintf(note, sizeof note, "Newest note, %s. %s", duration(in.newest_duration_s).c_str(), add);
     v.note = note;
-    v.foot = footer(v, in.pending                  ? std::to_string(in.pending) + " QUEUED"
-                      : in.external_power        ? "ON POWER"
-                      : in.synced               ? "SYNCED"
-                                                : "");
+    set_foot(in.pending           ? std::to_string(in.pending) + " QUEUED"
+             : in.external_power  ? "ON POWER"
+             : in.synced          ? "SYNCED"
+                                  : "");
   }
   v.hero = status_fit(v.hero, kHeroCols);
   v.foot = status_fit(v.foot, kFootCols);
@@ -268,6 +372,10 @@ StatusView compose_pairing(const StatusInputs& in, const PairingCopy& copy) {
   // the pairing screen's.
   StatusView v = compose_status(in);
   v.error = false;
+  // The strip has no business on this face: a tap here would open the microphone
+  // while the device is still being approved.
+  v.panel = TouchPanel::None;
+  v.button.clear();
   v.hero = copy.code.empty() ? std::string("PAIRING") : copy.code;
   std::string note;
   // One paragraph: the renderer wraps by column, and the 5x7 font has no
@@ -279,6 +387,22 @@ StatusView compose_pairing(const StatusInputs& in, const PairingCopy& copy) {
   }
   if (note.empty()) note = "Waiting for the Hermes host.";
   v.note = note;
+  v.hero = status_fit(v.hero, layout::kHeroCols);
+  return v;
+}
+
+StatusView compose_ask(const StatusInputs& in, std::string_view peer) {
+  // The chrome is the resting face's, the words are this question's. The address
+  // is the thing to compare with the phone in your hand, and thirteen columns
+  // hold its last two octets -- "Address ends EE:FF. Allow?" -- which is what the
+  // phone's own pairing dialog shows too.
+  StatusView v = compose_status(in);
+  v.error = false;
+  v.hero = "NEW PHONE";
+  std::string tail(peer.size() > 5 ? peer.substr(peer.size() - 5) : peer);
+  v.note = "Address ends " + tail + ". Allow?";
+  v.panel = in.touch ? TouchPanel::Ask : TouchPanel::None;
+  v.button.clear();
   v.hero = status_fit(v.hero, layout::kHeroCols);
   return v;
 }
@@ -323,6 +447,21 @@ void render_status(hg::Canvas& c, const StatusView& v) {
   // Footer: one line of truth. Carries the battery percentage that does not fit
   // in the masthead, and the count or link state that does not fit in the hero.
   if (!v.foot.empty()) c.text(kMarginX, kFootTop, status_fit(v.foot, kFootCols), kScaleBody, kInk);
+
+  // The touch strip: the only place on this panel that does anything when pressed.
+  draw_panel(c, v);
+}
+
+PanelHit status_panel_hit(const StatusView& v, int x, int y) {
+  if (y < kPanelTop || y >= kPanelTop + kPanelH) return PanelHit::None;
+  if (v.panel == TouchPanel::None) return PanelHit::None;
+  const PanelBoxes boxes = panel_boxes(v);
+  for (int i = 0; i < boxes.count; ++i) {
+    if (x < boxes.x[i] || x >= boxes.x[i] + boxes.w[i]) continue;
+    if (v.panel == TouchPanel::Ask) return i == 1 ? PanelHit::Yes : PanelHit::No;
+    return PanelHit::Talk;
+  }
+  return PanelHit::None;
 }
 
 namespace {
@@ -355,6 +494,9 @@ uint32_t StatusScreen::signature(const StatusView& v) {
   mix_string(h, v.hero);
   mix_string(h, v.note);
   mix_string(h, v.foot);
+  const uint8_t panel = static_cast<uint8_t>(v.panel);
+  mix(h, &panel, sizeof panel);
+  mix_string(h, v.button);
   return h;
 }
 

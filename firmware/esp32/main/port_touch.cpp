@@ -40,6 +40,12 @@ bool axs5106_read(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t* data, size_
 
 }  // namespace
 
+// One probe of one address, with the timeout every other probe here uses.
+bool i2c_device_present(i2c_master_bus_handle_t bus, uint8_t addr) {
+  if (bus == nullptr || addr == 0) return false;
+  return i2c_master_probe(bus, addr, 50) == ESP_OK;
+}
+
 bool TouchInput::begin(const TouchConfig& touch, const ExpanderKeyConfig& key, const EncoderConfig& encoder,
                        i2c_master_bus_handle_t bus, i2c_master_bus_handle_t key_bus) {
   if (!bus) return false;

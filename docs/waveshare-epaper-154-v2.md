@@ -248,7 +248,7 @@ Details:
   `audio_seconds ≥ 0.5`, ≤ 3.0, `playback_lead_ms` defaults 1000 — do not change.
 - Recommended `rate_kbps: 24` only if opus is enabled on both ends; PCM16 over LAN
   costs 96 KB/s ≪ 40 MB/s Wi-Fi capacity, so PCM16 is the default and simplest.
-- VAD: `vad_min_rms` / `drop_silent_recordings` come from the codec board config;
+- **Touch SKU**: the FT6336 touch glass at 0x38 draws a home screen TALK strip (YES/NO boxes) along the bottom of the panel, enables the phone‑pairing acknowledgement flow, and every action is a strip tap rather than a key. The plain SKU draws no strip and the keys carry all actions.
   set them from the Waveshare demo's observed noise floor during bring-up **[verify]**.
 
 ---
@@ -264,6 +264,7 @@ Details:
 | PWR (GPIO18) | **Note record** | Tap: start/stop offline voice note. Vendor firmware treats this pin as a real button (and uses double-press as a gesture), so wire it as `LatchPowerConfig.key` *and* read it in the port; keep the board's own hardware power function (long hold cuts/holds power) untouched. |
 | PWR unusable? | fallback | If bring-up shows the latch swallows taps before firmware sees them, fall back to **double-tap BOOT = note** and document the change here. **[verify on hardware — open A/B, evidence favours PWR]** |
 | Green LED (GPIO3) | feedback | Solid while a note is recording, slow blink while uploading (port-owned GPIO, no SDK concept needed). |
+**Touch SKU**: the FT6336 touch glass at 0x38 draws a home screen TALK strip (YES/NO boxes) along the bottom of the panel — a tap on it starts a live Hermes session and ends one — and draws NO / YES boxes while a phone asks to pair: only a release inside those boxes answers, and a tap anywhere else on the glass answers nothing. The plain SKU draws no strip and every action is a key.
 
 The 2 s long press arms only when the press found something to cancel — a turn
 in flight, or an overlay/question on the screen. A press from the idle screen

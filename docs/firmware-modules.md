@@ -25,7 +25,7 @@ logic shared through `port.hpp`, inert on every board that does not set
 | Durable config | `main/device_config.{hpp,cpp}` | `DeviceConfig`: NVS-backed typed settings that survive reboots |
 | Mode interfaces | `main/modes/live_mode.hpp`, `main/modes/notes_mode.hpp` | `LiveMode` (implemented: `LiveModeImpl` over the hardware-free `LiveState`) and `NotesMode`, still the stub the offline task replaces |
 | Status screen | `main/modes/status_screen.{hpp,cpp}`, `main/modes/notes_screen.{hpp,cpp}` | `compose_status` + `StatusScreen` (the 200x200 resting face, hardware-free) and `NotesScreen` (the hand-off that feeds it) |
-| Button router | `main/modes/mode_router.{hpp,cpp}` | `ModeRouter`: a PWR tap reaches `NotesMode`, and every loop pass ticks both modes |
+| Button router | `main/modes/mode_router.{hpp,cpp}` | `ModeRouter`: PWR → Home (`App::go_home`), BOOT → record note / hold to talk (`HomeKeys`). Every loop pass ticks both modes; a touch press when the ask strip is drawn is routed to `NotesScreen::touch` to answer YES/NO. |
 
 `main.cpp` wires them, all under `#if CONFIG_HG_BOARD_WS_EPAPER_154`:
 

@@ -352,9 +352,15 @@ void dispatch(hg::App& app, hgp::Event& ev) {
       ev.console->answer(app.console(std::string_view(text ? text : "", ev.len)));
       break;
     case EventType::Touch:
-      if (g_gestures && ev.len == sizeof(hgp::TouchSample)) {
+      if (ev.len == sizeof(hgp::TouchSample)) {
         const auto* t = reinterpret_cast<const hgp::TouchSample*>(ev.data);
-        g_gestures->update(t->touching, t->x, t->y, g_system.now_ms());
+#if CONFIG_HG_BOARD_WS_EPAPER_154
+        // While the resting face holds the glass its TALK box is the only target:
+        // the screen takes the finger, and a tap on the paper does nothing rather
+        // than opening the microphone.
+        if (g_status.touch(t->touching, t->x, t->y, g_system.now_ms())) break;
+#endif
+        if (g_gestures) g_gestures->update(t->touching, t->x, t->y, g_system.now_ms());
       }
       break;
     case EventType::Key:
@@ -402,7 +408,12 @@ extern "C" void app_main(void) {
   init_nvs();
   hgp::events::init();
   ESP_ERROR_CHECK(g_storage.begin() ? ESP_OK : ESP_FAIL);
-  const hgp::BoardConfig& board = hgp::board_config();
+  // A copy in BSS, not a reference: the e-paper board's touch block is enabled
+  // after the I2C bus exists (below), because one image serves both SKUs of that
+  // product. Everything else reads it exactly as the factory made it.
+  static hgp::BoardConfig board_store;
+  board_store = hgp::board_config();
+  hgp::BoardConfig& board = board_store;
 #if CONFIG_HG_BOARD_WS_EPAPER_154
   // Durable config (NVS): the boot counter proves it writes on every boot.
   g_config.begin(g_storage);
@@ -493,6 +504,20 @@ extern "C" void app_main(void) {
 #endif
   // GPIO45/46 belong to VDD_IO_5 on the P4; acquire LDO4 before creating I2C0.
   i2c_master_bus_handle_t i2c_bus = io_rail_ready ? hgp::i2c::bus(board.i2c) : nullptr;
+#if CONFIG_HG_BOARD_WS_EPAPER_154
+  // The product ships two SKUs on one firmware: this one, whose glass carries an
+  // FT6336 on the shared bus at 0x38, and the plain e-paper SKU, where nothing
+  // answers there. make() runs before the bus exists, so the probe is here and
+  // the touch block is switched on only by an answer: on the plain SKU the strip
+  // is never drawn and every action is a key.
+  if (i2c_bus != nullptr && hgp::i2c_device_present(i2c_bus, board.touch.addr)) {
+    board.touch.enabled = true;
+    ESP_LOGI(TAG, "touch glass found at 0x%02X: the home strip is live", board.touch.addr);
+  } else {
+    board.touch.enabled = false;
+    ESP_LOGI(TAG, "no touch controller at 0x%02X: the home strip is not drawn", board.touch.addr);
+  }
+#endif
   const bool peripherals_ready = io_rail_ready && (!board.cores3 || g_cores3.begin(i2c_bus)) &&
       (!board.sticks3 || g_sticks3.begin(i2c_bus)) &&
       (!board.stopwatch || g_stopwatch.begin(i2c_bus)) &&
@@ -767,7 +792,11 @@ extern "C" void app_main(void) {
 #if CONFIG_HG_BOARD_WS_EPAPER_154
   // The mode modules: the UI phase first, then the stubs the mode tasks replace.
   g_ui.bind(app);
-  g_modes.begin(board.latch_power.key, &g_live, &g_notes);
+  // PWR goes home, the second key records a note (and, on a unit with no touch
+  // glass, talks while it is held).
+  hgp::HomeKeys::Config keys;
+  keys.hold_talks = !(touch && board.touch.enabled);
+  g_modes.begin(board.latch_power.key, board.buttons.record, &app, &g_live, &g_notes, keys);
   g_live.begin(app, g_ui);
   // The offline notes: the same microphone and battery the core uses, and the
   // board's card slot. A PWR tap records to the card; the queue uploads when
@@ -781,7 +810,7 @@ extern "C" void app_main(void) {
   // The status screen owns the panel while the device rests (ready, offline, a
   // battery face). The core UI keeps every screen that wants a key, a turn or a
   // prompt, and hands the panel back through the same hook.
-  g_status.begin(app, g_notes, &g_system, g_epd);
+  g_status.begin(app, g_notes, &g_system, g_epd, touch && board.touch.enabled);
   app.rest_screen = [](const hg::UiModel& model, bool force) { return g_status.render(model, force); };
   app.on_console = [](std::string_view line) -> std::string {
     if (line == "notes") return g_notes.console({});

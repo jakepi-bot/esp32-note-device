@@ -55,13 +55,18 @@ if(HG_BUILD_TESTS)
   # The e-paper port's mode logic: LiveState (what the notice line shows for a
   # turn and a lost connection) and TalkHold (BOOT's long press) are
   # hardware-free by design, so they test here rather than on a board.
-  add_executable(hg_epaper_mode_tests tests/main.cpp tests/test_epaper_live_mode.cpp tests/test_epaper_status.cpp)
+  # HomeKeys is the device's key map (PWR goes home, the second key records or,
+  # held, talks), and the status screen's touch strip is drawn from the same
+  # constants its hit test reads.
+  add_executable(hg_epaper_mode_tests tests/main.cpp tests/test_epaper_live_mode.cpp tests/test_epaper_status.cpp
+                                  tests/test_epaper_keys.cpp)
   target_include_directories(hg_epaper_mode_tests PRIVATE esp32/main)
   target_link_libraries(hg_epaper_mode_tests PRIVATE hg_core)
   if(MSVC)
     target_compile_options(hg_epaper_mode_tests PRIVATE /utf-8)
   endif()
-  target_sources(hg_epaper_mode_tests PRIVATE esp32/main/modes/live_state.cpp esp32/main/modes/status_screen.cpp)
+  target_sources(hg_epaper_mode_tests PRIVATE esp32/main/modes/live_state.cpp esp32/main/modes/status_screen.cpp
+                                            esp32/main/modes/home_keys.cpp)
   add_test(NAME hg_epaper_mode_tests COMMAND hg_epaper_mode_tests)
 
   # The Bluetooth note sync's protocol (esp32/main/notes/notes_ble.*): packets,

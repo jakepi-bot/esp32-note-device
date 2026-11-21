@@ -2135,6 +2135,50 @@ void App::cancel_listening(std::string_view why) {
   mode_since_ = now();
 }
 
+// The home screen's TALK button on the e-paper board: a tap starts a turn and the
+// next tap ends it. It is the touchscreen's tap-to-talk (TouchGestures) made explicit
+// for a panel with no gestures, so it starts a tap-mode recording whatever the talk
+// key is set to; a tap that lands during a turn is the tap that ends it.
+bool App::touch_talk_toggle() {
+  if (!wifi_setup_text_.empty()) {
+    close_wifi_setup();
+    return true;
+  }
+  if (phone_pairing_) {
+    close_phone_pairing();
+    return true;
+  }
+  wake_display();
+  mark_reply_read();
+  close_notices_for_input();
+  if (mode_ == Mode::Listening) {
+    finish_listening();
+    update_model();
+    return true;
+  }
+  if (mode_ != Mode::Idle) {  // thinking or speaking: the tap is STOP
+    cancel_turn();
+    update_model();
+    return true;
+  }
+  // A question on the glass is what the tap is for: it answers the highlighted
+  // answer, as TALK does, rather than opening the microphone over the question.
+  if (prompt_showing()) {
+    if (choice_showing()) answer_choice(choice_sel_);
+    else if (prompt_armed(now())) answer_prompt(true);
+    update_model();
+    return true;
+  }
+  if (!can_talk()) {
+    set_hint_flash(tr(phase_ == Phase::Online ? i18n::Msg::ApprovePairingFirst : i18n::Msg::NotConnected));
+    update_model();
+    return false;
+  }
+  start_listening(true);
+  update_model();
+  return true;
+}
+
 void App::go_home() {
   wake_display();
   close_camera();

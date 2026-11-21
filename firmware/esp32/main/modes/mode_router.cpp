@@ -1,47 +1,89 @@
-// See mode_router.hpp.
+// See modes/mode_router.hpp.
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 #include "modes/mode_router.hpp"
 
 #include "driver/gpio.h"
+#include "esp_log.h"
+#include "hg/app.hpp"
 #include "modes/live_mode.hpp"
 #include "modes/notes_mode.hpp"
 
 namespace hgp {
 namespace {
 
-// A tap is a press shorter than this. LatchPower releases the battery latch
-// after its own, longer hold (2.5 s), so a press that lasts this long is on
-// its way to powering off and must not also start a note.
-constexpr uint32_t kMaxTapMs = 1500;
+constexpr const char* TAG = "hg.keys";
+// 3 polls at ~10 ms, the debounce port_buttons.cpp uses for the same kind of key.
+constexpr uint8_t kDebounceTicks = 3;
 
 }  // namespace
 
-void ModeRouter::begin(int note_gpio, LiveMode* live, NotesMode* notes) {
-  note_gpio_ = note_gpio;
+void ModeRouter::begin(int power_gpio, int record_gpio, hg::App* app, LiveMode* live, NotesMode* notes,
+                       const HomeKeys::Config& keys) {
+  power_gpio_ = power_gpio;
+  record_gpio_ = record_gpio;
+  app_ = app;
   live_ = live;
   notes_ = notes;
-  if (note_gpio_ >= 0) {
+  keys_.begin(keys);
+  const int gpios[2] = {power_gpio_, record_gpio_};
+  for (int gpio : gpios) {
+    if (gpio < 0) continue;
     gpio_config_t io = {};
-    io.pin_bit_mask = 1ULL << note_gpio_;
+    io.pin_bit_mask = 1ULL << gpio;
     io.mode = GPIO_MODE_INPUT;
     io.pull_up_en = GPIO_PULLUP_ENABLE;
-    gpio_config(&io);  // LatchPower configures the same pin the same way
+    gpio_config(&io);  // LatchPower configures the power pin the same way
+  }
+  ESP_LOGI(TAG, "keys: power %d (home), record %d (note%s)", power_gpio_, record_gpio_,
+           keys.hold_talks ? ", hold to talk" : "");
+}
+
+void ModeRouter::act(HomeAction action) {
+  switch (action) {
+    case HomeAction::None: break;
+    case HomeAction::Home:
+      if (app_ != nullptr) app_->go_home();
+      ESP_LOGI(TAG, "home");
+      break;
+    case HomeAction::NoteToggle:
+      if (notes_ != nullptr) notes_->on_note_button();
+      break;
+    case HomeAction::TalkStart:
+      if (app_ != nullptr) app_->on_button(hg::Button::Talk, true);
+      break;
+    case HomeAction::TalkStop:
+      if (app_ != nullptr) app_->on_button(hg::Button::Talk, false);
+      break;
   }
 }
 
 void ModeRouter::tick(uint32_t now_ms) {
-  if (note_gpio_ >= 0) {
-    const bool down = gpio_get_level(static_cast<gpio_num_t>(note_gpio_)) == 0;
-    if (down && !down_) {
-      down_ = true;
-      down_at_ms_ = now_ms;
-    } else if (!down && down_) {
-      down_ = false;
-      if (now_ms - down_at_ms_ <= kMaxTapMs && notes_) notes_->on_note_button();
+  if (power_gpio_ >= 0) {
+    const bool down = gpio_get_level(static_cast<gpio_num_t>(power_gpio_)) == 0;
+    if (down == power_raw_) {
+      power_stable_ = 0;
+    } else if (++power_stable_ >= kDebounceTicks) {
+      power_raw_ = down;
+      power_stable_ = 0;
+      act(down ? keys_.power_press(now_ms) : keys_.power_release(now_ms));
     }
   }
-  if (live_) live_->tick(now_ms);
-  if (notes_) notes_->tick(now_ms);
+  if (record_gpio_ >= 0) {
+    const bool down = gpio_get_level(static_cast<gpio_num_t>(record_gpio_)) == 0;
+    if (down == record_raw_) {
+      record_stable_ = 0;
+    } else if (++record_stable_ >= kDebounceTicks) {
+      record_raw_ = down;
+      record_stable_ = 0;
+      act(down ? keys_.key_press(now_ms) : keys_.key_release(now_ms));
+    }
+    // A press that passes the hold threshold starts talking before it is lifted,
+    // which is what makes hold-to-talk feel like talking.
+    if (keys_.key_down()) act(keys_.tick(now_ms));
+  }
+
+  if (live_ != nullptr) live_->tick(now_ms);
+  if (notes_ != nullptr) notes_->tick(now_ms);
 }
 
 }  // namespace hgp

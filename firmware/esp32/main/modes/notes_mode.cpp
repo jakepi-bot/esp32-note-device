@@ -9,6 +9,7 @@
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_vfs_fat.h"
 #include "freertos/task.h"
 #include "hg/app.hpp"
 #include "notes/sd_mount.hpp"
@@ -22,6 +23,8 @@ const char* TAG = "hg.notes";
 // retried while no card answers (a tap asks straight away).
 constexpr uint32_t kScanMs = 5000;
 constexpr uint32_t kSdRetryMs = 30000;
+// The mount point every user of the card shares (notes/sd_mount.hpp).
+constexpr const char* kSdRoot = "/sdcard";
 constexpr uint32_t kMinPlausibleUnix = 1577836800;  // 2020-01-01: earlier means no clock yet
 constexpr const char* kSeqKey = "note_seq";
 constexpr const char* kNotesUrlKey = "notes_url";
@@ -472,8 +475,24 @@ void NotesModeImpl::refresh_counts(bool publish) {
   counts_.failed = failed;
   counts_.stored = pending + sent + failed;
   queued_bytes_ = store_.pending_bytes();
+  refresh_space();
   refresh_newest();
   if (publish) publish_status();
+}
+
+// How much room the card has, for the resting screen's footer. FAT answers this
+// from its own free-cluster table: it costs one walk of the table, so it is read
+// with the counts scan (every 5 s) rather than per frame, and a card that refuses
+// the question (pulled mid-scan, or unmounted) simply reports nothing.
+void NotesModeImpl::refresh_space() {
+  uint64_t total = 0, free_bytes = 0;
+  if (esp_vfs_fat_info(kSdRoot, &total, &free_bytes) != ESP_OK || total == 0) {
+    sd_free_known_ = false;
+    return;
+  }
+  sd_total_bytes_ = total;
+  sd_free_bytes_ = free_bytes;
+  sd_free_known_ = true;
 }
 
 // The newest note on the card: the resting status screen says which note it is
@@ -512,6 +531,9 @@ NoteStatus NotesModeImpl::status() const {
   s.failed = counts_.failed;
   s.stored = counts_.stored;
   s.sd_ready = sd_ready_;
+  s.sd_free_bytes = sd_free_bytes_;
+  s.sd_total_bytes = sd_total_bytes_;
+  s.sd_free_known = sd_free_known_ && sd_ready_;
   s.has_newest = !newest_id_.empty();
   s.newest_valid = newest_valid_;
   s.newest_hour = newest_hour_;
@@ -598,10 +620,12 @@ bool NotesModeImpl::ensure_sd() {
   std::string error;
   if (!sd_mount::ensure(false, &error)) {
     sd_error_ = error.empty() ? "No SD card" : error;
+    sd_free_known_ = false;  // nothing on the glass may quote a card that is gone
     return false;
   }
   if (!store_.ensure()) {
     sd_error_ = "The card is not writable";
+    sd_free_known_ = false;
     return false;
   }
   sd_ready_ = true;

@@ -313,6 +313,10 @@ struct PowerRail {
 
 struct ButtonConfig {
   int talk = -1, cancel = -1, up = -1, down = -1;  // active-low GPIOs, -1 = absent
+  // The notes device's second key, read by the mode router rather than by the
+  // core: a tap starts or stops a note, a hold talks (modes/mode_router.hpp).
+  // -1 = the board has no such key; it is never the TALK key as well.
+  int record = -1;
   // Hold the talk key this long to tap CANCEL instead, for boards with no
   // cancel button (0 disables it). See docs/waveshare-epaper-154-v2.md 6.1.
   uint32_t talk_hold_cancel_ms = 0;

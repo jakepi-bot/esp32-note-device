@@ -17,6 +17,13 @@ namespace {
 
 constexpr const char* TAG = "hg.status";
 
+// How long a tap may last. A finger resting on the glass is not a press: the
+// e-paper panel takes a moment to show what a press did, and a hand on the
+// device must not start a session by accident.
+constexpr uint32_t kTapMaxMs = 700;
+// How far a finger may travel and still be a tap (2 mm at this glass's 183 ppi).
+constexpr int kTapSlopPx = 20;
+
 // The build's Bluetooth stack, if it has one. This board compiles it out
 // (firmware/esp32/platformio.ini, "Wi-Fi only: no BLE on this board"): the icon
 // then carries the cut mark and the words never claim a link that cannot exist.
@@ -32,7 +39,10 @@ constexpr bool kHasBluetooth = false;
 // phone was paired (the hardware QA's D3); its words are the core model's own,
 // so the screen only changes the paper. Everything else (boot, connecting,
 // listening, thinking, responding, the clock face, settings, prompts, errors,
-// OTA) stays with the core UI.
+// OTA) stays with the core UI. The one Setup screen this face takes is the
+// pairing *ask* (App::on_phone_ask), and only on a unit whose glass has a touch
+// controller: the answer is then the YES/NO strip (compose_ask), and the core's
+// tap-anywhere gesture path (core/src/touch.cpp) never sees the finger.
 bool rests_on(hg::Screen s) {
   switch (s) {
     case hg::Screen::Ready:
@@ -47,12 +57,15 @@ bool rests_on(hg::Screen s) {
 
 }  // namespace
 
-void NotesScreen::begin(hg::App& app, NotesMode& notes, hg::System* system, EpdDisplay& display) {
+void NotesScreen::begin(hg::App& app, NotesMode& notes, hg::System* system, EpdDisplay& display,
+                        bool touch) {
   app_ = &app;
   notes_ = &notes;
   system_ = system;
   display_ = &display;
-  ESP_LOGI(TAG, "status screen ready (%s bluetooth)", kHasBluetooth ? "with" : "without");
+  touch_ = touch;
+  ESP_LOGI(TAG, "status screen ready (%s bluetooth, %s touch)", kHasBluetooth ? "with" : "without",
+           touch_ ? "with" : "without");
 }
 
 StatusInputs NotesScreen::gather() {
@@ -69,6 +82,8 @@ StatusInputs NotesScreen::gather() {
   in.bt_supported = kHasBluetooth;
   in.bt_paired = app_->phones_paired() > 0;
   in.bt_connected = app_->phone_connected();
+  in.touch = touch_;
+  in.talk_live = app_->in_turn();
 
   // The core's own power read and battery rules: one number on the panel, not a
   // second opinion from here (and no ADC read per frame).
@@ -77,6 +92,8 @@ StatusInputs NotesScreen::gather() {
 
   const NoteStatus n = notes_->status();
   in.sd_ready = n.sd_ready;
+  in.sd_free_bytes = n.sd_free_bytes;
+  in.sd_free_known = n.sd_free_known;
   in.recording_s = n.recording_s;
   in.pending = n.pending;
   in.synced = n.synced;
@@ -101,9 +118,23 @@ StatusInputs NotesScreen::gather() {
   return in;
 }
 
+bool NotesScreen::draw(const StatusView& view, bool repaint) {
+  if (display_ == nullptr) return false;
+  if (repaint) display_->request_full_refresh();
+  if (!screen_.draw(*display_, view, repaint)) return false;
+  last_ = view;
+  owned_ = true;
+  return true;
+}
+
 bool NotesScreen::render(const hg::UiModel& model, bool force) {
   if (display_ == nullptr || notes_ == nullptr || app_ == nullptr) return false;
-  if (!rests_on(model.screen)) {
+  // A phone asking to pair is the one Setup screen this face takes: the answer is
+  // the strip, so the question has to be on the glass the strip belongs to. The
+  // plain SKU (no touch controller) leaves the core's own prompt, which the TALK
+  // key answers.
+  const bool ask_face = touch_ && app_->phone_ask_pending() && model.screen == hg::Screen::Setup;
+  if (!rests_on(model.screen) && !ask_face) {
     if (owned_) {
       // Back to the core UI: its bands have to be repainted over this image,
       // and the panel's own full-refresh counter is too slow to wait for.
@@ -116,13 +147,48 @@ bool NotesScreen::render(const hg::UiModel& model, bool force) {
   // Taking the panel, or taking it back: the glass holds another image, so the
   // next update must be a full one (a partial leaves the old screen ghosted).
   const bool repaint = force || !owned_;
-  if (repaint) display_->request_full_refresh();
   const StatusInputs in = gather();
-  const StatusView view = model.screen == hg::Screen::Pairing
-                              ? compose_pairing(in, PairingCopy{model.headline, model.detail, model.hint, model.code})
-                              : compose_status(in);
-  if (!screen_.draw(*display_, view, repaint)) return false;
-  owned_ = true;
+  const StatusView view =
+      ask_face     ? compose_ask(in, app_->phone_ask_peer())
+      : model.screen == hg::Screen::Pairing
+          ? compose_pairing(in, PairingCopy{model.headline, model.detail, model.hint, model.code})
+          : compose_status(in);
+  return draw(view, repaint);
+}
+
+bool NotesScreen::touch(bool touching, int x, int y, uint32_t now_ms) {
+  const bool asking = app_ != nullptr && app_->phone_ask_pending();
+  // With the ask on the glass, the strip is the only way to answer it: the tap is
+  // judged against YES and NO and a tap anywhere else answers nothing. (A unit
+  // with no touch controller never owns this face, so it still returns false and
+  // the core's own gesture path has the finger.)
+  if (asking && !owned_) {
+    touching_ = false;
+    return false;
+  }
+  if (!owned_) return false;
+  if (touching) {
+    if (!touching_) {
+      touching_ = true;
+      down_x_ = x;
+      down_y_ = y;
+      down_ms_ = now_ms;
+    }
+    return true;  // the panel is ours: nothing else reads this finger
+  }
+  if (!touching_) return true;
+  touching_ = false;
+  // A tap: released soon, close to where it pressed, and inside a box.
+  const int dx = x - down_x_, dy = y - down_y_;
+  if (now_ms - down_ms_ > kTapMaxMs || (dx * dx + dy * dy) > kTapSlopPx * kTapSlopPx) return true;
+  const PanelHit hit = status_panel_hit(last_, x, y);
+  if (asking) {
+    // The whole glass is swallowed here, so a stray finger can never allow a phone.
+    if (hit == PanelHit::Yes) app_->answer_phone_pairing(true);
+    else if (hit == PanelHit::No) app_->answer_phone_pairing(false);
+    return true;
+  }
+  if (hit == PanelHit::Talk) app_->touch_talk_toggle();
   return true;
 }
 

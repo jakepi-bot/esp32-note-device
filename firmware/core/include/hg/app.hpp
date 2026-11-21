@@ -283,6 +283,16 @@ class App {
   // the settings menu it is Back: the menu closes and the screen stays lit.
   // Wi-Fi and the Hermes connection stay up.
   void on_power_key();
+  // The e-paper notes device's power key: a short press is Home, whatever is open.
+  // It is the double press of TALK's action without the first press, so a menu, a
+  // question, an open camera, a widget page or a turn in flight all give way to it,
+  // and the glass goes back to the resting face with the default profile.
+  void go_home();
+  // The e-paper home screen's TALK button, one tap: starts a live turn in tap mode
+  // (hands-free, it ends on the next tap or on a pause) whatever the talk key's
+  // hold/tap setting is, and a tap during a turn ends that turn. False when there is
+  // nothing to talk to; the screen's hint line carries the reason.
+  bool touch_talk_toggle();
   // Dozing (System::set_dozing): the port's loop may wait this long for events.
   static constexpr uint32_t kDozeWaitMs = 100;
   // The longest recording; the recording buffer holds this much (RecordingBuffer::bytes_for).
@@ -333,6 +343,9 @@ class App {
   bool phone_pairing_open() const { return phone_pairing_; }
   // A phone is waiting for the screen's answer right now.
   bool phone_ask_pending() const { return !phone_ask_.empty(); }
+  // The address it gave, "AA:BB:CC:DD:EE:FF": the paper screen prints its last
+  // two octets, because thirteen columns cannot hold seventeen characters.
+  const std::string& phone_ask_peer() const { return phone_ask_; }
   // From the port: a new phone asks to pair (its address, most significant byte first).
   void on_phone_ask(const uint8_t (&peer)[6]);
   // The screen's answer: true lets the pairing finish and the code appear, false
@@ -560,8 +573,6 @@ class App {
   bool known_setting(std::string_view key) const;
   std::string wifi_command(std::string_view args);
   void start_new_session();
-  // The double press of TALK: back to Ready with the default profile.
-  void go_home();
   void scroll_body(int delta);
   // Long text pages itself, so boards without scroll buttons can read it all.
   bool turn_page();

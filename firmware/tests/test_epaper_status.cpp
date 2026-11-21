@@ -76,7 +76,7 @@ StatusInputs online_inputs() {
 
 }  // namespace
 
-TEST("the design card's ten states draw exactly the frames it approved") {
+TEST("the design card's ten states and the talk strip draw exactly the frames it approved") {
   struct Case {
     const char* name;
     StatusView v;
@@ -89,17 +89,17 @@ TEST("the design card's ten states draw exactly the frames it approved") {
     v.wifi = WifiState::Online; v.bt = BtState::Connected; v.battery_pct = 87;
     v.hero = "3 NOTES";
     v.note = "Reviewed the kitchen quote, second is cheaper";
-    v.foot = "87% \xC2\xB7 SYNCED";
-    cases.push_back({"01-idle-synced", v, 0xb8b9bdcfu});
+    v.foot = "87% \xC2\xB7 SD 3.1G";
+    cases.push_back({"01-idle-synced", v, 0x9ff782c3u});
   }
   {
     StatusView v;
     v.time_valid = true; v.hour = 14; v.minute = 32;
     v.wifi = WifiState::Offline; v.bt = BtState::Disconnected; v.battery_pct = 87;
     v.hero = "OFFLINE";
-    v.note = "Notes save to the card, upload when back";
+    v.note = "Notes save to the card, then upload.";
     v.foot = "87% \xC2\xB7 2 QUEUED";
-    cases.push_back({"02-offline", v, 0x3466973fu});
+    cases.push_back({"02-offline", v, 0x342ecfdbu});
   }
   {
     StatusView v;
@@ -108,7 +108,7 @@ TEST("the design card's ten states draw exactly the frames it approved") {
     v.hero = "RECORDING";
     v.note = "00:08  hold BOOT to stop";
     v.foot = "84%";
-    cases.push_back({"03-recording", v, 0xf1cbfa95u});
+    cases.push_back({"03-recording", v, 0x56394095u});
   }
   {
     StatusView v;
@@ -117,16 +117,16 @@ TEST("the design card's ten states draw exactly the frames it approved") {
     v.hero = "UPLOADING";
     v.note = "note 14:32  \xC2\xB7  443 KB";
     v.foot = "84% \xC2\xB7 1 OF 2";
-    cases.push_back({"04-uploading", v, 0x562c382du});
+    cases.push_back({"04-uploading", v, 0xb3fc282du});
   }
   {
     StatusView v;
     v.time_valid = true; v.hour = 14; v.minute = 32;
     v.wifi = WifiState::Online; v.bt = BtState::Unsupported; v.battery_pct = 12;
     v.hero = "LOW POWER";
-    v.note = "Plug in soon. Recording stops if it dies.";
+    v.note = "Plug in soon or recording stops.";
     v.foot = "12%";
-    cases.push_back({"05-low-battery", v, 0xa36f1c91u});
+    cases.push_back({"05-low-battery", v, 0x2806c5d5u});
   }
   {
     StatusView v;
@@ -136,7 +136,7 @@ TEST("the design card's ten states draw exactly the frames it approved") {
     v.hero = "3 NOTES";
     v.note = "Call the plumber about the upstairs radiator";
     v.foot = "46% \xC2\xB7 ON POWER";
-    cases.push_back({"06-on-power", v, 0x351ff223u});
+    cases.push_back({"06-on-power", v, 0xbb16c4afu});
   }
   {
     StatusView v;
@@ -145,7 +145,7 @@ TEST("the design card's ten states draw exactly the frames it approved") {
     v.hero = "NO TIME";
     v.note = "The clock sets itself once online.";
     v.foot = "NO CLOCK DATA";
-    cases.push_back({"07-no-time", v, 0xfdecb2f5u});
+    cases.push_back({"07-no-time", v, 0x9bac6ef5u});
   }
   {
     StatusView v;
@@ -154,7 +154,7 @@ TEST("the design card's ten states draw exactly the frames it approved") {
     v.hero = "NO NOTES";
     v.note = "Hold BOOT and speak to record one.";
     v.foot = "96%";
-    cases.push_back({"08-empty", v, 0x0df562dbu});
+    cases.push_back({"08-empty", v, 0x28f5ccdbu});
   }
   {
     StatusView v;
@@ -166,7 +166,7 @@ TEST("the design card's ten states draw exactly the frames it approved") {
         "block has to truncate and say that it did rather than silently dropping the rest of what was said into the "
         "void";
     v.foot = "61% \xC2\xB7 1 OF 3";
-    cases.push_back({"09-long-note", v, 0x3331d4a1u});
+    cases.push_back({"09-long-note", v, 0xf1c6cf69u});
   }
   {
     StatusView v;
@@ -176,10 +176,36 @@ TEST("the design card's ten states draw exactly the frames it approved") {
     v.error = true;
     v.note = "No SD card. Recording needs the card.";
     v.foot = "73% \xC2\xB7 NO CARD";
-    cases.push_back({"10-error", v, 0xef51e8cdu});
+    cases.push_back({"10-error", v, 0x44ba6089u});
+  }
+  {
+    // The Touch SKU's resting face: the free space in the footer and the TALK
+    // box along the bottom. The box is an outline, never a fill (a filled box
+    // costs a full refresh's ink for a button), and its word is centred in it.
+    StatusView v;
+    v.time_valid = true; v.hour = 9; v.minute = 5;
+    v.wifi = WifiState::Online; v.bt = BtState::Connected; v.battery_pct = 87;
+    v.hero = "NO NOTES";
+    v.note = "Tap BOOT to record, TALK to talk.";
+    v.foot = "87% \xC2\xB7 SD 3.1G";
+    v.panel = TouchPanel::Talk;
+    v.button = "TALK";
+    cases.push_back({"11-touch-talk", v, 0x524c8f35u});
+  }
+  {
+    // The pairing ask on the Touch SKU: the question and the two boxes that answer
+    // it. The frame is the one that decides whether a new phone is let in.
+    StatusView v;
+    v.time_valid = true; v.hour = 9; v.minute = 5;
+    v.wifi = WifiState::Online; v.bt = BtState::Disconnected; v.battery_pct = 87;
+    v.hero = "NEW PHONE";
+    v.note = "Address ends EE:FF. Allow?";
+    v.foot = "87% \xC2\xB7 SD 3.1G";
+    v.panel = TouchPanel::Ask;
+    cases.push_back({"12-pair-ask", v, 0x16ce3343u});
   }
 
-  CHECK_EQ(cases.size(), 10u);
+  CHECK_EQ(cases.size(), 12u);
   static uint16_t fb[kW * kH];
   for (const auto& kv : cases) {
     std::memset(fb, 0, sizeof fb);
@@ -329,33 +355,50 @@ TEST("an unchanged view is not sent to the panel again") {
   CHECK_EQ(StatusScreen::signature(same), StatusScreen::signature(v));
 }
 
-TEST("the footer prefers a count over a level that does not fit with it") {
+TEST("the footer keeps the card's free space and drops the level to do it") {
   StatusInputs in = online_inputs();
-  // 100% plus a word is one column too long for the 14 the footer has.
-  in.battery_pct = 100;
-  in.external_power = true;
+  in.sd_free_bytes = 3100000000ull;
+  in.sd_free_known = true;
   in.stored = 3;
   in.has_newest = true;
   in.newest_valid = true;
   in.newest_duration_s = 12;
   in.pending = 0;
-  in.synced = 3;
-  const StatusView powered = compose_status(in);
-  CHECK(powered.foot == std::string("100%"));  // the masthead bolt carries "on power"
+  in.synced = 0;
+  // Nothing else to say: the level fits beside the space, with room to breathe.
+  const StatusView alone = compose_status(in);
+  CHECK(alone.foot == std::string("87% \xC2\xB7 SD 3.1G"));
 
-  // A count is actionable, so it keeps the line and the level gives way.
+  // A queued count is actionable, so it keeps the line with the space and the
+  // level -- whose masthead icon still shows it -- is what goes. Fourteen
+  // columns do not hold "2 QUEUED", a spaced dot and "SD 3.1G" (17), so the space
+  // gives up its "SD" word rather than the count giving up its place.
   StatusInputs queued = in;
   queued.pending = 2;
   queued.synced = 1;
   const StatusView q = compose_status(queued);
-  CHECK(q.foot == std::string("2 QUEUED"));
+  CHECK(q.foot.find("2 QUEUED") != std::string::npos);
+  CHECK(q.foot.find("3.1G") != std::string::npos);
+  CHECK(q.foot.find('%') == std::string::npos);
+  CHECK(cols(q.foot) <= layout::kFootCols);
 
-  // Under 100% both facts fit, which is the design's own example.
-  StatusInputs both = in;
-  both.battery_pct = 87;
-  both.pending = 2;
-  const StatusView b = compose_status(both);
-  CHECK(b.foot == std::string("87% \xC2\xB7 2 QUEUED"));
+  // A synced face keeps its word and the space spelled out; the level goes.
+  StatusInputs synced = in;
+  synced.battery_pct = 100;
+  synced.synced = 3;
+  const StatusView sy = compose_status(synced);
+  CHECK(sy.foot.find("SYNCED") != std::string::npos);
+  CHECK(sy.foot.find("SD 3.1G") != std::string::npos);
+  CHECK(sy.foot.find('%') == std::string::npos);
+  CHECK(cols(sy.foot) <= layout::kFootCols);
+
+  // Under a gigabyte the number is megabytes, and it still fits the line.
+  StatusInputs small = in;
+  small.pending = 0;
+  small.sd_free_bytes = 940ull * 1000 * 1000;
+  const StatusView sm = compose_status(small);
+  CHECK(sm.foot.find("SD 940M") != std::string::npos);
+  CHECK(cols(sm.foot) <= layout::kFootCols);
 }
 
 TEST("a long note is marked as cut, not silently cut") {
@@ -430,6 +473,159 @@ TEST("a newest note without a stamp prints no clock at all") {
   const StatusView v = compose_status(in);
   CHECK(v.note.find("no clock") == std::string::npos);
   CHECK(v.note.find("00:00") == std::string::npos);
-  CHECK(v.note == std::string("Newest note, 2 s. Tap PWR to add another."));
+  CHECK(v.note == std::string("Newest note, 2 s. Tap BOOT to add."));
   CHECK(drawable_text(v.note));
+}
+
+TEST("the resting face always pays for the card's free space, and drops the level first") {
+  StatusInputs in = online_inputs();
+  in.has_newest = true;
+  in.stored = 3;
+  in.synced = 3;
+  in.newest_valid = true;
+  in.newest_hour = 9;
+  in.newest_minute = 5;
+  in.newest_duration_s = 12;
+  in.sd_free_bytes = 3100000000ull;  // 3.1 GB
+  in.sd_free_known = true;
+  {
+    const StatusView v = compose_status(in);
+    CHECK(v.foot.find("SD 3.1G") != std::string::npos);
+    CHECK(cols(v.foot) <= layout::kFootCols);
+    // "SYNCED" and "SD 3.1G" fill the fourteen columns: the level goes, not the
+    // space, and a face with nothing else to say keeps the level (below).
+    CHECK(v.foot.find('%') == std::string::npos);
+  }
+  {
+    // Nothing to report: the level and the space share the line.
+    in.synced = 0;
+    const StatusView v = compose_status(in);
+    CHECK(v.foot.find("87%") != std::string::npos);
+    CHECK(v.foot.find("SD 3.1G") != std::string::npos);
+    CHECK(cols(v.foot) <= layout::kFootCols);
+    in.synced = 3;
+  }
+  {
+    // A queued note plus the level plus the space does not fit in fourteen
+    // columns: the level is what goes, because the masthead icon still carries it.
+    in.pending = 2;
+    const StatusView v = compose_status(in);
+    CHECK(v.foot.find("2 QUEUED") != std::string::npos);
+    CHECK(v.foot.find("3.1G") != std::string::npos);
+    CHECK(v.foot.find('%') == std::string::npos);
+    CHECK(cols(v.foot) <= layout::kFootCols);
+  }
+  {
+    // No card: no free space is claimed, and the fault takes the line.
+    in.sd_ready = false;
+    in.sd_free_known = false;
+    const StatusView v = compose_status(in);
+    CHECK(v.foot.find("SD ") == std::string::npos);
+    CHECK(v.foot.find("NO CARD") != std::string::npos);
+  }
+}
+
+TEST("a card that never answered prints no free space at all") {
+  StatusInputs in = online_inputs();
+  in.sd_free_known = false;  // mounted, but the scan has not asked yet
+  const StatusView v = compose_status(in);
+  CHECK(v.foot.find("SD ") == std::string::npos);
+  CHECK(v.foot.find("87%") != std::string::npos);
+}
+
+TEST("the strip is drawn only where a finger can press it") {
+  StatusInputs in = online_inputs();
+  in.has_newest = false;  // the face whose copy names the controls
+  in.stored = 0;
+  in.synced = 0;
+  in.newest_valid = false;
+  {
+    // The plain SKU: no touch controller, so no box, and the copy names the keys.
+    const StatusView v = compose_status(in);
+    CHECK(v.panel == TouchPanel::None);
+    CHECK(v.note.find("Tap BOOT") != std::string::npos);
+    CHECK(status_panel_hit(v, kW / 2, layout::kPanelTop + layout::kPanelH / 2) == PanelHit::None);
+  }
+  {
+    // The Touch SKU: one box across the panel, and the copy sends talk to it.
+    in.touch = true;
+    const StatusView v = compose_status(in);
+    CHECK(v.panel == TouchPanel::Talk);
+    CHECK(v.button == std::string("TALK"));
+    CHECK(v.note.find("TALK") != std::string::npos);
+    const int mid_x = (layout::kMarginX + layout::kRightEdge) / 2;
+    const int mid_y = layout::kPanelTop + layout::kPanelH / 2;
+    CHECK(status_panel_hit(v, mid_x, mid_y) == PanelHit::Talk);
+    // A tap on the paper above the strip is nothing: the panel has one target.
+    CHECK(status_panel_hit(v, mid_x, layout::kPanelTop - 1) == PanelHit::None);
+    CHECK(status_panel_hit(v, layout::kMarginX - 1, mid_y) == PanelHit::None);
+    // Inside the very corners of the box: a finger is not a pixel.
+    CHECK(status_panel_hit(v, layout::kMarginX, layout::kPanelTop) == PanelHit::Talk);
+    CHECK(status_panel_hit(v, layout::kRightEdge - 1, layout::kPanelTop + layout::kPanelH - 1) ==
+          PanelHit::Talk);
+  }
+  {
+    // A live turn turns the same box into STOP.
+    in.touch = true;
+    in.talk_live = true;
+    const StatusView v = compose_status(in);
+    CHECK(v.button == std::string("STOP"));
+    // The label is part of the frame's identity: a changed word must repaint.
+    in.talk_live = false;
+    CHECK(compose_status(in).button == std::string("TALK"));
+  }
+}
+
+TEST("a phone asking to pair is answered on the strip, nowhere else") {
+  StatusInputs in = online_inputs();
+  in.touch = true;
+  in.bt_supported = true;
+  const StatusView v = compose_ask(in, "AA:BB:CC:DD:EE:FF");
+  CHECK(v.panel == TouchPanel::Ask);
+  // The last two octets are what thirteen columns hold, and what the phone's own
+  // dialog shows; the question is short enough for three lines.
+  CHECK(v.note.find("EE:FF") != std::string::npos);
+  CHECK(v.note.find("Allow?") != std::string::npos);
+  CHECK(static_cast<int>(hg::wrap_text(v.note, layout::kNoteCols).size()) <= layout::kNoteMaxLines);
+  CHECK(cols(v.hero) <= layout::kHeroCols);
+  CHECK(cols(v.foot) <= layout::kFootCols);
+
+  const int mid_y = layout::kPanelTop + layout::kPanelH / 2;
+  const int left_x = layout::kMarginX + 10;
+  const int right_x = layout::kRightEdge - 10;
+  // NO is the left box, YES the right one, and the gap between them is neither.
+  CHECK(status_panel_hit(v, left_x, mid_y) == PanelHit::No);
+  CHECK(status_panel_hit(v, right_x, mid_y) == PanelHit::Yes);
+  CHECK(status_panel_hit(v, (layout::kMarginX + layout::kRightEdge) / 2, mid_y) == PanelHit::None);
+  // The paper above the strip answers nothing, so a stray finger cannot allow a phone.
+  CHECK(status_panel_hit(v, right_x, layout::kPanelTop - 1) == PanelHit::None);
+  CHECK(status_panel_hit(v, right_x, layout::kFootTop) == PanelHit::None);
+
+  // No touch glass: no strip at all (the core's prompt keeps the ask and the TALK
+  // key answers it), and the hit test agrees with the drawing.
+  in.touch = false;
+  const StatusView plain = compose_ask(in, "AA:BB:CC:DD:EE:FF");
+  CHECK(plain.panel == TouchPanel::None);
+  CHECK(status_panel_hit(plain, right_x, mid_y) == PanelHit::None);
+}
+
+TEST("the strip is inside the glass, and the copy above it does not reach it") {
+  // Every line of a composed frame must land above the strip: a wrapped note that
+  // ran into the button would print under its border.
+  StatusInputs in = online_inputs();
+  in.touch = true;
+  in.has_newest = true;
+  in.stored = 12;
+  in.synced = 9;
+  in.newest_valid = true;
+  in.newest_hour = 23;
+  in.newest_minute = 59;
+  in.newest_duration_s = 3725;  // cut short with "..", the longest copy there is
+  const StatusView v = compose_status(in);
+  const size_t lines = hg::wrap_text(v.note, layout::kNoteCols).size();
+  CHECK(static_cast<int>(lines) <= layout::kNoteMaxLines);
+  const int note_bottom = layout::kNoteTop + layout::kNoteMaxLines * hg::Canvas::line_height(layout::kScaleBody);
+  CHECK(note_bottom <= layout::kFootTop);
+  CHECK(layout::kFootTop + hg::Canvas::line_height(layout::kScaleBody) <= layout::kPanelTop);
+  CHECK(layout::kPanelTop + layout::kPanelH <= layout::kH);
 }

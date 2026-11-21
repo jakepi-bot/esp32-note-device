@@ -1,5 +1,12 @@
 # Changelog
 
+## unreleased
+
+- **The e-paper notes device's keys and the home screen.** PWR is Home now: any short press returns to the resting face whatever is open; its long hold is still the latch's own power-off. BOOT is the second key: a tap starts or stops a voice note, held it talks (on a plain SKU; on the Touch SKU the home screen's strip does that instead).
+- **The home screen's TALK strip.** On a unit whose glass answers on the bus, a strip at the bottom is TAP TO TALK: one tap starts a live Hermes session and the next ends it, drawn from the same constants its hit test reads so a tap lands where the box is. It shares the line with the card's free space (SD xG / xM / xK, measured once — never a printed zero).
+- **Pairing needs the screen's yes.** A new phone asking to pair prints `Address ends EE:FF. Allow?` at hero scale and NO / YES boxes on the strip; only a release inside a box answers, and a tap anywhere else answers nothing. The plain SKU still has the core's own tap-to-allow.
+- **Bits**: `pio run -e waveshare-epaper-154` builds (2,040,723 B of 4,063,232; 87,756 B RAM); host suites green (hg_epaper_mode_tests: 23 cases, hg_core_tests: 0 failed).
+
 ## 0.7.2
 
 The Bluetooth half made deployable and made a decision: the server side is a

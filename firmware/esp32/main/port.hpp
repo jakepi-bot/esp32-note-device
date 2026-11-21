@@ -581,6 +581,12 @@ class CodecSpeaker final : public hg::AudioOut {
   std::atomic<uint32_t> drop_bytes_{0};  // bytes dropped on overflow, reported at stream end
 };
 
+// True when a device acknowledges its address on the bus (one probe, no read).
+// The notes device uses it once at boot to tell the Touch SKU from the plain
+// one: both ship the same firmware, and the touch block is enabled only when the
+// FT6336 answers. Call from the app task, before TouchInput::begin.
+bool i2c_device_present(i2c_master_bus_handle_t bus, uint8_t addr);
+
 // Polls a touchscreen, a key mirrored on an I/O expander and a rotary encoder
 // from its own task (some controllers need a pause between write and read) and
 // posts Touch, Key and Encoder events to the app task.

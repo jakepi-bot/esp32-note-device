@@ -61,7 +61,7 @@ void ModeRouter::begin(int power_gpio, int record_gpio, hg::App* app, LiveMode* 
       ESP_LOGW(TAG, "key GPIO %d has no edge interrupt; polling it", gpio);
     }
   }
-  ESP_LOGI(TAG, "keys: power %d (talk), record %d (note, hold to cancel), auto-home %u s", power_gpio_,
+  ESP_LOGI(TAG, "keys: power %d (talk), record %d (note; held: menu or cancel), auto-home %u s", power_gpio_,
            record_gpio_, static_cast<unsigned>(kAutoHomeSeconds));
 }
 

@@ -3250,7 +3250,24 @@ void App::update_model() {
   // The press guard counts from when the choice comes to the front (choice_armed).
   choice_front_ = m.screen == Screen::Choice;
   if (choice_front_ && !choice_was_front) choice_since_ = now();
-  if (!display_sleeping_) render(m);
+  if (display_sleeping_) {
+    // Nothing painted: whatever wakes has to repaint, so the module's change
+    // check must not skip the frame it comes back to.
+    rest_owned_ = false;
+    return;
+  }
+  // A board module may own the panel while the device rests (the e-paper
+  // board's notes screen): it gets the model and whether the core drew the
+  // frame before, so a panel somebody else painted is never left alone.
+  if (rest_screen && rest_screen(m, !rest_owned_)) {
+    rest_owned_ = true;
+    return;
+  }
+  if (rest_owned_) {
+    rest_owned_ = false;
+    if (ui_) ui_->invalidate();  // the module's pixels sit over the core's bands
+  }
+  render(m);
 }
 
 // The resting clock owns the whole panel: the time, the date and the mascot.

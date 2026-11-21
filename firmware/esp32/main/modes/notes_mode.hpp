@@ -42,6 +42,28 @@ struct NoteCounts {
   uint32_t failed = 0;   // rejected, kept for inspection (in failed/)
 };
 
+// The mode as the e-paper status screen needs it: cached counts and the newest
+// note's facts, never a card access, so the screen can ask on every frame.
+struct NoteStatus {
+  enum class Phase : uint8_t { Idle, Recording, Uploading, Error } phase = Phase::Idle;
+  uint32_t recording_s = 0;  // whole seconds recorded so far
+  uint32_t pending = 0, synced = 0, failed = 0, stored = 0;
+  bool sd_ready = false;
+  // The note the uploader holds, while it does.
+  bool uploading_valid = false;
+  uint32_t uploading_bytes = 0;
+  int uploading_hour = 0, uploading_minute = 0;  // local time it was recorded
+  // The most recent note on the card (pending or sent), for the resting screen.
+  bool has_newest = false;
+  bool newest_valid = false;  // it carries a real timestamp (not 1970)
+  int newest_hour = 0, newest_minute = 0;
+  uint32_t newest_duration_s = 0;
+  // Why the mode is in Error (empty otherwise): its own failure, or the last
+  // one the live mode put on the notice line.
+  std::string error;
+};
+
+
 // The board pieces the mode records through. `mic` is the same AudioIn the
 // core's live turns use; the notes mode only opens it when a note records.
 struct NotesIo {
@@ -61,6 +83,9 @@ class NotesMode {
   // The app loop's heartbeat (every pass, esp_timer milliseconds).
   virtual void tick(uint32_t now_ms) = 0;
   virtual NoteCounts counts() const = 0;
+  // The same facts, plus the phase and the newest note: what the status screen
+  // draws. Cached; safe to call every frame.
+  virtual NoteStatus status() const = 0;
   // The `notes` console command's arguments (empty = status). Returns the same
   // "@ok …" / "@error …" shape the core's commands use, and an empty string
   // for a line it does not know.
@@ -73,6 +98,7 @@ class NotesModeImpl final : public NotesMode {
   void on_note_button() override;
   void tick(uint32_t now_ms) override;
   NoteCounts counts() const override { return counts_; }
+  NoteStatus status() const override;
   std::string console(std::string_view args) override;
 
  private:
@@ -84,6 +110,7 @@ class NotesModeImpl final : public NotesMode {
   void begin_sync(uint32_t now_ms);
   void step_sync(uint32_t now_ms);
   void refresh_counts(bool publish);
+  void refresh_newest();
   void publish_status();
   bool ensure_sd();
   std::string notes_url() const;
@@ -107,6 +134,15 @@ class NotesModeImpl final : public NotesMode {
   uint32_t next_scan_ms_ = 0;
   uint32_t queued_bytes_ = 0;   // what the pending notes weigh, for `notes status`
   unsigned last_pct_ = 100;     // last upload percentage shown
+  uint32_t rec_started_ms_ = 0; // when the recording now open began
+
+  // The newest note on the card, for the status screen's resting state. Read
+  // with the counts (once per kScanMs), never from the screen's own calls.
+  std::string newest_id_;
+  bool newest_valid_ = false;
+  int newest_hour_ = 0, newest_minute_ = 0;
+  uint32_t newest_duration_s_ = 0;
+
 
   // One note retries at a time; a rejection or a new note moves on.
   std::string sync_id_;

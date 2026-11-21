@@ -30,10 +30,19 @@ class EpdDisplay final : public hg::Display {
     if (pending) force_full_ = true;  // the redraw lands on a fresh full refresh
     return pending;
   }
+  // The next update uses the full waveform however few partials have gone by:
+  // for a screen that takes the whole panel over from another one, where a
+  // partial leaves the previous image ghosted through the new one.
+  void request_full_refresh() { force_full_ = true; }
+
   // The 1-bit panel image, hex, one line: `screen` on the console proves what
   // the panel is showing (text and all) without a camera pointed at it. Empty
   // before begin(). Rows are MSB-first, padded to a byte.
-  std::string image_hex();
+  std::string image_hex() { return image_slice(0, 0); }
+  // A slice of that image, for a console that cannot print 10,000 characters in
+  // one write (the USB-serial send buffer takes about 4,000 a call). count 0
+  // means "to the end"; the range is clamped, so a caller can walk the image.
+  std::string image_slice(size_t first, size_t count);
 
  private:
   static void task(void* arg);

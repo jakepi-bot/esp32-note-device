@@ -275,13 +275,15 @@ More: [Troubleshooting](docs/troubleshooting.md), and the table at the end of
 
 ## Status
 
-The notes-only firmware builds from a clean checkout and is flashed on a physical
-board. Recorded on it: boot to the Home face, a Wi-Fi window that joins and syncs
-the clock, an upload answered `HTTP 202` with an HMAC the gateway verifies, a
-phone bonded by passkey after the ask, and a graceful power-off that keeps the
-card's notes. The QA pass that measured it also proved the screens were not
-refreshing after boot; that fix is in flight, and [CHANGELOG.md](CHANGELOG.md)
-records the state of each piece.
+The notes-only firmware builds from a clean checkout and has been run on the
+physical board. Recorded there: boot to the Home face, a Wi-Fi window that joins
+and syncs the clock over SNTP, a recorded note uploaded with an HMAC the gateway
+verified (`HTTP 202`), a phone bonded by passkey after the on-screen ask, and a
+graceful power-off that keeps the card's notes. A QA pass then proved one thing
+the bench pass had missed: the screens were built once at boot and never
+refreshed. That fix is in flight, and [CHANGELOG.md](CHANGELOG.md) records the
+state of each piece. No release of the notes firmware has been tagged yet, so
+`pio run -e notes` is the way to get it.
 
 Known gaps: no on-device OTA, and the setup page still asks for a Hermes address
 because it is the shared port's page (see **Provision Wi-Fi**).

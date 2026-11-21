@@ -407,6 +407,7 @@ host over the console (`about`, `battery`, `clock`, `radio`, `wifi`, `keys`,
 | BLE pairing ask, phone client | `hg.phone: a phone asks to pair; waiting for the screen` on connect, allow, `pairing passkey 449047` shown on the device and typed by the client, `bluetoothctl` then reports `Paired: yes` (bonded, passkey entry) |
 | battery percentage sane | `100% (4164 mV)` on USB; the board has no charge-signal pin, which the console now says instead of "discharging" |
 | clean shutdown, no lost writes | `notes poweroff`: recording finished, writer drained, card unmounted, latch left up because the board is on USB, card remounted, `58 notes`, `card ok`, `sd 62.9 GB free` — the count is unchanged by the pass |
+| the phone's setup AP and page | `wifi-setup` on the console: `Network: Hermes-75CA`, a WPA2 password, `Open http://192.168.4.1`; a second adapter joined, the AP's DHCP server assigned `192.168.4.2`, `GET /` answered 200 with the 5,482-byte page and `/api/setup` answered its `nonce`/`state`/`ssid` JSON; `wifi-setup stop` closed the page and left the station stopped |
 
 Three defects the desk pass found, all fixed here:
 
@@ -429,9 +430,10 @@ Three defects the desk pass found, all fixed here:
   running board with no storage. `Runtime::shutdown()` now leaves the latch alone
   when external power is present, reports it, and remounts: a person unplugs it.
 
-Two console verbs exist for this bench work and for QA without a finger on the
-board: `notes poweroff` (the PWR-hold path) and `phone allow` / `phone refuse`
-(the two answers the pairing ask takes from a key).
+Three console verbs exist for this bench work and for QA without a finger on the
+board: `notes poweroff` (the PWR-hold path), `phone allow` / `phone refuse` (the
+two answers the pairing ask takes from a key), and `wifi-setup` / `wifi-setup
+stop` (the menu's row that opens the phone's setup page).
 
 Measured duty cycle in the pass: radio up 26.5 s of 69.3 s of uptime across two
 windows, and the counter did not move afterwards (`26.457/74.147 s` at rest) —

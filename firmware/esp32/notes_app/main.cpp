@@ -282,6 +282,18 @@ std::string console_line(std::string_view line) {
                   g_radio.radio_reason(), g_net.radio_running() ? "on" : "off", g_runtime.net_reason());
     return out;
   }
+  if (line == "wifi-setup" || line.rfind("wifi-setup ", 0) == 0) {
+    // The menu's row on the glass, for a host with no finger on the board: the
+    // phone's setup page is the only way to give a device a network when none is
+    // saved, and QA has to be able to reach it without the keys.
+    if (line.size() > 11) {
+      g_net.stop_setup();
+      return std::string("@ok setup page closed");
+    }
+    if (g_net.setup_open()) return std::string("@error the setup page is already open");
+    const std::string answer = g_net.start_setup();
+    return answer.empty() ? std::string("@error the setup page did not start (see log)") : "@ok " + answer;
+  }
   if (line == "phone pair") return g_radio.open_pairing() ? "@ok pairing open, two minutes" : "@error no radio";
   // The two answers the pairing ask takes from a key (BOOT allows, PWR refuses),
   // for a host with no finger on the board: the QA path and the desk bench.

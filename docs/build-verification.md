@@ -168,7 +168,7 @@ survive it. Check the size line after any firmware change;
 | Workflow | Trigger | Jobs |
 |---|---|---|
 | `firmware.yml` | push to `main`, every pull request, manual | build `waveshare-epaper-154`, package the images, run the host core tests |
-| `ci.yml` (upstream) | push, pull request, manual | changed-area filter, host core on Ubuntu and Windows, Python 3.10/3.12, docs site, and the same single board build upstream's matrix would pick |
+| `ci.yml` (upstream) | push, pull request, manual | changed-area filter, host core on Ubuntu and Windows, Python 3.10/3.12, docs site, the `waveshare-epaper-154` build, and the two ESP32-P4 boards with `idf.py` in the ESP-IDF container |
 | `hermes.yml` (upstream) | pull request, nightly, manual | the plugin's tests against a real Hermes Agent |
 | `pages.yml` (upstream) | push touching `site/` or `docs/`, releases | build and publish the installer site to GitHub Pages |
 
@@ -176,8 +176,10 @@ Two host-side pieces are Unix-only in this fork because the notes stack does its
 file I/O and sockets with POSIX APIs: the notes card-tree tests
 (`hg_epaper_notes_tests`) and the notes POST dev tool (`hg_notes_request`). Both
 are skipped on MSVC rather than stubbed, so the Windows core job still builds and
-tests the rest of the core. Upstream's per-diff board picker and the ESP32-P4
-matrix were dropped: this fork builds one board.
+tests the rest of the core. Upstream's per-diff board picker was dropped, and
+the board matrix is this repository's shipped boards rather than upstream's set:
+`waveshare-epaper-154` on PlatformIO and the two ESP32-P4 boards on `idf.py`.
+Nothing here builds the other board profiles the repository still carries.
 
 ## What this does not prove
 

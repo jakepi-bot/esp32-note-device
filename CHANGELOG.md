@@ -39,7 +39,7 @@ unverified.
 
 ## Unreleased
 
-Nothing yet: entries land here and the heading is renamed to the version at release.
+- **The ESP32-P4 boards link again, so a tag publishes itself.** `port_sdlog.cpp` is built for every board and calls `hgp::sd_mount::*`, but its implementation was listed with the e-paper note modules and so only compiled for `waveshare-epaper-154`: the CrowPanel P4 and the Waveshare P4 7B failed to link (`undefined reference to hgp::sd_mount::ensure(bool, std::string*)` and two others), which made `release.yml`'s `esp32p4` job fail and the release job skip, and v0.7.0 had to be published by hand. `main/CMakeLists.txt` now compiles `notes/sd_mount.cpp` for every target; a board with no card slot configures `sd.enabled = false` and the mount declines, as before. CI gains an `esp32p4` job that builds both P4 boards with `idf.py` in the ESP-IDF container, since PlatformIO has no P4 platform and no other workflow built them: the same link error now fails a pull request. Verified locally by building both boards with `espressif/idf:v6.1` before and after the change: the CrowPanel P4 failed to link at `port_sdlog.cpp:81` and now builds.
 
 ## 0.6.0
 

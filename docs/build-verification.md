@@ -71,6 +71,22 @@ margin or the `ota_0` partition has to grow (which means revisiting
 `partitions.csv`, both slots, and the OTA flow). Check the size line after any
 firmware change; `tools/check_size.py` fails the build when a slot overflows.
 
+## What CI runs
+
+| Workflow | Trigger | Jobs |
+|---|---|---|
+| `firmware.yml` | push to `main`, every pull request, manual | build `waveshare-epaper-154`, package the images, run the host core tests |
+| `ci.yml` (upstream) | push, pull request, manual | changed-area filter, host core on Ubuntu and Windows, Python 3.10/3.12, docs site, and the same single board build upstream's matrix would pick |
+| `hermes.yml` (upstream) | pull request, nightly, manual | the plugin's tests against a real Hermes Agent |
+| `pages.yml` (upstream) | push touching `site/` or `docs/`, releases | build and publish the installer site to GitHub Pages |
+
+Two host-side pieces are Unix-only in this fork because the notes stack does its
+file I/O and sockets with POSIX APIs: the notes card-tree tests
+(`hg_epaper_notes_tests`) and the notes POST dev tool (`hg_notes_request`). Both
+are skipped on MSVC rather than stubbed, so the Windows core job still builds and
+tests the rest of the core. Upstream's per-diff board picker and the ESP32-P4
+matrix were dropped: this fork builds one board.
+
 ## What this does not prove
 
 - Not flashed from this clone: the image content is the same source that was

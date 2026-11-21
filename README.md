@@ -1,8 +1,9 @@
 # ESP32 Note Device (Jakebot)
 
 Firmware for a pocket voice-note and assistant device built on the **Waveshare
-ESP32-S3-ePaper-1.54 (V2)**: hold BOOT to talk to Hermes, tap PWR to record an
-offline voice note to the microSD card, and let the device upload the queue to
+ESP32-S3-ePaper-1.54 (V2)**: press PWR to talk to Hermes, tap BOOT to record an
+offline voice note to the microSD card, and the panel goes back to its home
+screen after a minute with no input, and let the device upload the queue to
 Hermes whenever it is next online.
 
 This repository is the canonical home of that firmware. It is a focused fork of
@@ -61,7 +62,7 @@ survive it.
 | Display | 1.54" 200×200 1-bit e-paper, SSD1681-class controller, SPI, partial refresh |
 | Audio | ES8311 codec (DAC + ADC on one I2S bus) → NS4150B amplifier → 8 Ω speaker, analog mic |
 | Storage | microSD, 1-bit SDIO, FAT32 |
-| Buttons | BOOT (GPIO 0) = TALK; PWR (GPIO 18) = voice-note key / power |
+| Buttons | PWR (GPIO 18) = talk to Hermes (a short press starts or ends a turn; a hold is the hardware power-off); BOOT (GPIO 0) = voice note (a tap starts or stops one, a 2 s hold drops it) |
 | Power | USB-C, ETA6098 charger, single-cell Li-ion, GPIO 17 battery latch, GPIO 4 battery sense (2:1 divider) |
 
 ### Pinout
@@ -143,8 +144,8 @@ and the hardware validation used.
 
 ## Notes: what the device does
 
-- **Tap PWR** → record; **tap again** → stop and commit the note to the card.
-  No network is needed at any point.
+- **Tap BOOT** → record; **tap again** → stop and commit the note to the card;
+  **hold BOOT 2 s** → drop the recording. No network is needed at any point.
 - Each note is a folder `notes/<state>/<note_id>/` holding `recording.wav`
   (24 kHz, PCM16, mono) and `note.json` (metadata), where `<state>` is one of
   `pending`, `sent`, `failed`.
@@ -192,7 +193,7 @@ rather than a look-alike:
   `OFFLINE`, `LOW POWER`, `NO TIME`, `NO CARD`, `ERROR`. There is no content-free
   `READY`.
 - **Newest note.** Its time and length — `Newest note 01:47, 16 s` — or
-  `Tap PWR to add another` when the card is empty.
+  `Tap BOOT to add another` when the card is empty.
 - **Footer.** The battery percentage plus the one fact that matters: `2 QUEUED`,
   `SYNCED`, `ON POWER`.
 

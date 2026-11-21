@@ -58,11 +58,9 @@ on the physical board.
   firmware-readable as a tap, not just a hardware latch.
 - **Touch** — the product line has four SKUs: `ESP32-S3-ePaper-1.54`, `-EN`, and
   `ESP32-S3-Touch-ePaper-1.54`, `-EN`. Only the Touch SKUs carry the FT6336
-  controller ("this example is only available for the touch-enabled version";
-  V1 had no touch variant). This spec assumes the **non-touch** SKU (the task links
-  the non-Touch page) — **[verify by eye; if it is the Touch SKU, set
-  `touch_screen = true`, FT6336 on the shared I2C bus, `EPD_TP_RST` net, and re-read
-  §6]**.
+  controller. **The desk unit is not one of them** (Jake, 2026-11-21, after the
+  round-2 probe below): its glass has no controller, the firmware wires no touch
+  input, and both keys are the whole input surface.
 - **Power** USB-C 5 V in, onboard charger (**ETA6098**, schematic), 3.3 V buck
   (MP1605), single-cell Li-ion on MX1.25 2-pin, battery-voltage divider to ADC,
   VBAT load switch driven by a GPIO (power latch).
@@ -248,21 +246,20 @@ Details:
   `audio_seconds ≥ 0.5`, ≤ 3.0, `playback_lead_ms` defaults 1000 — do not change.
 - Recommended `rate_kbps: 24` only if opus is enabled on both ends; PCM16 over LAN
   costs 96 KB/s ≪ 40 MB/s Wi-Fi capacity, so PCM16 is the default and simplest.
-- **Touch SKU**: the FT6336 touch glass at 0x38 draws a home screen TALK strip (YES/NO boxes) along the bottom of the panel, enables the phone‑pairing acknowledgement flow, and every action is a strip tap rather than a key. The plain SKU draws no strip and the keys carry all actions.
+- **No touch glass** (Jake, 2026-11-21): the desk unit's glass has no controller, so the firmware probes for none, draws no strip, and the two keys carry every action — including allowing or refusing a new phone.
   set them from the Waveshare demo's observed noise floor during bring-up **[verify]**.
 
 ---
 
 ## 6. Buttons and UI behaviour
 
-### 6.1a Touch probe on the desk unit (D3)
+### 6.1a There is no touch glass (D3, corrected)
 
 Waveshare's schematic and its `13_FT6336_Test` example put the Touch SKU's
 FT6336 at **0x38** on the shared I2C bus (GPIO 47/48), with **EPD_TP_RST on
-GPIO 7** and EPD_TP_INT on GPIO 21. The controller does not answer on the bus
-until that reset net is released, which the port now does before probing.
-
-Measured on the desk unit (fw 0.7.1, `hg-0123456789abcdef`):
+GPIO 7** and EPD_TP_INT on GPIO 21. The round-2 build pulsed that reset and
+scanned anyway, on the theory that the probe had read the bus too early. It
+found nothing, and the plain SKU reading was the right one all along:
 
 ```
 I (1156) hg.main: EPD_TP_RST (GPIO 7) pulsed: probing the touch glass
@@ -270,24 +267,24 @@ I (1156) hg.main: no touch controller at 0x38: the home strip is not drawn
 ```
 
 A full scan of the board's only I2C bus returns `0x18` (ES8311), `0x51`
-(PCF85063 RTC) and `0x70`; none of the three touch addresses answers afterwards
-(FT6336 0x38, GT911 0x5D / 0x14). So the desk unit behaves as the **plain**
-`ESP32-S3-ePaper-1.54` SKU: the glass is either not fitted or not connected.
-The firmware keeps the probe and the reset pulse, so a Touch SKU works with no
-code change; a plain SKU draws no strip and every action is a key.
+(PCF85063 RTC) and `0x70`; none of the three touch addresses answers (FT6336
+0x38, GT911 0x5D / 0x14). Jake confirmed by eye that the desk unit has no
+touch glass, so round 3 deleted the probe, the reset pulse, the strip and the
+touch input path instead of keeping them for a SKU this unit is not. The boot
+is shorter for it and nothing waits 100 ms for a controller that is not there.
 
-### 6.1 Button map (port-level; this board has no touch — see the Touch-SKU caveat in §2.1)
+### 6.1 Button map (port-level: `modes/home_keys.cpp`, `modes/mode_router.cpp`)
 
 | Physical | Logical | Behaviour |
 |---|---|---|
-| BOOT (GPIO0) | **Talk** | Press-and-hold: start recording (`has_cancel_button` semantics with a long press). Release: send. `talk_key = true`, `wake_key = true` (BOOT is also the deep-sleep wake pin). |
-| BOOT held ≥ 2 s | **Cancel** | Port-added long-press → `App::on_button(TouchCancel…)`-equivalent cancel of the current turn / closes overlays (the SDK expects Cancel handling to live in the port). |
-| PWR (GPIO18) | **Note record** | Tap: start/stop offline voice note. Vendor firmware treats this pin as a real button (and uses double-press as a gesture), so wire it as `LatchPowerConfig.key` *and* read it in the port; keep the board's own hardware power function (long hold cuts/holds power) untouched. |
-| PWR unusable? | fallback | If bring-up shows the latch swallows taps before firmware sees them, fall back to **double-tap BOOT = note** and document the change here. **[verify on hardware — open A/B, evidence favours PWR]** |
+| PWR (GPIO 18) | **Talk** | A short press toggles a live turn (`App::talk_toggle`): the first starts one, the next ends it, whatever the talk-key setting says. Held, it is the latch's own power-off and acts nothing in the firmware. |
+| BOOT (GPIO 0) | **Note** | A tap starts or stops an offline voice note (`NotesMode::on_note_button`). Never talks. It is also the flash-download and deep-sleep wake pin. |
+| BOOT held ≥ 2 s | **Cancel** | Fires once at the threshold, while the key is still down: a note being recorded is dropped (`NotesMode::on_cancel_button`), otherwise the hold taps CANCEL for a live turn or an overlay. |
 | Green LED (GPIO3) | feedback | Solid while a note is recording, slow blink while uploading (port-owned GPIO, no SDK concept needed). |
-**Touch SKU**: the FT6336 touch glass at 0x38 draws a home screen TALK strip (YES/NO boxes) along the bottom of the panel — a tap on it starts a live Hermes session and ends one — and draws NO / YES boxes while a phone asks to pair: only a release inside those boxes answers, and a tap anywhere else on the glass answers nothing. The plain SKU draws no strip and every action is a key.
+While a phone asks to pair the two keys answer it: **BOOT allows**, **PWR refuses**, and 20 s of neither refuses (`App::kPhoneAskMs`). The ask face prints the address and both keys. The auto-home timer is suspended while it shows.
 
-The 2 s long press arms only when the press found something to cancel — a turn
+
+On boards that use the core talk key, the 2 s long press arms only when the press found something to cancel — a turn
 in flight, or an overlay/question on the screen. A press from the idle screen
 starts the recording and holding it is talk for as long as it lasts, so
 hold-to-talk keeps working past 2 s (an arming press that started a fresh

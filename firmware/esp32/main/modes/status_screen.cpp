@@ -230,48 +230,6 @@ std::string duration(uint32_t seconds) {
   return buf;
 }
 
-// The strip's boxes, in panel pixels: one box for TALK, two for the pairing
-// question. The renderer and the hit test both read these, so a box drawn and a
-// box that answers a tap cannot disagree.
-struct PanelBoxes {
-  int count = 0;                    // 0, 1 or 2
-  int x[2] = {kMarginX, 0};
-  int w[2] = {kRightEdge - kMarginX, 0};
-};
-
-PanelBoxes panel_boxes(const StatusView& v) {
-  PanelBoxes b;
-  if (v.panel == TouchPanel::Talk) b.count = 1;
-  if (v.panel == TouchPanel::Ask) {
-    // Two boxes with a gap wide enough that a finger cannot straddle them: NO
-    // left, YES right, each 83 px (11.5 mm).
-    b.count = 2;
-    b.w[0] = b.w[1] = (kRightEdge - kMarginX - kPanelGap) / 2;
-    b.x[0] = kMarginX;
-    b.x[1] = kMarginX + b.w[0] + kPanelGap;
-  }
-  return b;
-}
-
-void draw_panel(hg::Canvas& c, const StatusView& v) {
-  if (v.panel == TouchPanel::None) return;
-  const PanelBoxes boxes = panel_boxes(v);
-  // A talking face names its word (TALK / STOP); the ask's two boxes are fixed,
-  // so the label cannot drift away from the hit test that answers it.
-  const char* labels[2] = {v.panel == TouchPanel::Ask ? "NO" : (v.button.empty() ? "TALK" : v.button.c_str()),
-                           "YES"};
-  for (int i = 0; i < boxes.count; ++i) {
-    // An outline, never a fill: the panel is black ink on paper, and a filled box
-    // would cost a full refresh's worth of ink for a button.
-    c.rect(boxes.x[i], kPanelTop, boxes.w[i], kPanelH, kInk);
-    c.rect(boxes.x[i] + 1, kPanelTop + 1, boxes.w[i] - 2, kPanelH - 2, kInk);
-    const std::string label = labels[i];
-    const int tw = hg::Canvas::text_width(label, kScaleBody);
-    const int th = hg::font::kGlyphHeight * kScaleBody;
-    c.text(boxes.x[i] + (boxes.w[i] - tw) / 2, kPanelTop + (kPanelH - th) / 2, label, kScaleBody, kInk);
-  }
-}
-
 // "443 KB" / "1.2 MB": the WAV on the card, rounded for reading.
 std::string size_text(uint32_t bytes) {
   char buf[16];
@@ -309,19 +267,12 @@ StatusView compose_status(const StatusInputs& in) {
     v.foot = footer_line(v, fact, space_known, in.sd_free_bytes, expendable);
   };
 
-  // The touch strip belongs to the resting face. Only a unit whose glass has a
-  // controller draws it: a box nobody can press would be a lie about the hardware.
-  if (in.touch) {
-    v.panel = TouchPanel::Talk;
-    v.button = in.talk_live ? "STOP" : "TALK";
-  }
-
-  // What the keys do, in the words the keys are printed with. BOOT is the second
-  // key (the request calls it the brightness key; this panel has no backlight, so
-  // nothing dims), PWR goes home. Three wrapped lines is all the note block has,
-  // so the copy is short enough to survive a wrap at 17 columns.
+  // What the keys do, in the words the keys are printed with. BOOT records; PWR
+  // talks (a press starts a live turn, the next press ends it); BOOT held drops a
+  // recording. Three wrapped lines is all the note block has, so the copy is short
+  // enough to survive a wrap at 13 columns.
   const char* add = "Tap BOOT to add.";
-  const char* stop = in.touch ? "tap STOP below" : "tap BOOT to stop";
+  const char* stop = "tap BOOT to stop";
 
   char note[96];
   // The order is the user's: what is happening now, then what is broken, then
@@ -368,10 +319,9 @@ StatusView compose_status(const StatusInputs& in) {
     set_foot("");
   } else if (!in.has_newest) {
     v.hero = "NO NOTES";
-    // The one hint the panel cannot show by itself: on a unit without the touch
-    // glass, holding this same key is how the live mode is reached.
-    v.note = in.touch ? std::string("Tap BOOT to record, TALK to talk.")
-                      : std::string("Tap BOOT to record. Hold it to talk.");
+    // The one hint the panel cannot show by itself: what each of the two keys is
+    // for. It fits 13 columns in two lines.
+    v.note = "Tap BOOT to record, PWR to talk.";
     set_foot(in.external_power ? "ON POWER" : "", /*expendable=*/true);
   } else {
     char hero[24];
@@ -406,10 +356,6 @@ StatusView compose_pairing(const StatusInputs& in, const PairingCopy& copy) {
   // the pairing screen's.
   StatusView v = compose_status(in);
   v.error = false;
-  // The strip has no business on this face: a tap here would open the microphone
-  // while the device is still being approved.
-  v.panel = TouchPanel::None;
-  v.button.clear();
   v.hero = copy.code.empty() ? std::string("PAIRING") : copy.code;
   std::string note;
   // One paragraph: the renderer wraps by column, and the 5x7 font has no
@@ -428,15 +374,13 @@ StatusView compose_pairing(const StatusInputs& in, const PairingCopy& copy) {
 StatusView compose_ask(const StatusInputs& in, std::string_view peer) {
   // The chrome is the resting face's, the words are this question's. The address
   // is the thing to compare with the phone in your hand, and thirteen columns
-  // hold its last two octets -- "Address ends EE:FF. Allow?" -- which is what the
-  // phone's own pairing dialog shows too.
+  // hold its last two octets -- "Ends EE:FF. BOOT allows, PWR refuses." -- which
+  // is what the phone's own pairing dialog shows too.
   StatusView v = compose_status(in);
   v.error = false;
   v.hero = "NEW PHONE";
   std::string tail(peer.size() > 5 ? peer.substr(peer.size() - 5) : peer);
-  v.note = "Address ends " + tail + ". Allow?";
-  v.panel = in.touch ? TouchPanel::Ask : TouchPanel::None;
-  v.button.clear();
+  v.note = "Ends " + tail + ". BOOT allows, PWR refuses.";
   v.hero = status_fit(v.hero, layout::kHeroCols);
   return v;
 }
@@ -481,21 +425,6 @@ void render_status(hg::Canvas& c, const StatusView& v) {
   // Footer: one line of truth. Carries the battery percentage that does not fit
   // in the masthead, and the count or link state that does not fit in the hero.
   if (!v.foot.empty()) c.text(kMarginX, kFootTop, status_fit(v.foot, kFootCols), kScaleBody, kInk);
-
-  // The touch strip: the only place on this panel that does anything when pressed.
-  draw_panel(c, v);
-}
-
-PanelHit status_panel_hit(const StatusView& v, int x, int y) {
-  if (y < kPanelTop || y >= kPanelTop + kPanelH) return PanelHit::None;
-  if (v.panel == TouchPanel::None) return PanelHit::None;
-  const PanelBoxes boxes = panel_boxes(v);
-  for (int i = 0; i < boxes.count; ++i) {
-    if (x < boxes.x[i] || x >= boxes.x[i] + boxes.w[i]) continue;
-    if (v.panel == TouchPanel::Ask) return i == 1 ? PanelHit::Yes : PanelHit::No;
-    return PanelHit::Talk;
-  }
-  return PanelHit::None;
 }
 
 namespace {
@@ -528,9 +457,6 @@ uint32_t StatusScreen::signature(const StatusView& v) {
   mix_string(h, v.hero);
   mix_string(h, v.note);
   mix_string(h, v.foot);
-  const uint8_t panel = static_cast<uint8_t>(v.panel);
-  mix(h, &panel, sizeof panel);
-  mix_string(h, v.button);
   return h;
 }
 

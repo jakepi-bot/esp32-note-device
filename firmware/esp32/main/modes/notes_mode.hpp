@@ -1,4 +1,4 @@
-// Offline voice notes: a PWR tap records to the SD card with no network, the
+// Offline voice notes: a BOOT tap records to the SD card with no network, the
 // finished note joins a durable queue, and the queue uploads itself to Hermes
 // whenever the device is online again. See docs/firmware-modules.md and
 // docs/waveshare-epaper-154-v2.md §7.
@@ -88,8 +88,11 @@ class NotesMode {
   // Called once after the core has started, with the services the mode
   // shows its state through and the hardware it records on.
   virtual void begin(hg::App& app, UiState& ui, DeviceConfig& config, const NotesIo& io) = 0;
-  // A tap on the PWR key: start a recording, or stop the one in progress.
+  // A tap on the BOOT key: start a recording, or stop the one in progress.
   virtual void on_note_button() = 0;
+  // BOOT held (2 s): drop the note being recorded, files and all. True when it
+  // did; false when no note was recording, so the hold can cancel something else.
+  virtual bool on_cancel_button() = 0;
   // The app loop's heartbeat (every pass, esp_timer milliseconds).
   virtual void tick(uint32_t now_ms) = 0;
   virtual NoteCounts counts() const = 0;
@@ -109,6 +112,7 @@ class NotesModeImpl final : public NotesMode {
  public:
   void begin(hg::App& app, UiState& ui, DeviceConfig& config, const NotesIo& io) override;
   void on_note_button() override;
+  bool on_cancel_button() override;
   void tick(uint32_t now_ms) override;
   NoteCounts counts() const override { return counts_; }
   NoteStatus status() const override;

@@ -2135,11 +2135,11 @@ void App::cancel_listening(std::string_view why) {
   mode_since_ = now();
 }
 
-// The home screen's TALK button on the e-paper board: a tap starts a turn and the
-// next tap ends it. It is the touchscreen's tap-to-talk (TouchGestures) made explicit
-// for a panel with no gestures, so it starts a tap-mode recording whatever the talk
-// key is set to; a tap that lands during a turn is the tap that ends it.
-bool App::touch_talk_toggle() {
+// The e-paper notes device's PWR key: a short press starts a turn and the next one
+// ends it. It is the touchscreen's tap-to-talk (TouchGestures) made explicit for a
+// board with no touch glass, so it starts a tap-mode recording whatever the talk
+// key is set to; a press that lands during a turn is the press that ends it.
+bool App::talk_toggle() {
   if (!wifi_setup_text_.empty()) {
     close_wifi_setup();
     return true;

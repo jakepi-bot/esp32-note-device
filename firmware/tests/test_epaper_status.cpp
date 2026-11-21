@@ -76,7 +76,7 @@ StatusInputs online_inputs() {
 
 }  // namespace
 
-TEST("the design card's ten states and the talk strip draw exactly the frames it approved") {
+TEST("the design card's ten states and the pairing ask draw exactly the frames it approved") {
   struct Case {
     const char* name;
     StatusView v;
@@ -179,33 +179,18 @@ TEST("the design card's ten states and the talk strip draw exactly the frames it
     cases.push_back({"10-error", v, 0x44ba6089u});
   }
   {
-    // The Touch SKU's resting face: the free space in the footer and the TALK
-    // box along the bottom. The box is an outline, never a fill (a filled box
-    // costs a full refresh's ink for a button), and its word is centred in it.
-    StatusView v;
-    v.time_valid = true; v.hour = 9; v.minute = 5;
-    v.wifi = WifiState::Online; v.bt = BtState::Connected; v.battery_pct = 87;
-    v.hero = "NO NOTES";
-    v.note = "Tap BOOT to record, TALK to talk.";
-    v.foot = "87% \xC2\xB7 SD 3.1G";
-    v.panel = TouchPanel::Talk;
-    v.button = "TALK";
-    cases.push_back({"11-touch-talk", v, 0x524c8f35u});
-  }
-  {
-    // The pairing ask on the Touch SKU: the question and the two boxes that answer
-    // it. The frame is the one that decides whether a new phone is let in.
+    // The pairing ask: the question and which key answers it. The frame is the one
+    // that decides whether a new phone is let in, so it is pinned like the others.
     StatusView v;
     v.time_valid = true; v.hour = 9; v.minute = 5;
     v.wifi = WifiState::Online; v.bt = BtState::Disconnected; v.battery_pct = 87;
     v.hero = "NEW PHONE";
-    v.note = "Address ends EE:FF. Allow?";
+    v.note = "Ends EE:FF. BOOT allows, PWR refuses.";
     v.foot = "87% \xC2\xB7 SD 3.1G";
-    v.panel = TouchPanel::Ask;
-    cases.push_back({"12-pair-ask", v, 0x16ce3343u});
+    cases.push_back({"11-pair-ask", v, 0x44054c87u});
   }
 
-  CHECK_EQ(cases.size(), 12u);
+  CHECK_EQ(cases.size(), 11u);
   static uint16_t fb[kW * kH];
   for (const auto& kv : cases) {
     std::memset(fb, 0, sizeof fb);
@@ -563,87 +548,47 @@ TEST("a card that never answered prints no free space at all") {
   CHECK(v.foot.find("87%") != std::string::npos);
 }
 
-TEST("the strip is drawn only where a finger can press it") {
+TEST("with no touch glass the resting face names both keys and draws no targets") {
   StatusInputs in = online_inputs();
   in.has_newest = false;  // the face whose copy names the controls
   in.stored = 0;
   in.synced = 0;
   in.newest_valid = false;
-  {
-    // The plain SKU: no touch controller, so no box, and the copy names the keys.
-    const StatusView v = compose_status(in);
-    CHECK(v.panel == TouchPanel::None);
-    CHECK(v.note.find("Tap BOOT") != std::string::npos);
-    CHECK(status_panel_hit(v, kW / 2, layout::kPanelTop + layout::kPanelH / 2) == PanelHit::None);
-  }
-  {
-    // The Touch SKU: one box across the panel, and the copy sends talk to it.
-    in.touch = true;
-    const StatusView v = compose_status(in);
-    CHECK(v.panel == TouchPanel::Talk);
-    CHECK(v.button == std::string("TALK"));
-    CHECK(v.note.find("TALK") != std::string::npos);
-    const int mid_x = (layout::kMarginX + layout::kRightEdge) / 2;
-    const int mid_y = layout::kPanelTop + layout::kPanelH / 2;
-    CHECK(status_panel_hit(v, mid_x, mid_y) == PanelHit::Talk);
-    // A tap on the paper above the strip is nothing: the panel has one target.
-    CHECK(status_panel_hit(v, mid_x, layout::kPanelTop - 1) == PanelHit::None);
-    CHECK(status_panel_hit(v, layout::kMarginX - 1, mid_y) == PanelHit::None);
-    // Inside the very corners of the box: a finger is not a pixel.
-    CHECK(status_panel_hit(v, layout::kMarginX, layout::kPanelTop) == PanelHit::Talk);
-    CHECK(status_panel_hit(v, layout::kRightEdge - 1, layout::kPanelTop + layout::kPanelH - 1) ==
-          PanelHit::Talk);
-  }
-  {
-    // A live turn turns the same box into STOP.
-    in.touch = true;
-    in.talk_live = true;
-    const StatusView v = compose_status(in);
-    CHECK(v.button == std::string("STOP"));
-    // The label is part of the frame's identity: a changed word must repaint.
-    in.talk_live = false;
-    CHECK(compose_status(in).button == std::string("TALK"));
-  }
+  const StatusView v = compose_status(in);
+  CHECK(v.note.find("Tap BOOT") != std::string::npos);
+  CHECK(v.note.find("PWR") != std::string::npos);
+  // The whole hint fits the note block: three lines of thirteen columns.
+  CHECK(static_cast<int>(hg::wrap_text(v.note, layout::kNoteCols).size()) <= layout::kNoteMaxLines);
+  // A recording says how to stop it, and the hold that drops it.
+  in.notes = NotesPhase::Recording;
+  in.recording_s = 8;
+  const StatusView rec = compose_status(in);
+  CHECK(rec.hero == std::string("RECORDING"));
+  CHECK(rec.note.find("BOOT") != std::string::npos);
+  CHECK(static_cast<int>(hg::wrap_text(rec.note, layout::kNoteCols).size()) <= layout::kNoteMaxLines);
 }
 
-TEST("a phone asking to pair is answered on the strip, nowhere else") {
+TEST("a phone asking to pair is answered on the keys, and the face says which") {
   StatusInputs in = online_inputs();
-  in.touch = true;
   in.bt_supported = true;
   const StatusView v = compose_ask(in, "AA:BB:CC:DD:EE:FF");
-  CHECK(v.panel == TouchPanel::Ask);
   // The last two octets are what thirteen columns hold, and what the phone's own
-  // dialog shows; the question is short enough for three lines.
+  // dialog shows; the answer is BOOT for allow and PWR for refuse.
   CHECK(v.note.find("EE:FF") != std::string::npos);
-  CHECK(v.note.find("Allow?") != std::string::npos);
+  CHECK(v.note.find("BOOT") != std::string::npos);
+  CHECK(v.note.find("PWR") != std::string::npos);
+  CHECK(v.hero == std::string("NEW PHONE"));
   CHECK(static_cast<int>(hg::wrap_text(v.note, layout::kNoteCols).size()) <= layout::kNoteMaxLines);
   CHECK(cols(v.hero) <= layout::kHeroCols);
   CHECK(cols(v.foot) <= layout::kFootCols);
-
-  const int mid_y = layout::kPanelTop + layout::kPanelH / 2;
-  const int left_x = layout::kMarginX + 10;
-  const int right_x = layout::kRightEdge - 10;
-  // NO is the left box, YES the right one, and the gap between them is neither.
-  CHECK(status_panel_hit(v, left_x, mid_y) == PanelHit::No);
-  CHECK(status_panel_hit(v, right_x, mid_y) == PanelHit::Yes);
-  CHECK(status_panel_hit(v, (layout::kMarginX + layout::kRightEdge) / 2, mid_y) == PanelHit::None);
-  // The paper above the strip answers nothing, so a stray finger cannot allow a phone.
-  CHECK(status_panel_hit(v, right_x, layout::kPanelTop - 1) == PanelHit::None);
-  CHECK(status_panel_hit(v, right_x, layout::kFootTop) == PanelHit::None);
-
-  // No touch glass: no strip at all (the core's prompt keeps the ask and the TALK
-  // key answers it), and the hit test agrees with the drawing.
-  in.touch = false;
-  const StatusView plain = compose_ask(in, "AA:BB:CC:DD:EE:FF");
-  CHECK(plain.panel == TouchPanel::None);
-  CHECK(status_panel_hit(plain, right_x, mid_y) == PanelHit::None);
+  // The address is the whole point: a peer with no tail still prints something.
+  CHECK(!compose_ask(in, "").note.empty());
 }
 
-TEST("the strip is inside the glass, and the copy above it does not reach it") {
-  // Every line of a composed frame must land above the strip: a wrapped note that
-  // ran into the button would print under its border.
+TEST("the copy fits above the footer, and nothing is drawn below it") {
+  // Every line of a composed frame must land above the footer: a wrapped note that
+  // ran into it would print over the card's free space.
   StatusInputs in = online_inputs();
-  in.touch = true;
   in.has_newest = true;
   in.stored = 12;
   in.synced = 9;
@@ -656,6 +601,5 @@ TEST("the strip is inside the glass, and the copy above it does not reach it") {
   CHECK(static_cast<int>(lines) <= layout::kNoteMaxLines);
   const int note_bottom = layout::kNoteTop + layout::kNoteMaxLines * hg::Canvas::line_height(layout::kScaleBody);
   CHECK(note_bottom <= layout::kFootTop);
-  CHECK(layout::kFootTop + hg::Canvas::line_height(layout::kScaleBody) <= layout::kPanelTop);
-  CHECK(layout::kPanelTop + layout::kPanelH <= layout::kH);
+  CHECK(layout::kFootTop + hg::Canvas::line_height(layout::kScaleBody) <= layout::kH);
 }

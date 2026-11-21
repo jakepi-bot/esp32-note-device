@@ -49,9 +49,10 @@ Pairing is a conversation between three things, and the gadget has the last word
    on the device's screen, `Bluetooth: <name>`).
 
 5. **Allow it on the gadget.** The screen changes to *Allow this phone?* and
-   shows the phone's Bluetooth address. **Tap the screen** to allow it. (On a
-   board without a touch screen, press the talk control; over the console,
-   `phone allow`. To refuse: swipe down, `phone deny`, or just wait 20 seconds.)
+   shows the phone's Bluetooth address. **Tap BOOT** to allow it. **PWR** refuses
+   (**tap PWR**. A 2 s hold is not an answer). Over the console the same two
+   answers are `phone allow` and `phone deny`, and 20 seconds with neither
+   refuses the phone on its own.
 
 6. **Confirm the code.** The gadget now shows a six-digit code, and iOS shows
    the same six digits in a *Bluetooth Pairing Request*. Tap **Pair** only if
@@ -72,12 +73,12 @@ the window is open, and a six-digit code on a screen that nobody is looking at
 decides nothing. So the gadget asks, names the phone, and waits for someone
 standing there to allow it:
 
-- nothing is shared, and no passkey is generated, until the tap;
+- nothing is shared, and no passkey is generated, until someone presses BOOT;
 - a refused or ignored ask drops that link and the phone's pairing fails with an
   authentication error, so the phone cannot bond and try again later;
 - one phone at a time: a second phone asking while one waits is refused;
 - the window is still open after a refusal, so the same phone can ask again if
-  the tap was a mistake.
+  the press was a mistake.
 
 Combined with the passkey step, a phone has to be both *allowed* at the device
 and *confirmed* by the code, which is what makes it safe to leave the pairing
@@ -85,7 +86,7 @@ window open for two minutes.
 
 ## Sending a note
 
-1. Record on the gadget as usual (the brightness control, or hold the screen).
+1. Record on the gadget as usual (tap BOOT).
    The note lands in `pending/` on the card.
 2. On the page, tap **List notes** (it also refreshes on connect). Each note
    shows its size, length and recorded time.
@@ -114,8 +115,8 @@ until the server has the note.
 |---|---|
 | Bluefy says Web Bluetooth is unavailable | the page is not on HTTPS; use the `https://` address, and trust the server's certificate (deploy README step 7) |
 | `no gadget chosen` | the pairing window closed (two minutes), or the device is asleep: press a key, open Settings → Phone app again |
-| `Connect` fails with `authentication`/`insufficient encryption` | the gadget did not allow this phone: open the pairing window and tap Allow when it asks |
-| The gadget asks, you tap Allow, iOS shows a different code | something else is in the middle; tap Cancel, then `phone forget` on the gadget and start again |
+| `Connect` fails with `authentication`/`insufficient encryption` | the gadget did not allow this phone: open the pairing window again and tap BOOT when it asks (PWR refuses, and 20 s of neither refuses too) |
+| The gadget asks, you tap BOOT to allow, iOS shows a different code | something else is in the middle; tap Cancel, then `phone forget` on the gadget and start again |
 | The page connects but lists nothing | no notes are waiting: they may already be in `sent/` after a previous sync |
 | A note stops at a percentage | keep the page in front and tap Send again; it resumes where it stopped |
 | `401 device … is not enrolled` | the key in the page does not match a key the server knows |

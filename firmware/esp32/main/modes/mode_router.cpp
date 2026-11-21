@@ -17,7 +17,7 @@ constexpr const char* TAG = "hg.keys";
 // 3 polls at ~10 ms, the debounce port_buttons.cpp uses for the same kind of key.
 constexpr uint8_t kDebounceTicks = 3;
 // After an edge the loop polls at 10 ms for this long: long enough for the
-// 3-tick debounce and for a hold to start talking without a visible lag.
+// 3-tick debounce and for a hold to start acting without a visible lag.
 constexpr uint32_t kFastWindowMs = 400;
 
 uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
@@ -54,8 +54,8 @@ void ModeRouter::begin(int power_gpio, int record_gpio, hg::App* app, LiveMode* 
       ESP_LOGW(TAG, "key GPIO %d has no edge interrupt; polling it", gpio);
     }
   }
-  ESP_LOGI(TAG, "keys: power %d (home), record %d (note%s)", power_gpio_, record_gpio_,
-           keys.hold_talks ? ", hold to talk" : "");
+  ESP_LOGI(TAG, "keys: power %d (talk), record %d (note, hold to cancel), auto-home %u s", power_gpio_,
+           record_gpio_, static_cast<unsigned>(kAutoHomeSeconds));
 }
 
 // GPIO ISR: no allocation and nothing that blocks, only a timestamp and an
@@ -104,22 +104,60 @@ void ModeRouter::arm_sleep_wake(bool dozing) {
 }
 
 void ModeRouter::act(HomeAction action) {
+  if (action == HomeAction::None) return;
+  // A phone waiting for an answer owns both keys: nothing else opens the
+  // microphone or the card while the security question is on the glass.
+  if (app_ != nullptr && app_->phone_ask_pending()) {
+    switch (pairing_ask_answer(action)) {
+      case AskAnswer::Allow:
+        ESP_LOGI(TAG, "pairing ask: BOOT allows");
+        app_->answer_phone_pairing(true);
+        break;
+      case AskAnswer::Deny:
+        ESP_LOGI(TAG, "pairing ask: PWR refuses");
+        app_->answer_phone_pairing(false);
+        break;
+      case AskAnswer::None: break;
+    }
+    return;
+  }
   switch (action) {
     case HomeAction::None: break;
-    case HomeAction::Home:
-      if (app_ != nullptr) app_->go_home();
-      ESP_LOGI(TAG, "home");
+    case HomeAction::TalkToggle:
+      // The same call the home screen's TALK strip used to make: one press
+      // starts a turn, the next ends it.
+      if (app_ != nullptr) app_->talk_toggle();
+      ESP_LOGI(TAG, "PWR: talk");
       break;
     case HomeAction::NoteToggle:
       if (notes_ != nullptr) notes_->on_note_button();
       break;
-    case HomeAction::TalkStart:
-      if (app_ != nullptr) app_->on_button(hg::Button::Talk, true);
-      break;
-    case HomeAction::TalkStop:
-      if (app_ != nullptr) app_->on_button(hg::Button::Talk, false);
+    case HomeAction::Cancel:
+      // A note being recorded is the thing to drop; otherwise the hold taps CANCEL
+      // for a live turn or an overlay, as the other boards' long press does.
+      if (notes_ != nullptr && notes_->on_cancel_button()) break;
+      if (app_ != nullptr) {
+        app_->on_button(hg::Button::Cancel, true);
+        app_->on_button(hg::Button::Cancel, false);
+      }
       break;
   }
+}
+
+AutoHome::Inputs ModeRouter::auto_home_inputs() const {
+  AutoHome::Inputs in;
+  if (app_ == nullptr) return in;  // nothing to return from
+  in.at_home = auto_home_face(app_->model().screen);
+  in.dozing = app_->dozing();
+  bool notes_busy = false;
+  if (notes_ != nullptr) notes_busy = notes_->status().phase != NoteStatus::Phase::Idle;
+  // A turn, a pairing ask, a question from Hermes and an upload all suspend the
+  // count: the minute is for a device somebody walked away from, not one that is
+  // in the middle of something.
+  const hg::Screen screen = app_->model().screen;
+  const bool question = screen == hg::Screen::Prompt || screen == hg::Screen::Choice;
+  in.busy = app_->in_turn() || app_->phone_ask_pending() || question || notes_busy;
+  return in;
 }
 
 void ModeRouter::tick(uint32_t now_ms) {
@@ -130,6 +168,7 @@ void ModeRouter::tick(uint32_t now_ms) {
     } else if (++power_stable_ >= kDebounceTicks) {
       power_raw_ = down;
       power_stable_ = 0;
+      auto_home_.interacted(now_ms);  // a press is interaction, whatever it decides
       act(down ? keys_.power_press(now_ms) : keys_.power_release(now_ms));
     }
   }
@@ -140,15 +179,23 @@ void ModeRouter::tick(uint32_t now_ms) {
     } else if (++record_stable_ >= kDebounceTicks) {
       record_raw_ = down;
       record_stable_ = 0;
+      auto_home_.interacted(now_ms);
       act(down ? keys_.key_press(now_ms) : keys_.key_release(now_ms));
     }
-    // A press that passes the hold threshold starts talking before it is lifted,
-    // which is what makes hold-to-talk feel like talking.
+    // A press that passes the hold threshold cancels before it is lifted.
     if (keys_.key_down()) act(keys_.tick(now_ms));
   }
 
   if (live_ != nullptr) live_->tick(now_ms);
   if (notes_ != nullptr) notes_->tick(now_ms);
+
+  if (auto_home_.tick(now_ms, auto_home_inputs())) {
+    ESP_LOGI(TAG, "home: %u s with no interaction", static_cast<unsigned>(kAutoHomeSeconds));
+    if (app_ != nullptr) {
+      app_->close_settings();  // a menu left open gives way like any other screen
+      app_->go_home();
+    }
+  }
 }
 
 }  // namespace hgp

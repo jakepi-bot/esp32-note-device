@@ -772,23 +772,15 @@ BoardConfig make() {
   b.latch_power.usb_external_power = true;
   b.latch_power.key = 18;
   // Neither key is the core's TALK: the mode router owns both of them
-  // (modes/mode_router.cpp). BOOT is the record key -- a tap records a note, a
-  // hold talks on a unit with no touch glass -- and PWR goes home.
+  // (modes/mode_router.cpp). BOOT is the record key (a tap records a note, held
+  // it cancels) and PWR talks.
   b.buttons = {-1, -1, -1, -1};
   b.buttons.record = 0;
   b.talk_label = "BOOT";
-  // The Touch SKU of this product carries an FT6336 on the shared I2C bus at
-  // 0x38; the plain SKU carries nothing there. make() runs before the bus
-  // exists, so this is the shape the port enables only when the controller
-  // answers the probe (main.cpp). Reset is EPD_TP_RST on GPIO 7 (Waveshare's
-  // schematic and its 13_FT6336_Test example): the chip does not answer until
-  // that net is released, which is why the probe pulses it first.
-  b.touch.controller = TouchController::Ft5x06;
-  b.touch.addr = 0x38;
-  b.touch.rst = 7;
-  b.touch.width = b.epd.width;
-  b.touch.height = b.epd.height;
-  b.touch.ppi = 183;  // 1.54" over 200 px, the same glass as the panel
+  b.cancel_label = "BOOT";
+  // No touch block: the desk unit's glass has no controller (Jake, 2026-11-21),
+  // and the board config is what the port reads, so nothing probes the I2C bus
+  // for one at boot.
   // Bluetooth LE: the phone link and the note sync (docs/ble-note-sync.md).
   // The build needs the NimBLE lines in this board's sdkconfig.defaults and the
   // 8 MB partition table beside them.

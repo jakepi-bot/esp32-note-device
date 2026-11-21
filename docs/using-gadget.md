@@ -1,6 +1,9 @@
 # Talk, type, and interrupt
 
-Wait for the device to show Ready. On the LCD board, BOOT is TALK and PLUS is CANCEL. On the round touchscreen, hold the screen to talk and swipe down to cancel.
+Wait for the device to show Ready. On the LCD board, BOOT is TALK and PLUS is CANCEL. On the round touchscreen, hold the screen to talk and swipe down to cancel. On
+the e-paper notes device, PWR talks and BOOT records a note: it has no touch
+glass and no home button, and it goes home by itself after a minute with no
+input.
 
 | What you want to do | Control |
 |---|---|

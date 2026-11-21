@@ -45,6 +45,7 @@ if(CONFIG_HG_BOARD_WS_EPAPER_154)
         "modes/notes_screen.cpp"
         "modes/mode_router.cpp"
         "modes/home_keys.cpp"
+        "modes/auto_home.cpp"
         "modes/status_screen.cpp"
         "notes/notes_queue.cpp"
         "notes/notes_ble.cpp"

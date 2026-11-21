@@ -288,11 +288,11 @@ class App {
   // question, an open camera, a widget page or a turn in flight all give way to it,
   // and the glass goes back to the resting face with the default profile.
   void go_home();
-  // The e-paper home screen's TALK button, one tap: starts a live turn in tap mode
-  // (hands-free, it ends on the next tap or on a pause) whatever the talk key's
-  // hold/tap setting is, and a tap during a turn ends that turn. False when there is
-  // nothing to talk to; the screen's hint line carries the reason.
-  bool touch_talk_toggle();
+  // The e-paper notes device's PWR key, one short press: starts a live turn in tap
+  // mode (hands-free, it ends on the next press or on a pause) whatever the talk
+  // key's hold/tap setting is, and a press during a turn ends that turn. False when
+  // there is nothing to talk to; the screen's hint line carries the reason.
+  bool talk_toggle();
   // Dozing (System::set_dozing): the port's loop may wait this long for events.
   static constexpr uint32_t kDozeWaitMs = 100;
   // A module owns a bistable (e-paper) panel and nothing visible changes

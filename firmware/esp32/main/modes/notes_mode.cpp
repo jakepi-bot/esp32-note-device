@@ -169,6 +169,17 @@ void NotesModeImpl::on_note_button() {
   // While a note uploads, a tap is ignored: the queue finishes on its own.
 }
 
+bool NotesModeImpl::on_cancel_button() {
+  if (mode_ != Mode::Recording) return false;
+  abort_note("button hold");
+  // The line stops counting and the resting face comes back with the counts; the
+  // partial note never reached note.json, so nothing on the card refers to it.
+  ui_->set(UiPhase::Idle);
+  refresh_counts(true);
+  publish_status();
+  return true;
+}
+
 void NotesModeImpl::start_note(uint32_t now) {
   if (mode_ != Mode::Idle) return;
   if (app_->in_turn()) {

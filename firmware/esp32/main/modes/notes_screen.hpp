@@ -14,11 +14,10 @@
 // ghosted, and the panel's own "full every 20 partials" rule is too slow to
 // hide it.
 //
-// The touch targets are the strip along the bottom: TALK/STOP, which starts and
-// stops a live turn (App::touch_talk_toggle), and -- while a phone asks to pair --
-// the NO/YES boxes that answer it (App::answer_phone_pairing). Both are drawn
-// only on a unit whose glass answered on the I2C bus (the product's Touch SKU);
-// the plain SKU draws no strip, and the keys are the way in.
+// There is no touch glass on this product (Jake, 2026-11-21), so this screen has
+// no targets: the two keys are the whole input surface and every hint says which
+// key does what. The one screen it takes from the core's Setup is the pairing
+// ask, because the answer has to be readable on paper and the buttons answer it.
 #pragma once
 
 #include <cstdint>
@@ -38,22 +37,16 @@ class EpdDisplay;
 
 class NotesScreen {
  public:
-  // The board's services. `system` supplies the clock; the battery level and
-  // the supply come from App, which already polls them and applies the board's
-  // battery rules (gauge, or the voltage estimate) once. `touch` says the glass
-  // answered on the I2C bus, so the strip is drawn and a tap is read.
-  void begin(hg::App& app, NotesMode& notes, hg::System* system, EpdDisplay& display, bool touch);
+  // The board's services. `system` supplies the clock; the battery level and the
+  // supply come from App, which already polls them and applies the board's
+  // battery rules (gauge, or the voltage estimate) once.
+  void begin(hg::App& app, NotesMode& notes, hg::System* system, EpdDisplay& display);
 
   // App::rest_screen: draws the status screen when the device is resting and
   // returns true when this screen holds the panel afterwards. `force` says the
   // core UI painted the frame before this one, so the glass is not this
   // screen's image any more.
   bool render(const hg::UiModel& model, bool force);
-
-  // A touch sample from the input task, delivered on the app task. True when this
-  // screen consumed it: while it owns the glass, the strip is the only target and
-  // a tap anywhere else is swallowed rather than opening the microphone.
-  bool touch(bool touching, int x, int y, uint32_t now_ms);
 
  private:
   StatusInputs gather();
@@ -63,18 +56,9 @@ class NotesScreen {
   NotesMode* notes_ = nullptr;
   hg::System* system_ = nullptr;
   EpdDisplay* display_ = nullptr;
-  bool touch_ = false;  // the glass has a controller
 
   StatusScreen screen_;
   bool owned_ = false;  // this screen holds the panel
-  // The face on the glass, so a tap is hit-tested against what the user sees.
-  StatusView last_;
-
-  // The touch in progress: a tap is judged on release, inside the box it started
-  // in and soon after it started, so a hand resting on the device presses nothing.
-  bool touching_ = false;
-  int down_x_ = 0, down_y_ = 0;
-  uint32_t down_ms_ = 0;
 };
 
 }  // namespace hgp

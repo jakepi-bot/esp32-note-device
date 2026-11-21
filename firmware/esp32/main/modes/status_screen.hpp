@@ -44,17 +44,9 @@ constexpr int kRuleY = 36;
 constexpr int kHeroTop = 46;
 constexpr int kNoteTop = 74;
 // Three wrapped lines: the note block gives one line back to the footer's own
-// row so the card's free space always has a place, and the touch strip below it
-// has room for a finger.
+// row so the card's free space always has a place.
 constexpr int kNoteMaxLines = 3;
 constexpr int kFootTop = 134;
-// The touch strip: the home screen's TALK button, or the pairing question's YES
-// and NO. 44 px is 6.1 mm, above the 5 mm a fingertip needs and inside the 4 px
-// bottom margin.
-constexpr int kPanelTop = 154;
-constexpr int kPanelH = 44;
-constexpr int kPanelGap = 10;
-constexpr int kPanelBorder = 2;
 constexpr int kSpineX = kMarginX, kSpineW = 3;
 constexpr int kNoteTextX = 22;  // clears the spine, with a real gutter
 // Type scale. 2 = 14 px (1.93 mm), 3 = 21 px (2.90 mm). Scale 2 is the floor,
@@ -77,12 +69,6 @@ enum class BtState : uint8_t { Unsupported, Off, Disconnected, Connected };
 // What the notes mode is doing, as the screen words it.
 enum class NotesPhase : uint8_t { Idle, Recording, Uploading, Error };
 
-// What the touch strip along the bottom of the panel offers. None on a unit whose
-// glass has no touch controller: the strip then draws nothing and the keys carry
-// every action. Ask is the pairing question: two boxes, NO on the left and YES on
-// the right, because a new phone must be allowed on this glass and nowhere else.
-enum class TouchPanel : uint8_t { None, Talk, Ask };
-
 struct StatusView {
   bool time_valid = false;
   int hour = 0, minute = 0;  // local time, 24 h
@@ -94,10 +80,6 @@ struct StatusView {
   std::string note;             // free text, wrapped by the renderer
   std::string foot;             // one line, <= kFootCols
   bool error = false;           // draws the hero in a box
-  // The touch strip. `button` is the button's WORD ("TALK", "STOP"), drawn
-  // centred in its box.
-  TouchPanel panel = TouchPanel::None;
-  std::string button;
 };
 
 // Everything the copy needs, gathered by the board. Plain data: no clock, no
@@ -115,11 +97,6 @@ struct StatusInputs {
   int battery_pct = -1;
   bool external_power = false;
 
-  // The glass has a touch controller (the Touch SKU); the home screen then asks
-  // through its own TALK button instead of through a key hold.
-  bool touch = false;
-  // A live turn is in progress: the home screen's button reads STOP.
-  bool talk_live = false;
   // From the card: free space for the footer, and the card's size for the copy.
   // sd_free_known is false until the card answers, so the footer never prints a
   // zero it did not measure.
@@ -160,17 +137,11 @@ struct PairingCopy {
 };
 StatusView compose_pairing(const StatusInputs& in, const PairingCopy& copy);
 
-// A phone asking to pair, on the touch SKU: the address's last two octets (all
-// that thirteen columns hold), the question, and the YES/NO strip. It is its own
-// face rather than compose_pairing's because the answer is the only thing the
-// screen is for, and a tap off the strip must answer nothing.
+// A phone asking to pair: the address's last two octets (all that thirteen
+// columns hold), the question, and which key answers it. It is its own face
+// rather than compose_pairing's because the answer is the only thing the screen
+// is for: BOOT allows, PWR refuses, and twenty seconds of neither refuses.
 StatusView compose_ask(const StatusInputs& in, std::string_view peer);
-
-// What a touch at (x, y) hit on the strip, for the screen that owns the panel.
-// Computed from the same constants the renderer draws with, so the target and the
-// box can never drift apart.
-enum class PanelHit : uint8_t { None, Talk, Yes, No };
-PanelHit status_panel_hit(const StatusView& v, int x, int y);
 
 // `s` in at most `cols` display columns, ending in ".." when it had to cut.
 // (The font has no ellipsis glyph: U+2026 draws as '?'.)

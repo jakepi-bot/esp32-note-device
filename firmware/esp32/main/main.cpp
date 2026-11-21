@@ -354,12 +354,8 @@ void dispatch(hg::App& app, hgp::Event& ev) {
     case EventType::Touch:
       if (ev.len == sizeof(hgp::TouchSample)) {
         const auto* t = reinterpret_cast<const hgp::TouchSample*>(ev.data);
-#if CONFIG_HG_BOARD_WS_EPAPER_154
-        // While the resting face holds the glass its TALK box is the only target:
-        // the screen takes the finger, and a tap on the paper does nothing rather
-        // than opening the microphone.
-        if (g_status.touch(t->touching, t->x, t->y, g_system.now_ms())) break;
-#endif
+        // This product has no touch glass: no board here registers a reader, so
+        // nothing arrives. The gesture path stays for the boards that do.
         if (g_gestures) g_gestures->update(t->touching, t->x, t->y, g_system.now_ms());
       }
       break;
@@ -412,9 +408,10 @@ extern "C" void app_main(void) {
   init_nvs();
   hgp::events::init();
   ESP_ERROR_CHECK(g_storage.begin() ? ESP_OK : ESP_FAIL);
-  // A copy in BSS, not a reference: the e-paper board's touch block is enabled
-  // after the I2C bus exists (below), because one image serves both SKUs of that
-  // product. Everything else reads it exactly as the factory made it.
+  // The e-paper board's touch block stays disabled: the desk unit has no touch
+  // glass (Jake, 2026-11-21 — the round-2 I2C probe's "nothing at 0x38" was the
+  // truth, not a reset bug). One image serves the whole product line, and every
+  // other board reads this exactly as the factory made it.
   static hgp::BoardConfig board_store;
   board_store = hgp::board_config();
   hgp::BoardConfig& board = board_store;
@@ -508,51 +505,6 @@ extern "C" void app_main(void) {
 #endif
   // GPIO45/46 belong to VDD_IO_5 on the P4; acquire LDO4 before creating I2C0.
   i2c_master_bus_handle_t i2c_bus = io_rail_ready ? hgp::i2c::bus(board.i2c) : nullptr;
-#if CONFIG_HG_BOARD_WS_EPAPER_154
-  // The product ships two SKUs on one firmware: this one, whose glass carries an
-  // FT6336 on the shared bus at 0x38, and the plain e-paper SKU, where nothing
-  // answers there. make() runs before the bus exists, so the probe is here and
-  // the touch block is switched on only by an answer: on the plain SKU the strip
-  // is never drawn and every action is a key.
-  //
-  // EPD_TP_RST is GPIO 7 and the FT6336 does not answer until it is released
-  // (Waveshare's schematic and its 13_FT6336_Test example pulse it). The old
-  // probe read the bus with the chip still in reset, which is why the desk unit
-  // reported no touch controller while its glass was fitted.
-  if (i2c_bus != nullptr) {
-    if (board.touch.rst >= 0) {
-      gpio_config_t rst = {};
-      rst.pin_bit_mask = 1ull << board.touch.rst;
-      rst.mode = GPIO_MODE_OUTPUT;
-      rst.pull_up_en = GPIO_PULLUP_DISABLE;
-      rst.pull_down_en = GPIO_PULLDOWN_DISABLE;
-      rst.intr_type = GPIO_INTR_DISABLE;
-      if (gpio_config(&rst) == ESP_OK) {
-        gpio_set_level(static_cast<gpio_num_t>(board.touch.rst), 0);
-        vTaskDelay(pdMS_TO_TICKS(10));  // a real reset pulse, as the vendor demo does
-        gpio_set_level(static_cast<gpio_num_t>(board.touch.rst), 1);
-        vTaskDelay(pdMS_TO_TICKS(100));  // the chip's boot time
-        ESP_LOGI(TAG, "EPD_TP_RST (GPIO %d) pulsed: probing the touch glass", board.touch.rst);
-      } else {
-        ESP_LOGW(TAG, "EPD_TP_RST (GPIO %d) did not configure", board.touch.rst);
-      }
-    }
-    // The definitive scan: both controllers a 1.54" e-paper glass is built
-    // with (FT6336 at 0x38, GT911 at 0x5D and its alternate 0x14), so the log
-    // says which one answered instead of only that 0x38 did not.
-    const uint8_t candidates[] = {0x38, 0x5D, 0x14};
-    for (const uint8_t addr : candidates) {
-      if (hgp::i2c_device_present(i2c_bus, addr)) ESP_LOGI(TAG, "I2C: touch candidate 0x%02X answers", addr);
-    }
-  }
-  if (i2c_bus != nullptr && hgp::i2c_device_present(i2c_bus, board.touch.addr)) {
-    board.touch.enabled = true;
-    ESP_LOGI(TAG, "touch glass found at 0x%02X: the home strip is live", board.touch.addr);
-  } else {
-    board.touch.enabled = false;
-    ESP_LOGI(TAG, "no touch controller at 0x%02X: the home strip is not drawn", board.touch.addr);
-  }
-#endif
   const bool peripherals_ready = io_rail_ready && (!board.cores3 || g_cores3.begin(i2c_bus)) &&
       (!board.sticks3 || g_sticks3.begin(i2c_bus)) &&
       (!board.stopwatch || g_stopwatch.begin(i2c_bus)) &&
@@ -838,14 +790,16 @@ extern "C" void app_main(void) {
 #if CONFIG_HG_BOARD_WS_EPAPER_154
   // The mode modules: the UI phase first, then the stubs the mode tasks replace.
   g_ui.bind(app);
-  // PWR goes home, the second key records a note (and, on a unit with no touch
-  // glass, talks while it is held).
+  // PWR talks (a short press starts a live turn, the next ends it), BOOT records a
+  // note and drops one when held, and the glass goes home after a quiet minute:
+  // the desk unit has no touch glass, so the two keys are the whole input.
   hgp::HomeKeys::Config keys;
-  keys.hold_talks = !(touch && board.touch.enabled);
+  keys.tap_max_ms = 1500;      // a press past this is on its way to the power latch
+  keys.cancel_hold_ms = 2000;  // BOOT held: drop the recording
   g_modes.begin(board.latch_power.key, board.buttons.record, &app, &g_live, &g_notes, keys);
   g_live.begin(app, g_ui);
   // The offline notes: the same microphone and battery the core uses, and the
-  // board's card slot. A PWR tap records to the card; the queue uploads when
+  // board's card slot. A BOOT tap records to the card; the queue uploads when
   // Hermes is reachable.
   hgp::NotesIo notes_io;
   notes_io.mic = hal.mic;
@@ -856,7 +810,7 @@ extern "C" void app_main(void) {
   // The status screen owns the panel while the device rests (ready, offline, a
   // battery face). The core UI keeps every screen that wants a key, a turn or a
   // prompt, and hands the panel back through the same hook.
-  g_status.begin(app, g_notes, &g_system, g_epd, touch && board.touch.enabled);
+  g_status.begin(app, g_notes, &g_system, g_epd);
   app.rest_screen = [](const hg::UiModel& model, bool force) { return g_status.render(model, force); };
   app.on_console = [](std::string_view line) -> std::string {
     if (line == "notes") return g_notes.console({});

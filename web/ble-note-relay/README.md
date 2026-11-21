@@ -75,3 +75,24 @@ after changing `notes_ble.cpp`:
 cmake --build <host build dir> --target hg_ble_capture
 ./<host build dir>/hg_ble_capture > web/ble-note-relay/test/transfer-fixture.txt
 ```
+## The phone lists no device
+
+The page asks the browser for devices advertising the note service
+(`dc5300a0-…`), and Chrome and iOS only offer devices whose advertising packet
+carries it. Two things make the list empty:
+
+- the gadget's **Phone app** pairing window is not open. The device advertises
+  only while that window is open, or once a phone is already paired;
+- the firmware advertises the wrong service. It must be `…00a0`, not the hub's
+  `…0001`.
+
+`tools/scan_adv.py` answers that from any machine with a Bluetooth adapter:
+
+```sh
+pip install bleak
+python3 tools/scan_adv.py        # with the pairing window open
+```
+
+It prints the name, RSSI and service UUIDs of every device advertising `…00a0`.
+An empty result means the packet does not carry it (or nothing is advertising),
+which no phone setting can fix.

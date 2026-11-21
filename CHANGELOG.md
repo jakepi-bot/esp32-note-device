@@ -2,6 +2,13 @@
 
 ## unreleased
 
+- **The gadget advertises the note service, so a phone can find it.** The
+  advertising packet carried the hub service (`…0001`) while the relay page
+  filtered on the note service (`…00a0`), so neither Bluefy nor Chrome listed the
+  device at all: an iPhone scanning inside the page saw an empty list. The packet
+  now carries `…00a0`, verified from a Linux adapter advertising `dc5300a0-…` and
+  a GATT table with the control and data characteristics. Both UUIDs cannot share
+  one 31-byte packet with the flags.
 - **The menu has a way in, and it is the held BOOT.** The documented TALK+CANCEL
   chord could never fire on the notes device: holding PWR is the latch's own
   power-off, so the board switched off before the second key mattered. A held

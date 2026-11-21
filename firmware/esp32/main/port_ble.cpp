@@ -196,7 +196,13 @@ void advertise() {
   ble_svc_gap_device_name_set(name.c_str());
   ble_hs_adv_fields fields = {};
   fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-  fields.uuids128 = &g_service_uuid;
+  // The note service, not the hub service: a Web Bluetooth caller filters on the
+  // service it is going to use, and Chrome and iOS drop any device whose
+  // advertising packet does not carry it. Advertising ...0001 here (the hub's
+  // UUID) left the phone's chooser empty, which is how a real iPhone saw "no
+  // device". Both 128-bit UUIDs do not fit in one 31-byte packet with the flags,
+  // and the phone only ever talks to ...00a0, so this one is the advertisement.
+  fields.uuids128 = &g_note_service_uuid;
   fields.num_uuids128 = 1;
   fields.uuids128_is_complete = 1;
   ble_hs_adv_fields scan = {};

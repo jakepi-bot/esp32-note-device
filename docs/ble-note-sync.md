@@ -24,7 +24,10 @@ Hermes has it, so a transfer can be interrupted at any byte and resumed.
 | Data | `dc5300a2-7a2a-400f-b8f6-e87185576192` | Notify; subscribe before the first `get` |
 
 Both characteristics need the same paired phone as the console channel: the
-device only advertises while **Phone app** pairing is open or a phone is already
+device advertises the note service's UUID (`dc5300a0-…`) in its advertising
+packet, because a Web Bluetooth caller filters on the service it will use and
+neither Chrome nor iOS lists a device that does not carry it; it only advertises
+at all while **Phone app** pairing is open or a phone is already
 paired, and it hands out a six-digit passkey that the phone's user types
 ([pairing](protocol.md#phone-app-over-bluetooth)). A note is private; an
 unencrypted link would let anything in radio range read it.

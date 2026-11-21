@@ -207,7 +207,8 @@ screen: [docs/ios-bluetooth-sync.md](docs/ios-bluetooth-sync.md).
 | Board shows `NO TIME` | `timezone` is not set (step 2) |
 | Footer says `NO BATTERY` | `battery_estimate liion` is not set (step 2) |
 | Bluefy says Web Bluetooth is unavailable | the page is not on HTTPS, or the certificate is not trusted (step 4) |
-| **Connect** finds no device | the pairing window closed, or the board is asleep. Open Settings → Phone app again |
+| **Connect** lists no device | the pairing window is closed, or an older firmware advertises the wrong service. The device only advertises while **Phone app** is open; check the packet with `python3 web/ble-note-relay/tools/scan_adv.py` |
+| Phone's Settings → Bluetooth shows nothing | expected: the gadget is found inside the Bluefy page, not in iOS Settings |
 | **Connect** fails with `authentication` | the board did not allow this phone. Open the window and press BOOT when it asks |
 | `bind: address already in use` on 8766 | a Hermes gateway owns that port. Set `NOTES_PORT=8767` |
 | `401 device … is not enrolled` | the server has no key for that id. Step 3, the `devices.json` copy |

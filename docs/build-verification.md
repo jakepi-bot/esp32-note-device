@@ -52,6 +52,9 @@ waveshare-epaper-154  SUCCESS   00:01:38.489
 | Toolchain | `toolchain-xtensa-esp-elf @ 15.2.0+20251204` |
 | Python | 3.13, PlatformIO Core 6.2.0 |
 
+Repeated from a fresh clone after the CI and CMake changes in the same series
+(commit `c8d6c2e`): same image sizes, 94.9 s, `[SUCCESS]`.
+
 ## Release packaging (the step CI runs after the build)
 
 ```

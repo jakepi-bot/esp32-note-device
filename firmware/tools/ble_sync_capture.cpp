@@ -9,7 +9,13 @@
 //   cmake --build <build dir> --target hg_ble_capture
 //   ./hg_ble_capture > web/ble-note-relay/test/transfer-fixture.txt
 //
-// Everything here is deterministic: the note's bytes are a formula, not random.
+// Everything here is deterministic: with no argument the note's bytes are a
+// formula, not random. Pass a file and it becomes the note instead, which is how
+// a real recording is put through the same framing for an end-to-end check
+// against the notes endpoint:
+//
+//   ./hg_ble_capture tests/fixtures/voice-notes/sample.wav > /tmp/fixture.txt
+//
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -71,12 +77,44 @@ void print_hex(const uint8_t* data, size_t len) {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   MemoryCard card;
-  // 3000 bytes: a fraction of a real note, enough for 18 blocks at an iOS MTU,
-  // and the same bytes every run.
-  card.audio.resize(3000);
-  for (size_t i = 0; i < card.audio.size(); ++i) card.audio[i] = static_cast<uint8_t>((i * 31 + 7) & 0xFF);
+  if (argc > 1) {
+    // A real note: the bytes of the file the device recorded (a WAV on the card).
+    std::FILE* f = std::fopen(argv[1], "rb");
+    if (!f) {
+      std::fprintf(stderr, "cannot open %s\n", argv[1]);
+      return 1;
+    }
+    uint8_t buf[4096];
+    size_t n;
+    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) card.audio.insert(card.audio.end(), buf, buf + n);
+    std::fclose(f);
+    // A real WAV says how long it is: walk the chunk list for `fmt ` (byte rate
+    // at +8) and `data` (its size), since a file may carry other chunks first.
+    if (card.audio.size() > 44 && std::memcmp(card.audio.data(), "RIFF", 4) == 0) {
+      const auto le32 = [&card](size_t at) {
+        return static_cast<uint32_t>(card.audio[at]) | static_cast<uint32_t>(card.audio[at + 1]) << 8 |
+               static_cast<uint32_t>(card.audio[at + 2]) << 16 | static_cast<uint32_t>(card.audio[at + 3]) << 24;
+      };
+      uint32_t byte_rate = 0, data = 0;
+      for (size_t at = 12; at + 8 <= card.audio.size();) {
+        const uint32_t size = le32(at + 4);
+        if (std::memcmp(card.audio.data() + at, "fmt ", 4) == 0 && at + 16 <= card.audio.size()) byte_rate = le32(at + 16);
+        if (std::memcmp(card.audio.data() + at, "data", 4) == 0) {
+          data = size;
+          break;
+        }
+        at += 8 + size + (size & 1);
+      }
+      if (byte_rate > 0 && data > 0) card.duration_s = (data + byte_rate - 1) / byte_rate;
+    }
+  } else {
+    // 3000 bytes: a fraction of a real note, enough for 18 blocks at an iOS MTU,
+    // and the same bytes every run.
+    card.audio.resize(3000);
+    for (size_t i = 0; i < card.audio.size(); ++i) card.audio[i] = static_cast<uint8_t>((i * 31 + 7) & 0xFF);
+  }
 
   BleSync sync;
   sync.begin(&card);
@@ -91,11 +129,13 @@ int main() {
 
   uint32_t now = 0;
   unsigned packets = 0;
+  unsigned blocks = 0;
   bool seen_end = false;
-  const auto sink = [&packets, &seen_end](const uint8_t* data, size_t len) {
+  const auto sink = [&packets, &blocks, &seen_end](const uint8_t* data, size_t len) {
     std::printf("PACKET ");
     print_hex(data, len);
     ++packets;
+    if (len > 0 && data[0] == BleSync::kTagBlock) ++blocks;
     if (len > 0 && data[0] == BleSync::kTagEnd) seen_end = true;
     return true;
   };
@@ -110,6 +150,7 @@ int main() {
     std::snprintf(ack, sizeof(ack), "ack %u", sync.progress().sent);
     sync.command(ack, now);
   }
+  std::printf("PACKETS_BLOCKS %u\n", blocks);
   std::printf("# %u packets\n", packets);
   return 0;
 }

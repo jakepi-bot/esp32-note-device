@@ -162,9 +162,10 @@ again, so a phone sync is for the notes you want *now*.
 ## 8. Setup
 
 Bluetooth is on only for this board, and it does not fit in the shared 1.9 MB
-app slots: NimBLE plus this service is about 218 KB (app 1,806,123 → 2,024,672
-bytes). The board therefore builds with `partitions-epaper-8mb.csv`, two 3.875 MB
-slots, and the app uses 50% of one of them.
+app slots: NimBLE plus this service is about 219 KB (app 1,806,123 → 2,030,667
+bytes, measured on a clean build). The board therefore builds with
+`partitions-epaper-8mb.csv`, two 3.875 MB slots, and the app uses 1,984 KB of one
+of them (50% free).
 
 Changing the partition table needs **one USB flash**; an over-the-air update
 cannot move partitions. `nvs` keeps its offset, so settings and paired phones
@@ -224,11 +225,22 @@ relay still sends `done`.
 
 ### 9.2 Conduit for iOS
 
-Conduit has no BLE central: it reaches Hermes over the network, so it cannot read
-this service today, and the relay is the piece that does. Nothing else is missing
-— the relay posts to `POST /notes/v1`, which is the same pipeline (STT, Obsidian
-note, Conduit card) a Wi-Fi upload feeds, so a note taken over Bluetooth shows up
-in Conduit exactly like any other.
+Conduit reaches Hermes over the network and has no BLE central in this repository,
+so it cannot read the GATT service itself: the relay page is the piece that
+reaches the radio. What Conduit *does* keep is everything after that — the relay
+posts to `POST /notes/v1`, the same endpoint and the same HMAC a Wi-Fi upload uses
+([voice-note ingestion](voice-note-ingestion.md)), so a note taken over Bluetooth
+is transcribed and filed under `~/obsidian/Notes/voice notes` exactly like a note
+that went out over Wi-Fi. Nothing on the Hermes side is configured for Bluetooth,
+and nothing in Conduit has to be reconfigured.
+
+**Why not a Shortcut alone.** An iOS Shortcut cannot open a Bluetooth LE
+connection to a GATT service, and it has no HMAC-SHA256 action with which to sign
+`POST /notes/v1`; a Shortcut therefore cannot be the receiver, and the board's key
+must not be pasted into one that posts unsigned. The bridge is the Bluefy page in
+§9.1: it holds the key on the phone (in `localStorage`, like the device holds it),
+pulls the note over BLE, and signs the upload. A Shortcut can still be chained
+after it, but it would only be doing what the page already did.
 
 If a BLE receiver is added to Conduit later, the device needs no change: the
 contract is this document — connect to `dc5300a0-…`, subscribe to `dc5300a2-…`,
@@ -273,18 +285,48 @@ Host, without hardware: `ctest -R hg_epaper_ble_tests` (the protocol) and
 `node --test web/ble-note-relay/selftest.mjs` (the phone's half against the
 firmware's own packets).
 
+Host, without hardware, through the real endpoint (what the checkout can prove
+today; the radio is still the hardware pass's):
+
+```sh
+# 1. Frame a real recording the way the device would, and post it exactly as the
+#    relay page does — reassembled from the packets, signed with the board key.
+cmake --build build/host --target hg_ble_capture
+./build/host/hg_ble_capture tests/fixtures/voice-notes/sample.wav > /tmp/note.txt
+# 2. Point relay.mjs's postNote at a notes endpoint (a scratch inbox and vault, or
+#    the live one) and check the answer: 202 (or 200 for a repeat) and
+#    shaMatchesHeader true.
+```
+
+Done on 2026-11-20 against `plugin/notes_ingest.py` running with a scratch inbox
+and a scratch vault, with a real enrolled device key: 165,794 B in 970 blocks,
+every block CRC checked, the header's SHA-256 equal to the rebuilt audio's,
+`202 accepted`, the note transcribed and written as markdown into the vault, and
+the job moved from `notes/inbox/` to `notes/done/`. What that does not cover is
+the BLE link itself — pairing, the MTU, a dropped connection.
+
 ## 11. What has been verified, and what has not
 
 Verified:
 
-- The firmware builds for the board with Bluetooth on: 2,024,672 B in the 3,875 KB
-  slot, 49.8% free (`pio run -e waveshare-epaper-154`).
+- The firmware builds clean for the board with Bluetooth on: 2,030,667 B (1,984 KB)
+  in the 3,968 KB `ota_0` slot, 50% free, 86,492 B static RAM (26.4%), 107 s from
+  an empty `.pio/build` (`pio run -e waveshare-epaper-154`).
 - The partition table in the built image is the 8 MB one (ota_0 at `0x20000`,
-  ota_1 at `0x400000`, 3,968 KB each).
+  ota_1 at `0x400000`, 3,968 KB each), read back out of `partitions.bin`.
 - The protocol: 16 host cases (windows, resume, rewind, per-block CRC, empty
   notes, no card, unknown id, timeouts, MTU refusal, `done` moving the note).
 - The phone's half, against a packet stream captured from the firmware itself:
-  11 cases, including the SHA-256 of the rebuilt WAV.
+  11 cases, including the SHA-256 of the rebuilt WAV. Re-running
+  `hg_ble_capture` reproduces the committed fixture byte for byte, so the two
+  halves are tested against the code in the tree, not a stale dump.
+- The upload half end to end: a real 3.4 s WAV (165,794 B) framed by the firmware's
+  own protocol into 970 blocks, reassembled and signed by `relay.mjs`, posted to
+  the plugin's real `POST /notes/v1` — `202 accepted`, transcribed, markdown in the
+  vault, job in `notes/done/` (steps in §10).
+- The whole repository test set on this tree: `ctest` 7/7 (core, board, e-paper
+  mode, BLE protocol, notes, tailnet), `node --test web/ble-note-relay/selftest.mjs`
+  11/11, `npm test` in `site/` 32/32.
 
 Not yet verified (needs the board and a phone, and is what the QA pass is for):
 

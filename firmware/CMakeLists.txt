@@ -81,10 +81,14 @@ if(HG_BUILD_TESTS)
   # A dev tool, not a test: POSTs the exact bytes the firmware uploads to a
   # live endpoint (see the header comment), so the device's half of the
   # contract can be checked against plugin/notes_ingest.py from any host.
-  add_executable(hg_notes_request tools/notes_request.cpp)
-  target_include_directories(hg_notes_request PRIVATE esp32/main)
-  target_link_libraries(hg_notes_request PRIVATE hg_core)
-  target_sources(hg_notes_request PRIVATE esp32/main/notes/notes_queue.cpp)
+  # It speaks BSD sockets (arpa/inet.h), so like the card-tree tests it is a
+  # Unix-host tool: Windows builds skip it.
+  if(NOT MSVC)
+    add_executable(hg_notes_request tools/notes_request.cpp)
+    target_include_directories(hg_notes_request PRIVATE esp32/main)
+    target_link_libraries(hg_notes_request PRIVATE hg_core)
+    target_sources(hg_notes_request PRIVATE esp32/main/notes/notes_queue.cpp)
+  endif()
 
   # TailTiny's Noise channel AEAD (esp32/components/TAILTINY.md) against RFC 8439. The vendored
   # C uses GCC builtins, so not on MSVC.

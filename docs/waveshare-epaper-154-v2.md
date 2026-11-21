@@ -1,8 +1,21 @@
 # Waveshare ESP32-S3-ePaper-1.54 v2 × Hermes Gadget — integration spec
 
-Status: research + design, no code yet. Written for the fork that implements the
-"AI assistant / voice note taker" device (live assistant mode + offline SD voice notes
-summarized into Obsidian).
+Status: as built. The device this describes is now **notes-only**: `pio run -e
+notes` builds the app the board runs, and the Hermes live assistant is not in that
+image. Read this document with that in mind:
+
+| Sections | Still true for the shipped device |
+|---|---|
+| 2 hardware, 5 audio, 7 the card and `note.json`, 8 the upload contract, 9 power, 10 toolchain and flash | yes |
+| 3 transports, 4 the Hermes endpoint and protocol | **no**: the live WebSocket link is not in the notes image. It still describes the Hermes app (`-e waveshare-epaper-154`), which this repository keeps buildable as a regression check |
+| 6.1 the key map | rewritten for the notes app (`main/notes_app/ui_keys.cpp`), with the Hermes app's map kept as history |
+| 11 the module breakdown | history: the first implementation. What was built is [the plan](notes-only-firmware-plan.md) and [as built](notes-ui-implementation.md) |
+
+The device's own guide is [using the notes device](notes-device.md).
+
+Original note: research + design. Written for the fork that implements the
+"AI assistant / voice note taker" device (live assistant mode + offline SD voice
+notes summarized into Obsidian).
 
 Board: Waveshare **ESP32-S3-ePaper-1.54**, hardware revision **v2** (module
 ESP32-S3-PICO-1-N8R8), 8 MB flash + 8 MB octal PSRAM, 1.54″ 200×200 e-paper,
@@ -273,40 +286,42 @@ touch glass, so round 3 deleted the probe, the reset pulse, the strip and the
 touch input path instead of keeping them for a SKU this unit is not. The boot
 is shorter for it and nothing waits 100 ms for a controller that is not there.
 
-### 6.1 Button map (port-level: `modes/home_keys.cpp`, `modes/mode_router.cpp`)
+### 6.1 Button map (the notes app: `main/notes_app/ui_keys.cpp`)
 
-Two keys, three jobs. Because holding PWR is the latch's own power-off, a
-settings *chord* is impossible on this board (it was documented, and never
-fired on a desk): the menu is the held BOOT, and what the hold does is decided
-by the screen. `hgp::route_key()` (`modes/home_keys.cpp`) is the whole rule and
-is host-tested in `firmware/tests/test_epaper_keys.cpp`.
+Two keys, one job each, and no chord. Because holding PWR is the latch's own
+power-off, a two-key chord is impossible on this board: the menu is the held
+BOOT, and what the hold does is decided by the screen. `notesui::press()` in
+`firmware/esp32/main/notes_app/ui_keys.cpp` is the whole rule, one press in and
+one `Action` out, and it is host-tested in `firmware/tests/test_notes_ui.cpp`
+(8 cases).
 
-| Physical | Logical | Behaviour |
-|---|---|---|
-| PWR (GPIO 18) | **Talk** | A short press toggles a live turn (`App::talk_toggle`): the first starts one, the next ends it, whatever the talk-key setting says. Held, it is the latch's own power-off and acts nothing in the firmware. |
-| BOOT (GPIO 0) | **Note** | A tap starts or stops an offline voice note (`NotesMode::on_note_button`). Never talks. It is also the flash-download and deep-sleep wake pin. |
-| BOOT held ≥ 2 s | **Hold** | Fires once at the threshold, while the key is still down, and does the one thing there is to do with what is on the glass: drops the note being recorded (`NotesMode::on_cancel_button`), closes the settings menu, cancels a live turn or an overlay, or — on the home screen — **opens the settings menu** (`App::open_settings`). |
-| BOOT tap, menu open | **Next** | Moves to the next settings item (the core's CANCEL). |
-| PWR tap, menu open | **Change** | Changes the selected item (the core's TALK). |
-| Green LED (GPIO3) | feedback | Solid while a note is recording, slow blink while uploading (port-owned GPIO, no SDK concept needed). |
-While a phone asks to pair the two keys answer it: **BOOT allows**, **PWR refuses**, and 20 s of neither refuses (`App::kPhoneAskMs`). The ask face prints the address and both keys. The auto-home timer is suspended while it shows.
+| Physical | Home | Recording | Menu | Note list | A note | Delete? | Playing | Pairing ask |
+|---|---|---|---|---|---|---|---|---|
+| **PWR** tap (GPIO 18) | power off | power off | select | open the note | select | keep | power off | refuse |
+| **BOOT** tap (GPIO 0) | start a note | stop and keep | next row | next note | next action | keep | stop | allow |
+| **BOOT** held ≥ 2 s | open the menu | discard the note | back to Home | back to the menu | back to the list | **delete** | stop | nothing |
+| **PWR** held ≥ 2.5 s | the hardware latch: power off, from any screen | | | | | | | |
 
+The pairing ask takes the two keys as its answer: **BOOT allows, PWR refuses, and
+20 s of neither refuses** (`port_ble`'s ask, drawn by the notes app's Pairing
+screen). BOOT is also the flash-download pin, and the green LED (GPIO 3) is
+port-owned feedback: solid while recording, slow blink while uploading.
 
-On the boards that do use the core talk key (not this one: its PWR and BOOT are the
-router's, see 6.1), the 2 s long press arms only when the press found something to cancel — a turn
-in flight, or an overlay/question on the screen. There a press from the idle screen
-starts the recording and holding it is talk for as long as it lasts, so
-hold-to-talk keeps working past 2 s (an arming press that started a fresh
-recording would cut every utterance at the threshold). Implemented in
-`main/talk_hold.hpp` (`hold_cancel_armed` / `TalkHold`), driven from
-`port_buttons.cpp`, threshold in `ButtonConfig.talk_hold_cancel_ms`; the state
-machine is covered by the host tests in `firmware/tests/test_epaper_live_mode.cpp`,
-the gesture itself is a hardware-validation item. This board's own long press is
-BOOT held 2 s, which is `ModeRouter`'s and never talks: it cancels what is open,
-and on the home screen it opens the menu.
+The screens themselves, their copy and their refresh rules are in
+[sect. 6.2](#62-screen-rules-for-e-paper-this-is-where-an-lcd-port-would-mislead-you),
+[the notes UI spec](notes-ui-spec.md) and [as built](notes-ui-implementation.md).
+None of the core's UI is in this image: no settings menu, clock, hero, mascot,
+cards, choices or auto-paging.
 
-Settings UI, clock, hero/mascot, cards, `display.choices`, auto-paging replies all
-come from the core unchanged.
+#### The Hermes app's map, for the regression build
+
+`waveshare-epaper-154` still builds the Hermes core app, and on *that* build the
+keys are the router's (`modes/home_keys.cpp`, host-tested in
+`tests/test_epaper_keys.cpp`): a PWR tap toggled a live turn (`App::talk_toggle`),
+a BOOT tap started or stopped an offline note (`NotesMode::on_note_button`), BOOT
+held 2 s cancelled what was open or opened the settings menu, a BOOT tap in the
+menu was next and a PWR tap changed the item. That map is the one being retired;
+it is documented here only so the two builds are not confused.
 
 ### 6.2 Screen rules for e-paper (this is where an LCD port would mislead you)
 
@@ -627,12 +642,19 @@ else at boot.
 ### 10.2 Build
 
 ```bash
-cd hermes-gadget-sdk
+git clone https://github.com/jakepi-bot/esp32-note-device.git
 python -m pip install -e ".[dev]"
-cd firmware/esp32
-pio run -e waveshare-epaper-154                 # or:
-idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/waveshare-epaper-154/sdkconfig.defaults" build
+cd esp32-note-device/firmware/esp32
+pio run -e notes                                # the device's firmware
+pio run -e waveshare-epaper-154                 # the Hermes app, kept buildable
+# or, with ESP-IDF directly:
+idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/waveshare-epaper-154/sdkconfig.defaults" -DHG_APP=notes build
 ```
+
+Both environments share the board, the partition table and the sdkconfig; the
+`notes` one passes `-DHG_APP=notes`, which picks the notes source list in
+`main/CMakeLists.txt`. Measured on 2026-11-21: notes 1,464,175 B (36.0% of the
+3.87 MB slot) and 63,136 B static RAM, the Hermes app 2,052,223 B and 87,948 B.
 
 ### 10.3 Flash (USB-C)
 
@@ -652,7 +674,8 @@ idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/waveshare-epaper-154/sdk
 3. Flash:
 
    ```bash
-   pio run -e waveshare-epaper-154 -t upload      # or:
+   pio run -e notes -t upload                     # the device
+   pio run -e waveshare-epaper-154 -t upload      # the Hermes app; or:
    idf.py -D SDKCONFIG_DEFAULTS="…" flash monitor # 115200 baud console
    ```
 
@@ -664,23 +687,30 @@ idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/waveshare-epaper-154/sdk
 5. **Toolchain path**: PlatformIO's install/flash of esptool and the IDF toolchain
    downloads at first build (internet needed once). Checksums/versions are what
    PlatformIO resolves — record them in the flash log of the validation task.
-6. OTA afterwards: `hermes gadget update` (`ota.offer` over the open socket; app
-   image slot 1.9 MB — `tools/check_size.py` fails the build under 10 % free;
-   `caps.ota.max_size` reported by the device; 5-min probation rollback requires the
-   new image to reach Hermes).
+6. OTA afterwards: not available in the notes app. `hermes gadget update` pushes
+   an app image over the Hermes app's live link (`ota.offer`; app image slot 3.87 MB
+   under the 8 MB table — `tools/check_size.py` fails the build under 10% free; the
+   5-min probation rollback requires the new image to reach Hermes), and the notes
+   app has neither the link nor an HTTP manifest pull yet, so it is updated over
+   USB. `port_ota` is still compiled into both images and already handles the
+   partition, the image and board checks and the rollback marker.
 
-### 10.4 Pairing
+### 10.4 Pairing and identity
 
-First boot shows a pairing code (device id `hg-…`); on the host:
+The notes app never pairs with Hermes. Its identity is a 32-byte key generated on
+first boot, stored as `device_key` in `nvs`, and answered as the device id
+`hg-…`; that pair is what the note endpoint enrolls (the plugin's `devices.json`,
+or `serve.py enroll` in the Compose stack), and every upload carries
+`X-Gadget-Mac` as `HMAC-SHA256(key, canonical)`. Nothing is approved on the host.
 
-```bash
-hermes -p <profile-with-gadget> gadget pair      # or: hermes pairing approve gadget <CODE>
-```
+The phone pairing is the other pairing, and it is between the phone and the board
+(BOOT allows, PWR refuses, passkey confirmed on both); see
+[ble-note-sync](ble-note-sync.md) and the phone guides.
 
-`hermes gadget info` prints the device URL (`ws://192.168.1.20:8765/gadget` on this
-host). A USB-enumerated board is a serial port (`/dev/ttyACM0` on Linux, `COM5` on
-Windows; `pio device list` shows it), and that port is what `hermes-gadget console`,
-`provision` and `diag` take as `--port`.
+A USB-enumerated board is a serial port (`/dev/ttyACM0` on Linux, `COM5` on
+Windows; `pio device list` shows it), which is what `pio device monitor`,
+`hermes-gadget console` and `diag` take as `--port`. The console's `about` and
+`sd` answer the identity and the card without a host.
 
 ---
 

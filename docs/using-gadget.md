@@ -1,9 +1,11 @@
 # Talk, type, and interrupt
 
-Wait for the device to show Ready. On the LCD board, BOOT is TALK and PLUS is CANCEL. On the round touchscreen, hold the screen to talk and swipe down to cancel. On
-the e-paper notes device, PWR talks and BOOT records a note: it has no touch
-glass and no home button, and it goes home by itself after a minute with no
-input.
+> **The e-paper device this repository ships does not talk.** Its firmware is
+> notes-only: PWR is power, BOOT records, and there is no turn, no reply and no
+> speech on the device at all. Controls, screens and the menu are in
+> [Using the notes device](notes-device.md). The rest of this page describes the
+> Hermes Gadget SDK's other boards, whose core is still in the tree and still
+> builds (`-e waveshare-epaper-154`).
 
 | What you want to do | Control |
 |---|---|

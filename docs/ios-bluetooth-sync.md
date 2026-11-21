@@ -17,6 +17,7 @@ a basement.
   [deploy/bluetooth-sync](../deploy/bluetooth-sync/README.md).
 - The wire format and the device's rules: [ble-note-sync.md](ble-note-sync.md).
 - The GATT table: [protocol.md § Note sync](protocol.md#note-sync-voice-notes-off-the-card).
+- An Android phone instead: [android-bluetooth-sync.md](android-bluetooth-sync.md).
 
 ## What you need
 
@@ -31,10 +32,10 @@ a basement.
 
 Pairing is a conversation between three things, and the gadget has the last word.
 
-1. **Open the pairing window on the gadget.** Hold **BOOT** for two seconds to open the settings menu, then **Phone app** → the
-   window opens and the screen says *Pair a phone*. (Over the USB console:
-   `phone pair`. Or, from another Bluetooth phone, the device settings menu.)
-   The window lasts two minutes; if it closes, open it again.
+1. **Open the pairing window on the gadget.** Hold **BOOT** for two seconds to
+   open the menu, BOOT-tap down to **Phone**, and PWR-tap to select. The screen
+   shows the pairing screen and the window lasts two minutes; if it closes, open
+   it again. (Over the USB console: `phone pair`.)
 
 2. **Load the relay page on the iPhone.** In Bluefy open
    `https://<your-server-name>:8443/` — for example `https://hermes.local:8443/`.
@@ -51,7 +52,7 @@ Pairing is a conversation between three things, and the gadget has the last word
 5. **Allow it on the gadget.** The screen changes to *Allow this phone?* and
    shows the phone's Bluetooth address. **Tap BOOT** to allow it. **PWR** refuses
    (**tap PWR**. A 2 s hold is not an answer). Over the console the same two
-   answers are `phone allow` and `phone deny`, and 20 seconds with neither
+   answers are `phone allow` and `phone refuse`, and 20 seconds with neither
    refuses the phone on its own.
 
 6. **Confirm the code.** The gadget now shows a six-digit code, and iOS shows
@@ -63,8 +64,9 @@ Pairing is a conversation between three things, and the gadget has the last word
    them.
 
 Pairing is kept: from then on the gadget advertises for that phone and step 5–6
-do not repeat. Up to three phones can be paired; the fourth forgets the oldest.
-`phone forget` on the console removes them all and drops a connected phone.
+do not repeat. Up to three phones are remembered; a fourth pushes out the oldest.
+This build has no un-pair command: remove the entry in iOS Bluetooth settings and
+pair again from step 1.
 
 ### Why the gadget asks first
 
@@ -107,7 +109,7 @@ until the server has the note.
   finds it without opening the pairing window again.
 - Open the page, tap Connect, send. No code, no tapping Allow.
 - If the phone forgets the gadget ("Forget This Device" in iOS Bluetooth
-  settings) or the gadget runs `phone forget`, pair again from step 1.
+  settings), pair again from step 1.
 
 ## Troubleshooting
 
@@ -139,7 +141,7 @@ the controller only runs inside a short window:
 | Window | How long | Why |
 |---|---|---|
 | Boot | 2 minutes | a phone that is looking finds a new device |
-| Pairing (`phone pair`, Settings → Phone app) | 2 minutes | the pairing exchange and its passkey |
+| Pairing (menu → Phone, or `phone pair`) | 2 minutes | the pairing exchange and its passkey |
 | After a note is recorded | 3 minutes | a phone can take the note over BLE |
 | Notes still waiting, no phone | 30 s every 5 minutes | keeps trying without holding the radio up |
 | `phone wake` over the console | 1 minute | look for me now |

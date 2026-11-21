@@ -1,5 +1,13 @@
 # Audit: ESP32 note device firmware
 
+> **Snapshot of the Hermes app, 0.6.0.** The device now runs the notes-only
+> firmware (`pio run -e notes`), which has no `hg::App`, live link, OTA or agent
+> UI; the OTA rollback described below is not armed in it. This audit is kept
+> because the hardware findings (panel, codec, card, keys, power, the missing RTC)
+> are unaffected, and because the Hermes app still builds from this tree as a
+> regression check. The device's own guide is
+> [Using the notes device](notes-device.md).
+
 Snapshot taken 2026-11-20 from the firmware as flashed on the physical board
 (firmware version 0.6.0, build `d6300f7`), read against
 `firmware/esp32/` and `firmware/core/` at the commit this file was added with.

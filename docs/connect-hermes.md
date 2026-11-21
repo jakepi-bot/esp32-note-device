@@ -1,5 +1,13 @@
 # Connect Hermes
 
+> **On the notes device, Hermes does one job: transcription.** The device never
+> connects to the gateway, never pairs with it, and never speaks a reply. What it
+> needs from the host is the note endpoint the plugin serves on port 8766 - step 1
+> below. Steps 2 to 4 (connecting a device, approving it, enabling speech) are for
+> the Hermes Gadget SDK's other boards and the simulator, whose core is still in
+> this tree. The device's own setup is in [Using the notes device](notes-device.md)
+> and [the README](../README.md#the-host-still-runs-hermes-for-transcription).
+
 Use your own Hermes Agent for replies, tools, memory, and skills. Run the commands below on the computer where Hermes is installed.
 
 ## 1. Install the plugin
@@ -21,7 +29,15 @@ To see the scan result before you install, clone the repository and run `hermes 
 
 ## 2. Connect a device
 
-For hardware, follow [Set up a board](setup-board.md) and use the installer link from `hermes gadget info`.
+**The notes device skips this step.** It has no live link to configure: it posts to
+`http://<hermes-host>:8766/notes/v1`, and the host is taken from the address given
+on its own Wi-Fi setup page (`ws://hermes.local:8765/gadget` and
+`http://hermes.local:8766/notes/v1` are the same host), or from `notes_url` on its
+console. Confirm the endpoint answers with `curl -s
+http://localhost:8766/health` on the host.
+
+For the SDK's other boards, follow [Set up a board](setup-board.md) and use the
+installer link from `hermes gadget info`.
 
 For a simulator on the same computer as Hermes:
 
@@ -35,7 +51,9 @@ If that port is already in use, [change the gadget port](hermes-integration.md#c
 
 ## 3. Approve the device
 
-When the device shows a pairing code, run:
+**SDK boards only.** The notes device is never approved: its identity is the key it generates on first
+boot, which the note endpoint enrolls. On the SDK's boards, when the device shows a
+pairing code, run:
 
 ```bash
 hermes gadget pair
@@ -49,7 +67,12 @@ Approve devices in the default profile. If you turn on profile switching, an app
 
 ## 4. Enable speech
 
-Configure speech recognition and text-to-speech with `hermes tools` and `hermes setup`, or the `stt:` and `tts:` sections of Hermes `config.yaml`. Non-WAV speech output also needs `ffmpeg` on the Hermes computer.
+**SDK boards only.** The notes device plays no reply, so it needs no `tts:`. It does need **speech
+recognition** on the host (`stt:` in `config.yaml`), because the notes pipeline
+transcribes each uploaded note with it; with no `stt:` the plugin stages the audio
+and writes the note untranscribed.
+
+On the SDK's boards, configure speech recognition and text-to-speech with `hermes tools` and `hermes setup`, or the `stt:` and `tts:` sections of Hermes `config.yaml`. Non-WAV speech output also needs `ffmpeg` on the Hermes computer.
 
 For the desktop simulator, install its [audio extra](desktop.md#4-try-audio) and enable `--live-audio`. Board microphones and speakers use their firmware drivers.
 

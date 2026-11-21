@@ -4,7 +4,7 @@ Thanks for helping. Bug reports from real boards, new board support, fixes and d
 
 ## Reporting a bug
 
-Open an [issue](https://github.com/Adolanium/hermes-gadget-sdk/issues/new/choose) and say which board, firmware version and Hermes version you're on. For anything on a device, attach a diagnostics report:
+Open an [issue](https://github.com/jakepi-bot/esp32-note-device/issues/new/choose) and say which board, firmware version and Hermes version you're on. For anything on a device, attach a diagnostics report:
 
 ```bash
 hermes-gadget diag --port COM5      # or /dev/ttyACM0, /dev/cu.usbmodem101, ...
@@ -12,7 +12,7 @@ hermes-gadget diag --port COM5      # or /dev/ttyACM0, /dev/cu.usbmodem101, ...
 
 A gadget connected to Hermes can send it without a cable: run `hermes gadget diag <name>` on the Hermes computer, or use **Save diagnostics report** in the dashboard's Gadgets tab. That file also has the gateway's recent Gadget log.
 
-The [browser installer](https://adolanium.github.io/hermes-gadget-sdk/) saves the same report without Python: **Troubleshooting** → **Something else** → **Save a diagnostics report**. If the installer was involved, the **Technical details** log at the bottom of its page helps too.
+The [browser installer](https://jakepi-bot.github.io/esp32-note-device/) saves the same report without Python: **Troubleshooting** → **Something else** → **Save a diagnostics report**. If the installer was involved, the **Technical details** log at the bottom of its page helps too.
 
 Security problems go through [SECURITY.md](SECURITY.md) instead, not a public issue.
 

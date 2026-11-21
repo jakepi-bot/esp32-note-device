@@ -430,7 +430,7 @@ def test_release_notes_pin_the_plugin_to_the_release_commit(project, tmp_path):
     notes = tmp_path / "notes.md"
     commit = "75b8a689bce3925d46de5c256f53d343ae6b876f"
     assert _package(project, "--all", "--out", str(tmp_path / "dist"), "--notes", str(notes), "--commit", commit) == 0
-    assert (f"hermes plugins install https://github.com/Adolanium/hermes-gadget-sdk.git#plugin --ref {commit} --enable"
+    assert (f"hermes plugins install {package_release.GIT_URL}#plugin --ref {commit} --enable"
             in notes.read_text(encoding="utf-8"))
 
 

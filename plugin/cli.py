@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 # The browser installer: flashes a board over USB and gives it Wi-Fi and this Hermes's address.
-INSTALLER_URL = "https://adolanium.github.io/hermes-gadget-sdk/"
+INSTALLER_URL = "https://jakepi-bot.github.io/esp32-note-device/"
 PAIR_TIMEOUT_S = 300
 DIAG_TIMEOUT_S = 20.0  # the gateway's poll, then up to 8 s for the device
 INTERPRET_TIMEOUT_S = 10.0

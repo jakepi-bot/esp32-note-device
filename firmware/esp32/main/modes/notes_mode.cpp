@@ -498,6 +498,14 @@ NoteStatus NotesModeImpl::status() const {
       s.phase = NoteStatus::Phase::Idle;
       break;
   }
+  // A phone taking a note over Bluetooth is the queue uploading over another
+  // link: the resting screen shows the same busy state it shows for a POST
+  // (notes_screen.cpp), so a transfer is visible without a second widget.
+  const auto& ble = ble_sync_.progress();
+  if (ble.active && s.phase == NoteStatus::Phase::Idle) {
+    s.phase = NoteStatus::Phase::Uploading;
+    s.uploading_bytes = ble.total;
+  }
   // A failure that still stands is the state, whatever the mode is doing now.
   if (s.phase == NoteStatus::Phase::Idle && !s.error.empty()) s.phase = NoteStatus::Phase::Error;
   return s;

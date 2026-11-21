@@ -66,13 +66,41 @@ package_release: hermes-gadget-waveshare-epaper-154-0.6.0.bin (1892 KB),
 `SHA256SUMS`, and the license bundle — the same artifact set `.github/workflows/firmware.yml`
 uploads.
 
+## Second verification: Bluetooth on, 8 MB partitions
+
+Recorded 2026-11-20 after the [Bluetooth note sync](ble-note-sync.md) landed, from
+the same tree at commit `61281a9` (working tree clean apart from that card's own
+follow-up), with `.pio/build/waveshare-epaper-154` deleted first so nothing was
+reused:
+
+```
+Flash: [=====     ]  50.0% (used 2030667 bytes from 4063232 bytes)
+check_size: app 1984 KB in the 3968 KB 'ota_0' slot, 50% free
+======================== [SUCCESS] Took 106.64 seconds ========================
+```
+
+| Fact | Value |
+|---|---|
+| Result | success from an empty build directory |
+| Wall clock | 107 s (warm package cache) |
+| App image | 2 030 667 B (1984 KB) in the 3 968 KB `ota_0` slot — **50% free** |
+| Growth over the Wi-Fi-only build | +224 544 B (~219 KB), the NimBLE stack and the note-sync service |
+| RAM | 86 492 B static (26.4% of 320 KB) |
+| Partition table in the image | `partitions-epaper-8mb.csv`: ota_0 `0x20000`, ota_1 `0x400000`, 3 968 KB each (read back from `partitions.bin`) |
+
+`firmware/tests/test_epaper_ble_sync.cpp` (16 cases) and
+`web/ble-note-relay/selftest.mjs` (11 cases) pass on that tree; re-running
+`hg_ble_capture` reproduces the committed relay fixture byte for byte.
+
 ## Consequence worth knowing before adding features
 
-The app is at **88.9% of its OTA slot with 11% free (~180 KB)**. Enabling the
-NimBLE Bluetooth stack, or adding a font/greyscale waveform, has to fit in that
-margin or the `ota_0` partition has to grow (which means revisiting
-`partitions.csv`, both slots, and the OTA flow). Check the size line after any
-firmware change; `tools/check_size.py` fails the build when a slot overflows.
+The board now builds against `partitions-epaper-8mb.csv`, not `partitions.csv`,
+because NimBLE plus the note sync does not fit the shared 1.9 MB slots (it needed
+~219 KB where ~180 KB was free). Under the 8 MB table the app is at **50% of its
+`ota_0` slot**. Changing that table needs one USB flash — an OTA update cannot
+move partitions — and `nvs` keeps its offset, so settings and paired phones
+survive it. Check the size line after any firmware change;
+`tools/check_size.py` fails the build when a slot drops under 10% free.
 
 ## What CI runs
 

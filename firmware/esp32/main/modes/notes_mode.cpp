@@ -119,9 +119,16 @@ void NotesModeImpl::begin(hg::App& app, UiState& ui, DeviceConfig& config, const
   }
 
   // The microphone keeps feeding the live path; a recording in progress takes
-  // its copy here, on the same task.
-  app.on_mic_samples_extra = [this](const int16_t* samples, size_t count) {
-    if (capture_.active()) capture_.feed(samples, count);
+  // its copy here. This task only copies it into the writer's ring: the card
+  // write happens on the writer's own task, so a slow write (this card has
+  // taken 1.5 s for one 640-byte chunk) no longer stalls the app loop, the
+  // console's replies or the microphone's event queue.
+  const bool writer_ready = writer_.begin();
+  writer_.bind(&capture_);
+  app.on_mic_samples_extra = [this, writer_ready](const int16_t* samples, size_t count) {
+    if (!capture_.active()) return;
+    if (writer_ready) writer_.push(samples, count);
+    else capture_.feed(samples, count);  // no task for the ring: write here
   };
 
   // A note id has to stay unique across power cycles: the counter is NVS-backed
@@ -189,6 +196,7 @@ void NotesModeImpl::start_note(uint32_t now) {
     if (auto status = power_->read(); status && status->battery_mv) meta.battery_mv = *status->battery_mv;
   }
   meta_ = std::move(meta);
+  writer_.reset_dropped();
   mode_ = Mode::Recording;
   rec_started_ms_ = now;
   stop_error_.clear();
@@ -202,6 +210,10 @@ void NotesModeImpl::finish_note(uint32_t now, const char* why) {
   if (mode_ != Mode::Recording) return;
   if (mic_) mic_->stop();
   mode_ = Mode::Idle;
+  // The microphone is stopped, so nothing new is pushed: wait for the writer
+  // to have the rest on the card before the file is finished. 30 s is the
+  // card's own pathological worst case, not a normal wait.
+  if (!writer_.drain(30000)) ESP_LOGW(TAG, "note %s: the card did not take the rest of the audio in 30 s", meta_.note_id.c_str());
   std::string error;
   const bool capped = capture_.full();
   if (!capture_.finish(meta_, error)) {
@@ -226,6 +238,13 @@ void NotesModeImpl::finish_note(uint32_t now, const char* why) {
   }
   ESP_LOGI(TAG, "note %s stored: %s, %u s%s", meta_.note_id.c_str(), notes::human_bytes(meta_.bytes).c_str(),
            static_cast<unsigned>(meta_.duration_s), capped ? " (cap reached)" : "");
+  if (const uint32_t lost = writer_.dropped_bytes()) {
+    // The ring overflowed: the card could not keep up with the microphone. The
+    // audio is continuous up to the first hole and the note still plays.
+    ESP_LOGW(TAG, "note %s lost %u bytes of audio: the card could not keep up", meta_.note_id.c_str(),
+             static_cast<unsigned>(lost));
+    writer_.discard();
+  }
   refresh_counts(true);
   ui_->set(UiPhase::Idle);
   publish_status();
@@ -233,6 +252,7 @@ void NotesModeImpl::finish_note(uint32_t now, const char* why) {
 
 void NotesModeImpl::abort_note(const char* why) {
   if (mic_) mic_->stop();
+  writer_.discard();
   if (capture_.active()) capture_.abort();
   mode_ = Mode::Idle;
   ESP_LOGW(TAG, "recording dropped: %s", why);

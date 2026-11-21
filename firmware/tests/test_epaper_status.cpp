@@ -381,3 +381,55 @@ TEST("a long note is marked as cut, not silently cut") {
   CHECK(status_fit("short", layout::kNoteCols) == "short");
   CHECK(drawable_text(cut));
 }
+
+TEST("the pairing screen is paper like the resting face, and says what the core said") {
+  StatusInputs in = online_inputs();
+  const PairingCopy copy{"Pairing code 123456", "On the Hermes host, run: hermes-gadget pair --code 123456",
+                         "waiting for approval", "123456"};
+  const StatusView v = compose_pairing(in, copy);
+  // The code is the hero: it is what the user carries to the host.
+  CHECK(v.hero == std::string("123456"));
+  // Every word the core had is still on the screen, in the model's language.
+  CHECK(v.note.find(copy.headline) == 0);
+  CHECK(v.note.find(copy.detail) != std::string::npos);
+  CHECK(v.note.find(copy.hint) != std::string::npos);
+  CHECK(!v.error);
+  CHECK(drawable_text(v.note));
+
+  // Paper, not the core UI's white-on-black: the panel must not invert between
+  // this screen and the resting one (the hardware QA measured 94% ink there
+  // against 11% here; anything near 94% is the old frame).
+  static uint16_t fb[kW * kH];
+  std::memset(fb, 0, sizeof fb);
+  hg::Canvas c(fb, kW, kH, false);
+  render_status(c, v);
+  int ink = 0;
+  for (int i = 0; i < kW * kH; ++i) {
+    if (fb[i] == hg::rgb565(0, 0, 0)) ++ink;
+  }
+  CHECK(ink > 600);           // it is not a blank panel
+  CHECK(ink < 12000);         // and it is a paper screen, not a black one
+
+  // No code yet: the hero is the state, and the words still come through.
+  const PairingCopy waiting{"Pair this device", "Asking Hermes for a pairing code...", "waiting for approval", ""};
+  const StatusView w = compose_pairing(in, waiting);
+  CHECK(w.hero == std::string("PAIRING"));
+  CHECK(w.note.find("Pair this device") == 0);
+  CHECK(drawable_text(w.note));
+}
+
+TEST("a newest note without a stamp prints no clock at all") {
+  // The clock is set (the masthead shows it) and the note is not: it was
+  // recorded before the first time sync. The line may not claim a time, and it
+  // may not claim there is no clock either (the hardware QA's D5).
+  StatusInputs in = online_inputs();
+  in.has_newest = true;
+  in.newest_valid = false;
+  in.newest_duration_s = 2;
+  in.stored = 1;
+  const StatusView v = compose_status(in);
+  CHECK(v.note.find("no clock") == std::string::npos);
+  CHECK(v.note.find("00:00") == std::string::npos);
+  CHECK(v.note == std::string("Newest note, 2 s. Tap PWR to add another."));
+  CHECK(drawable_text(v.note));
+}

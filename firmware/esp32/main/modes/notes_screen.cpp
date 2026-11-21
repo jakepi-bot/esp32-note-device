@@ -27,7 +27,10 @@ constexpr bool kHasBluetooth = false;
 #endif
 
 // The screens this one replaces: the device is resting, and none of them wants
-// a key, a turn or a prompt. Everything else (boot, connecting, pairing,
+// a key, a turn or a prompt. Pairing is here because the core UI draws it
+// white-on-black, which made the panel flash inverted at the very moment a
+// phone was paired (the hardware QA's D3); its words are the core model's own,
+// so the screen only changes the paper. Everything else (boot, connecting,
 // listening, thinking, responding, the clock face, settings, prompts, errors,
 // OTA) stays with the core UI.
 bool rests_on(hg::Screen s) {
@@ -36,7 +39,8 @@ bool rests_on(hg::Screen s) {
     case hg::Screen::Offline:
     case hg::Screen::LowBattery:
     case hg::Screen::Charging:
-    case hg::Screen::Charged: return true;
+    case hg::Screen::Charged:
+    case hg::Screen::Pairing: return true;
     default: return false;
   }
 }
@@ -113,7 +117,11 @@ bool NotesScreen::render(const hg::UiModel& model, bool force) {
   // next update must be a full one (a partial leaves the old screen ghosted).
   const bool repaint = force || !owned_;
   if (repaint) display_->request_full_refresh();
-  if (!screen_.draw(*display_, compose_status(gather()), repaint)) return false;
+  const StatusInputs in = gather();
+  const StatusView view = model.screen == hg::Screen::Pairing
+                              ? compose_pairing(in, PairingCopy{model.headline, model.detail, model.hint, model.code})
+                              : compose_status(in);
+  if (!screen_.draw(*display_, view, repaint)) return false;
   owned_ = true;
   return true;
 }

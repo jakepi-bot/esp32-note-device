@@ -116,6 +116,19 @@ struct StatusInputs {
 // one number that does not fit in the masthead.
 StatusView compose_status(const StatusInputs& in);
 
+// The core UI's pairing screen, drawn in this screen's paper style instead of
+// the core's white-on-black (the hardware QA's D3: the panel flashed inverted
+// exactly when a phone was paired). The words are the core model's own, already
+// in the device's language, so nothing is retranslated here; the code sits at
+// hero scale because it is what the user types into the host.
+struct PairingCopy {
+  std::string headline;  // "Pairing code 123456" / "Pair this device"
+  std::string detail;    // "On the Hermes host, run: ..."
+  std::string hint;      // "waiting for approval"
+  std::string code;      // the digits alone, when the core has them
+};
+StatusView compose_pairing(const StatusInputs& in, const PairingCopy& copy);
+
 // `s` in at most `cols` display columns, ending in ".." when it had to cut.
 // (The font has no ellipsis glyph: U+2026 draws as '?'.)
 std::string status_fit(std::string_view s, int cols);

@@ -6,6 +6,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/queue.h"
 #if CONFIG_HG_BOARD_CARDPUTER_ADV
 #include "hg/protocol.hpp"
@@ -27,6 +28,11 @@ bool firmware_frame(EventType type, const void* data, size_t len) {
 constexpr unsigned kDepth = 96;
 std::atomic<uint32_t> dropped{0};  // posts that found the queue full or no memory
 std::atomic<uint32_t> peak{0};     // the most events waiting at once
+// A full queue during a note recording sheds microphone chunks at the
+// microphone's own rate (77 a second): one log line each flooded the console
+// and, with SD logging on, the card. One line a second carries the burst.
+std::atomic<uint32_t> pending_drops{0};
+std::atomic<int64_t> last_drop_log_ms{0};
 
 }  // namespace
 
@@ -80,7 +86,13 @@ bool post(EventType type, const void* data, size_t len, uint32_t generation, Con
 #if CONFIG_HG_BOARD_CARDPUTER_ADV
     if (firmware) xSemaphoreGive(firmware_slots);
 #endif
-    ESP_LOGW(TAG, "event queue full; dropping event %d", static_cast<int>(type));
+    pending_drops.fetch_add(1, std::memory_order_relaxed);
+    const int64_t now = esp_timer_get_time() / 1000;
+    int64_t last = last_drop_log_ms.load(std::memory_order_relaxed);
+    if (now - last >= 1000 && last_drop_log_ms.compare_exchange_strong(last, now, std::memory_order_relaxed)) {
+      ESP_LOGW(TAG, "event queue full; dropped %u events in the last second (last was event %d)",
+               static_cast<unsigned>(pending_drops.exchange(0, std::memory_order_relaxed)), static_cast<int>(type));
+    }
     free(ev.data);
     dropped.fetch_add(1, std::memory_order_relaxed);
     return false;

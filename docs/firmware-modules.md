@@ -159,6 +159,7 @@ wired in `main.cpp` with the board's microphone, battery and card slot
 | `main/notes/notes_queue.*` | note ids, `note.json`, multipart framing, response rules |
 | `main/notes/notes_store.*` | the card tree (`pending/`, `sent/`, `failed/`), its atomic commits and its deletes |
 | `main/notes/notes_capture.*` | microphone → `recording.wav` |
+| `main/notes/capture_writer.*` | the recording's ring and its own task: the card write never runs on the app loop |
 | `main/notes/notes_uploader.*` | one pending note → one POST, sliced across loop passes |
 | `main/notes/notes_ble.*` | the Bluetooth transfer protocol: commands in, packets out, no radio |
 

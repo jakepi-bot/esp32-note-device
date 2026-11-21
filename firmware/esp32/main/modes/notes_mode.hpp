@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 
+#include "notes/capture_writer.hpp"
 #include "notes/notes_ble.hpp"
 #include "notes/notes_capture.hpp"
 #include "notes/notes_queue.hpp"
@@ -137,6 +138,9 @@ class NotesModeImpl final : public NotesMode {
 
   notes::Store store_{"/sdcard/notes"};
   notes::Capture capture_;
+  // The capture's audio reaches the card from its own task (notes/capture_writer.hpp):
+  // this task only copies the microphone chunk into its ring.
+  CaptureWriter writer_;
   notes::Uploader uploader_;
   notes::Meta meta_;  // the note being recorded, or the one being uploaded
 

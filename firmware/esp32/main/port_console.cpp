@@ -8,6 +8,7 @@
 
 #include "esp_console.h"
 #include "esp_log.h"
+#include "freertos/task.h"
 #include "hg/console_args.hpp"
 #include "sdkconfig.h"
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
@@ -41,9 +42,21 @@ int run(int argc, char** argv) {
   // The app task answers on its own time. The slot outlives this function
   // if that answer comes after the wait below gave up.
   ConsoleRequest* req = ConsoleRequest::create();
-  const bool posted = events::post(EventType::Console, line.data(), line.size(), 0, req);
+  // The queue drops an event when it is full, so try for a moment rather than
+  // reporting a device that is merely busy drawing a panel or writing a card:
+  // the app task is never blocked for long, but its queue can be full of
+  // microphone chunks for a second.
+  bool posted = false;
+  for (int attempt = 0; attempt < 20 && !posted; ++attempt) {
+    if (attempt) vTaskDelay(pdMS_TO_TICKS(100));
+    posted = events::post(EventType::Console, line.data(), line.size(), 0, req);
+  }
   if (!posted) req->release();  // nobody will answer: drop the app task's share too
-  if (posted && req->wait(3000)) {
+  // A card write plus a full panel refresh can hold the app task for seconds
+  // (the e-paper QA measured `notes stop` at 3.0 s on a bad SD write), so the
+  // reply is waited for well past that: `@error device busy` means the device
+  // really did not answer, not that it was drawing.
+  if (posted && req->wait(10000)) {
     std::printf("%s\n", req->reply().c_str());
   } else if (is_diag && argc == 1) {
     // A stuck app task or a full event queue is what a hang report most needs to

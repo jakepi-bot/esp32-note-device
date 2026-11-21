@@ -12,11 +12,13 @@ core, the host tests, the Hermes plugin, and the documentation still build here,
 so upstream fixes can be merged instead of re-ported. The target board to build
 and flash is `waveshare-epaper-154`.
 
-Status (2026-11-20): **release 0.7.0**. The firmware builds from a clean checkout,
+Status (2026-11-20): **release 0.7.1**. The firmware builds from a clean checkout,
 is flashed on a physical board, and has been validated end to end over Wi-Fi —
 pairing to a live Hermes hub, live assistant turns (record → stream → reply →
 spoken reply), and offline voice notes recorded to the card and uploaded to the
-notes endpoint. 0.7.0 adds the redesigned [e-paper status screen](#display-what-the-panel-shows)
+notes endpoint. 0.7.1 fixes the three defects the 0.7.0 hardware QA recorded as
+known limitations (`notes stop` during a panel refresh, the pairing screen's
+inverted polarity, the newest-note line before a first clock sync); 0.7.0 added the redesigned [e-paper status screen](#display-what-the-panel-shows)
 and [Bluetooth note sync](#bluetooth-note-sync-from-an-iphone-conduit).
 Bluetooth now initialises on the board — the GATT table registers, the `phone` and
 `notes ble` commands answer, and pairing opens advertising — but no phone has
@@ -32,12 +34,12 @@ the README's build steps are for changing the firmware, not for running it.
 
 | File | Use it for |
 |---|---|
-| `hermes-gadget-waveshare-epaper-154-0.7.0.bin` | the whole flash image, from `0x0`: a fresh board, or the one USB flash the Bluetooth build needs |
-| `hermes-gadget-waveshare-epaper-154-0.7.0-app.bin` | `hermes gadget update <device> <file>`, an over-the-air update of a board already on 0.7.0's partition layout |
+| `hermes-gadget-waveshare-epaper-154-0.7.1.bin` | the whole flash image, from `0x0`: a fresh board, or the one USB flash the Bluetooth build needs |
+| `hermes-gadget-waveshare-epaper-154-0.7.1-app.bin` | `hermes gadget update <device> <file>`, an over-the-air update of a board already on 0.7.x's partition layout |
 | `SHA256SUMS`, `manifest.json` | checksums; what the browser installer reads |
 
 ```bash
-esptool.py --chip esp32s3 write_flash 0x0 hermes-gadget-waveshare-epaper-154-0.7.0.bin
+esptool.py --chip esp32s3 write_flash 0x0 hermes-gadget-waveshare-epaper-154-0.7.1.bin
 ```
 
 Writing the full image erases the settings area (NVS), so a device flashed this way
@@ -132,8 +134,10 @@ and the hardware validation used.
    ```
 
    Until `timezone` is set the clock is UTC, and until `battery_estimate` is set
-   the footer reads `NO BATTERY` even with a pack fitted (the board has no fuel
-   gauge; the percentage is a voltage estimate). See
+   the footer reads `NO BATTERY` even with a pack fitted: `set battery_estimate
+   liion` is exactly what turns that footer into a percentage once a single-cell
+   pack is fitted (the board has no fuel gauge; the percentage is a voltage
+   estimate). See
    [battery indicator settings](docs/using-gadget.md#device-settings-and-hardware-checks)
    and QA report [D2](docs/qa-report-0588422.md).
 
@@ -271,14 +275,6 @@ from a packet stream captured from the firmware, SHA-256 included, and post a re
 
 ## Known limitations
 
-- `notes stop` during a full panel refresh answers `@error device busy` and drops
-  events while the refresh runs (D4). The recording is unaffected; the command has to
-  be repeated.
-- The pairing screen draws white-on-black while the resting screen is black-on-white
-  (D3), so the panel flashes inverted when a phone is paired.
-- A note recorded in the first seconds after reset shows `0s, no clock yet` on the
-  newest-note line (D5); the stamp is replaced at upload, so the vault note is dated
-  correctly.
 - An iPhone has not paired with this build, and a real note has not travelled over
   Bluetooth yet. See the list above and [§11](docs/ble-note-sync.md#11-what-has-been-verified-and-what-has-not).
 - The relay page has to be hosted over HTTPS (or opened from the phone's Files app);

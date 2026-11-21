@@ -246,7 +246,11 @@ StatusView compose_status(const StatusInputs& in) {
       std::snprintf(note, sizeof note, "Newest note %02d:%02d, %s. Tap PWR to add another.", in.newest_hour,
                     in.newest_minute, duration(in.newest_duration_s).c_str());
     else
-      std::snprintf(note, sizeof note, "Newest note %s, no clock yet. Tap PWR to add another.",
+      // The note's own stamp is not a time (it was recorded before the clock
+      // was ever set), so the line prints only what is true: the length. It
+      // used to say "no clock yet", which contradicted a clock already on the
+      // masthead (the hardware QA's D5).
+      std::snprintf(note, sizeof note, "Newest note, %s. Tap PWR to add another.",
                     duration(in.newest_duration_s).c_str());
     v.note = note;
     v.foot = footer(v, in.pending                  ? std::to_string(in.pending) + " QUEUED"
@@ -256,6 +260,26 @@ StatusView compose_status(const StatusInputs& in) {
   }
   v.hero = status_fit(v.hero, kHeroCols);
   v.foot = status_fit(v.foot, kFootCols);
+  return v;
+}
+
+StatusView compose_pairing(const StatusInputs& in, const PairingCopy& copy) {
+  // The chrome (clock, links, cell) is the resting face's; only the words are
+  // the pairing screen's.
+  StatusView v = compose_status(in);
+  v.error = false;
+  v.hero = copy.code.empty() ? std::string("PAIRING") : copy.code;
+  std::string note;
+  // One paragraph: the renderer wraps by column, and the 5x7 font has no
+  // glyph for a newline.
+  for (const std::string* line : {&copy.headline, &copy.detail, &copy.hint}) {
+    if (line->empty()) continue;
+    if (!note.empty()) note += ' ';
+    note += *line;
+  }
+  if (note.empty()) note = "Waiting for the Hermes host.";
+  v.note = note;
+  v.hero = status_fit(v.hero, layout::kHeroCols);
   return v;
 }
 

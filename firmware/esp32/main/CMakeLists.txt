@@ -49,7 +49,9 @@ if(CONFIG_HG_BOARD_WS_EPAPER_154)
         "notes/notes_ble.cpp"
         "notes/notes_store.cpp"
         "notes/notes_capture.cpp"
-        "notes/notes_uploader.cpp")
+        "notes/capture_writer.cpp"
+        "notes/notes_uploader.cpp"
+        "notes/sd_mount.cpp")
 endif()
 # The RGB panel driver (ST7701 over an I/O expander) only builds for the chips
 # with an LCD_CAM RGB scanout: port_rgb.cpp is compiled out on every other

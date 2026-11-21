@@ -55,3 +55,10 @@ jobs:
         run: cmake --build build/host --config Release --parallel
       - name: Test
         run: ctest --test-dir build/host -C Release --output-on-failure
+      # The phone half of the Bluetooth note sync, against a packet stream the
+      # firmware itself printed (web/ble-note-relay/test/transfer-fixture.txt).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Relay protocol tests
+        run: node --test web/ble-note-relay/selftest.mjs

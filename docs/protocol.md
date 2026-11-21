@@ -522,6 +522,30 @@ Boards whose firmware enables Bluetooth (none yet; see [hardware validation](har
 - **Replies:** the reply text arrives in notifications sized to the link's MTU, ending with a single `0x00` byte. `@error device busy` means the device didn't answer within 3 s.
 - **State:** `status` includes `"phone": {"paired": 1, "connected": true, "pairing": false}` on these boards; `phone` alone returns the same object as `@phone {...}`.
 
+### Note sync (voice notes off the card)
+
+The same Bluetooth stack carries a second service, which hands the notes waiting
+in `pending/` to a phone when the device has no Wi-Fi at all. It is not a console
+channel: it has its own wire format, its own commands and its own rules, and it
+never changes a note until the phone says Hermes has it. The full contract is
+[Bluetooth note sync](ble-note-sync.md); this is the GATT table.
+
+| | UUID | Properties |
+|---|---|---|
+| Service | `dc5300a0-7a2a-400f-b8f6-e87185576192` | Primary |
+| Control | `dc5300a1-7a2a-400f-b8f6-e87185576192` | Write with response; needs the same encrypted, authenticated link as Command |
+| Data | `dc5300a2-7a2a-400f-b8f6-e87185576192` | Notify: one packet per notification, packed to the link's MTU; needs a subscription |
+
+- **Commands** (control, one UTF-8 line each): `hello`, `list`, `get <note_id>`
+  or `get next`, `resume <note_id> <offset>`, `ack <offset>`, `done <note_id>`,
+  `stop`.
+- **Packets** (data): `H` header line fragments, `B` an audio block (offset,
+  CRC-32, bytes), `L` and `E` answer and error line fragments, `K` the end of a
+  note.
+- **MTU:** the link must negotiate at least 64 bytes, or every command is
+  refused with `Bluetooth MTU too small`. iOS negotiates about 185; the device
+  asks for 247.
+
 ## Versioning
 
 - `proto` is a single integer, and a server rejects versions it does not speak.

@@ -160,6 +160,7 @@ wired in `main.cpp` with the board's microphone, battery and card slot
 | `main/notes/notes_store.*` | the card tree (`pending/`, `sent/`, `failed/`), its atomic commits and its deletes |
 | `main/notes/notes_capture.*` | microphone → `recording.wav` |
 | `main/notes/notes_uploader.*` | one pending note → one POST, sliced across loop passes |
+| `main/notes/notes_ble.*` | the Bluetooth transfer protocol: commands in, packets out, no radio |
 
 Durability: the audio is written as `recording.wav.part` and renamed first,
 then `note.json` goes to `note.json.part`, is flushed, and is renamed.
@@ -192,8 +193,17 @@ id and the `idempotency_key` never move — the server derives the job from the 
 note still answers `200 duplicate`. A note that already carries a plausible stamp
 is sent untouched: its stored bytes have to stay put for the dedupe.
 
+Bluetooth: when the board has it on, `NotesIo::ble` (port `NoteLink`) gives the
+mode a second way out of the queue, for a device with no network at all. The mode
+owns the state machine — `step_ble()` runs first in `tick()`, drains the commands
+the radio queued, feeds them to `notes::BleSync` and hands its packets back to the
+link — so all card reads stay on the app task beside the recording. The mode
+implements `notes::BleSource` over the store (`CardBleSource`): pending notes only,
+sequential reads, and `done <id>` is what moves a note to `sent/`. The protocol and
+its failure rules are [Bluetooth note sync](ble-note-sync.md).
+
 The console drives it headlessly: `notes status`, `record`, `stop`, `sync`,
-`list`, `mount`, `format`, `prune`, `delete`. `screen` prints the panel image
+`ble`, `list`, `mount`, `format`, `prune`, `delete`. `screen` prints the panel image
 (1 bit per pixel, hex), which is how the display is checked without a camera.
 `notes status` also counts the pending notes whose id says 1970 (`… | 2
 undated`): they are the ones waiting for their first upload to give them a date.

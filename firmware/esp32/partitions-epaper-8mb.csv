@@ -1,0 +1,20 @@
+# Two 3.875 MB app slots for the boards with 8 MB of flash (the Waveshare
+# ESP32-S3-ePaper-1.54 V2 has 8 MB). The default partitions.csv keeps the 1.9 MB
+# slots every other board uses; Bluetooth needs more than those leave free
+# (NimBLE is about 200 KB of code, and the note sync adds its own service), and
+# an image that does not fit cannot be updated over the air at all.
+#
+# The layout is the default one with each slot grown in place: nvs, otadata,
+# phy_init and coredump keep their offsets, and ota_0 starts where it always
+# did, so a device flashed with this table and a device flashed with the 4 MB
+# one still boot the same way. Flashing it over USB is a one-time step; files
+# under `/sdcard` are untouched, and NVS (settings, paired phones) survives
+# because its partition does not move.
+#
+# Name,   Type, SubType, Offset,   Size
+nvs,      data, nvs,     0x9000,   0x6000
+otadata,  data, ota,     0xf000,   0x2000
+phy_init, data, phy,     0x11000,  0x1000
+coredump, data, coredump,0x12000,  0xE000
+ota_0,    app,  ota_0,   0x20000,  0x3e0000
+ota_1,    app,  ota_1,   0x400000, 0x3e0000

@@ -980,6 +980,27 @@ class PhoneLink {
   void set_name(const std::string& name);
 };
 
+// The phone's note sync over the same Bluetooth stack (port_ble.cpp;
+// docs/ble-note-sync.md): a second GATT service beside the console bridge that
+// hands the notes on the card to a paired phone when there is no Wi-Fi at all.
+// The protocol is notes::BleSync; this class is only the radio side of it, and
+// is polled from the app task like the notes mode. Frames go out as
+// notifications at the link's negotiated MTU.
+class NoteLink {
+ public:
+  // The build has NimBLE and the note service is registered.
+  bool available() const;
+  bool connected() const;
+  // ATT MTU of the current connection (23 when there is none).
+  uint16_t mtu() const;
+  // The next command line the phone wrote to the control characteristic.
+  bool poll_command(std::string& out);
+  // One packet for the data characteristic. False when the link has no room
+  // this pass (NimBLE is out of buffers), the phone has not subscribed, or
+  // there is no connection: the caller keeps the packet for the next tick.
+  bool send_frame(const uint8_t* data, size_t len);
+};
+
 // The device's own Tailscale node (TailTiny, components/tailtiny), for a Hermes host
 // that only listens on its tailnet address (docs/tailnet.md). Call everything from
 // the app task. It reports to hg::App::on_tunnel; TailTiny's own tasks never call

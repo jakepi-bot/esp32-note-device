@@ -22,7 +22,7 @@ Hardware detail and assumptions are in [docs/audit.md](docs/audit.md).
 
 | Part | Detail |
 |---|---|
-| SoC | ESP32-S3-PICO-1-N8R8, 8 MB flash, 8 MB octal PSRAM, Wi-Fi 2.4 GHz, BLE 5 capable |
+| SoC | ESP32-S3-PICO-1-N8R8, 8 MB flash, 8 MB octal PSRAM, Wi-Fi 2.4 GHz, BLE 5 capable (Bluetooth is on: phone link + note sync) |
 | Display | 1.54" 200×200 1-bit e-paper, SSD1681-class controller, SPI, partial refresh |
 | Audio | ES8311 codec (DAC + ADC on one I2S bus) → NS4150B amplifier → 8 Ω speaker, analog mic |
 | Storage | microSD, 1-bit SDIO, FAT32 |
@@ -105,8 +105,15 @@ and the hardware validation used.
 - Note ids are `<device_id>-<YYYYMMDDTHHMMSS>-<seq>`, which sorts by time and
   doubles as the idempotency key (retries are byte-identical).
 
+- With no network at all, a phone can take a note over **Bluetooth LE** instead:
+  a paired phone lists the pending notes, pulls one with resumable, CRC-checked
+  blocks, posts it to Hermes, and only then does the device move it to `sent/`.
+  The phone side is a Web Bluetooth page in `web/ble-note-relay/` (Chrome, Edge,
+  or Bluefy on iOS). [How it works](docs/ble-note-sync.md).
+
 Wire contract: [docs/voice-note-ingestion.md](docs/voice-note-ingestion.md).
 Card layout and uploader design: [docs/waveshare-epaper-154-v2.md](docs/waveshare-epaper-154-v2.md) §7.
+Bluetooth service, protocol and the phone workflow: [docs/ble-note-sync.md](docs/ble-note-sync.md).
 
 Console commands (type `help` for everything else):
 
@@ -116,6 +123,7 @@ Console commands (type `help` for everything else):
 | `notes record` / `notes stop` | record from the console |
 | `notes sync` | force an upload pass |
 | `notes list` | ids per state |
+| `notes ble` | Bluetooth link, MTU, the note in flight, why the last one stopped |
 | `notes delete <id>` / `notes delete --failed` | remove notes |
 | `notes mount` / `notes format` | remount or format the card |
 | `screen` | hex dump of the 1-bit panel image (proves what is shown) |

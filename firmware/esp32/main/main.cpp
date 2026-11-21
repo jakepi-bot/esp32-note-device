@@ -93,6 +93,7 @@ hgp::CoreS3Board g_cores3;
 hgp::StickS3Board g_sticks3;
 hgp::StopWatchBoard g_stopwatch;
 hgp::PhoneLink g_phone;
+hgp::NoteLink g_notelink;
 hgp::TailnetLink g_tailnet;
 #endif
 hgp::Buttons g_buttons;
@@ -772,6 +773,7 @@ extern "C" void app_main(void) {
   notes_io.mic = hal.mic;
   notes_io.power = hal.power;
   notes_io.sd = board.sd;
+  notes_io.ble = &g_notelink;  // the phone syncs the queue over Bluetooth when there is no Wi-Fi
   g_notes.begin(app, g_ui, g_config, notes_io);
   // The status screen owns the panel while the device rests (ready, offline, a
   // battery face). The core UI keeps every screen that wants a key, a turn or a

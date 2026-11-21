@@ -64,6 +64,19 @@ if(HG_BUILD_TESTS)
   target_sources(hg_epaper_mode_tests PRIVATE esp32/main/modes/live_state.cpp esp32/main/modes/status_screen.cpp)
   add_test(NAME hg_epaper_mode_tests COMMAND hg_epaper_mode_tests)
 
+  # The Bluetooth note sync's protocol (esp32/main/notes/notes_ble.*): packets,
+  # windows, resumption and the errors, driven by a phone written in the test.
+  # notes_ble.cpp is plain C++ with no radio and no file system, so this runs
+  # everywhere the other host tests do.
+  add_executable(hg_epaper_ble_tests tests/main.cpp tests/test_epaper_ble_sync.cpp)
+  target_include_directories(hg_epaper_ble_tests PRIVATE esp32/main)
+  target_link_libraries(hg_epaper_ble_tests PRIVATE hg_core)
+  if(MSVC)
+    target_compile_options(hg_epaper_ble_tests PRIVATE /utf-8)
+  endif()
+  target_sources(hg_epaper_ble_tests PRIVATE esp32/main/notes/notes_ble.cpp)
+  add_test(NAME hg_epaper_ble_tests COMMAND hg_epaper_ble_tests)
+
   # The offline notes' portable half: note ids, note.json, the multipart
   # request, the response rules, and the card tree against a temp directory.
   # notes_store and notes_capture do their file work with POSIX open/rename and
@@ -89,6 +102,14 @@ if(HG_BUILD_TESTS)
     target_link_libraries(hg_notes_request PRIVATE hg_core)
     target_sources(hg_notes_request PRIVATE esp32/main/notes/notes_queue.cpp)
   endif()
+
+  # A dev tool, not a test: dumps the exact Bluetooth packet stream one note
+  # produces, so web/ble-note-relay can be checked against the firmware's bytes
+  # (web/ble-note-relay/selftest.mjs reads the fixture it prints).
+  add_executable(hg_ble_capture tools/ble_sync_capture.cpp)
+  target_include_directories(hg_ble_capture PRIVATE esp32/main)
+  target_link_libraries(hg_ble_capture PRIVATE hg_core)
+  target_sources(hg_ble_capture PRIVATE esp32/main/notes/notes_ble.cpp)
 
   # TailTiny's Noise channel AEAD (esp32/components/TAILTINY.md) against RFC 8439. The vendored
   # C uses GCC builtins, so not on MSVC.

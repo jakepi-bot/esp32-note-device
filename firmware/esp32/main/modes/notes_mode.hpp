@@ -12,9 +12,11 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 
+#include "notes/notes_ble.hpp"
 #include "notes/notes_capture.hpp"
 #include "notes/notes_queue.hpp"
 #include "notes/notes_store.hpp"
@@ -70,6 +72,7 @@ struct NotesIo {
   hg::AudioIn* mic = nullptr;
   hg::Power* power = nullptr;  // battery, for note.json (optional)
   SdConfig sd;                 // the card slot
+  NoteLink* ble = nullptr;     // the phone's note sync, on boards with Bluetooth
 };
 
 class NotesMode {
@@ -109,6 +112,7 @@ class NotesModeImpl final : public NotesMode {
   void abort_note(const char* why);
   void begin_sync(uint32_t now_ms);
   void step_sync(uint32_t now_ms);
+  void step_ble(uint32_t now_ms);
   void refresh_counts(bool publish);
   void refresh_newest();
   void publish_status();
@@ -116,6 +120,14 @@ class NotesModeImpl final : public NotesMode {
   std::string notes_url() const;
   bool clock_ok() const;
   std::string status_line() const;
+
+  // Bluetooth note sync (notes/notes_ble.hpp): the phone serves itself from the
+  // card when there is no Wi-Fi. `ble_` is null on a build without it.
+  NoteLink* ble_ = nullptr;
+  notes::BleSync ble_sync_;
+  std::unique_ptr<notes::BleSource> ble_source_;
+  bool ble_linked_ = false;   // the app task has seen the current connection
+  unsigned ble_pct_ = 100;    // last progress shown on the screen
 
   hg::App* app_ = nullptr;
   UiState* ui_ = nullptr;

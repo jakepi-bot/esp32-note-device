@@ -36,6 +36,71 @@ std::string trim(std::string_view text) {
   return std::string(text.substr(b, e - b));
 }
 
+// The card as the Bluetooth transfer reads it: pending/ notes only, sequential
+// reads, and a note moves to sent/ only when the phone says Hermes took it
+// (notes_ble.hpp). The mode owns the Store and the card check, so this is the
+// adapter between the two and holds no state of its own beyond the open file.
+class CardBleSource final : public notes::BleSource {
+ public:
+  CardBleSource(notes::Store& store, std::function<bool()> card_ready)
+      : store_(store), card_ready_(std::move(card_ready)) {}
+  ~CardBleSource() override { close(); }
+
+  bool ready() const override { return card_ready_(); }
+
+  std::vector<notes::BleNote> pending() override {
+    std::vector<notes::BleNote> out;
+    if (!ready()) return out;
+    for (const auto& id : store_.pending_ids()) {
+      notes::Meta meta;
+      if (!store_.read_meta(id, meta)) continue;  // a folder without note.json: not a note
+      out.push_back({meta.note_id, meta.bytes, meta.duration_s, meta.sha256, meta.recorded_at});
+    }
+    return out;
+  }
+
+  bool open(std::string_view id, notes::BleNote& out) override {
+    close();
+    if (!ready()) return false;
+    // Only a *pending* note is offered: a note in sent/ is already home, and
+    // one in failed/ was rejected by the server and needs a person.
+    notes::NoteState state = notes::NoteState::Pending;
+    if (!store_.locate(id, state) || state != notes::NoteState::Pending) return false;
+    notes::Meta meta;
+    if (!store_.read_meta(id, meta)) return false;
+    file_ = std::fopen(store_.audio_path(notes::NoteState::Pending, id).c_str(), "rb");
+    if (!file_) return false;
+    out = {meta.note_id, meta.bytes, meta.duration_s, meta.sha256, meta.recorded_at};
+    return true;
+  }
+
+  size_t read(uint8_t* out, size_t max) override { return file_ ? std::fread(out, 1, max, file_) : 0; }
+
+  bool seek(uint32_t offset) override {
+    return file_ && std::fseek(file_, static_cast<long>(offset), SEEK_SET) == 0;
+  }
+
+  void close() override {
+    if (file_) std::fclose(file_);
+    file_ = nullptr;
+  }
+
+  bool mark_synced(std::string_view id) override {
+    notes::NoteState state = notes::NoteState::Pending;
+    if (!store_.locate(id, state)) return false;
+    if (state == notes::NoteState::Sent) return true;  // a repeated `done`: already home
+    if (state != notes::NoteState::Pending) return false;
+    if (!store_.move(id, notes::NoteState::Pending, notes::NoteState::Sent)) return false;
+    store_.prune_sent();
+    return true;
+  }
+
+ private:
+  notes::Store& store_;
+  std::function<bool()> card_ready_;
+  FILE* file_ = nullptr;
+};
+
 }  // namespace
 
 void NotesModeImpl::begin(hg::App& app, UiState& ui, DeviceConfig& config, const NotesIo& io) {
@@ -45,6 +110,13 @@ void NotesModeImpl::begin(hg::App& app, UiState& ui, DeviceConfig& config, const
   mic_ = io.mic;
   power_ = io.power;
   sd_mount::configure(io.sd);
+
+  // The phone's note sync, when the board has Bluetooth (notes_ble.hpp).
+  ble_ = io.ble;
+  if (ble_ && ble_->available()) {
+    ble_source_ = std::make_unique<CardBleSource>(store_, [this] { return sd_ready_; });
+    ble_sync_.begin(ble_source_.get());
+  }
 
   // The microphone keeps feeding the live path; a recording in progress takes
   // its copy here, on the same task.
@@ -167,6 +239,9 @@ void NotesModeImpl::abort_note(const char* why) {
 }
 
 void NotesModeImpl::tick(uint32_t now) {
+  // The phone first: a transfer is driven by the commands the link queued, and
+  // it runs beside whatever else the board is doing (recording included).
+  step_ble(now);
   if (mode_ == Mode::Recording) {
     ui_->set(UiPhase::Recording);
     // The cap, or a live turn that needs the microphone back.
@@ -290,6 +365,57 @@ void NotesModeImpl::step_sync(uint32_t now) {
   publish_status();
 }
 
+void NotesModeImpl::step_ble(uint32_t now) {
+  if (!ble_ || !ble_source_ || !ble_->available()) return;
+
+  if (!ble_->connected()) {
+    if (ble_linked_) {
+      ble_linked_ = false;
+      // The note stays in pending/: the phone resumes from the offset it
+      // acknowledged, so a dropped link costs the bytes in flight, nothing more.
+      ble_sync_.disconnected();
+      refresh_counts(true);
+      publish_status();
+    }
+    return;
+  }
+  ble_linked_ = true;
+  ble_sync_.set_mtu(ble_->mtu());
+
+  std::string line;
+  while (ble_->poll_command(line)) {
+    // A phone asking for notes is also the cue to probe the card again: the
+    // counts scan runs every 5 s and the phone may be quicker than that.
+    if (!sd_ready_) ensure_sd();
+    ESP_LOGI(TAG, "phone: %s", line.c_str());
+    ble_sync_.command(line, now);
+  }
+  ble_sync_.tick(now, [this](const uint8_t* data, size_t len) { return ble_->send_frame(data, len); });
+
+  if (ble_sync_.took_delivery()) {
+    // The phone stored the note and Hermes took it: the queue is one shorter.
+    ESP_LOGI(TAG, "note delivered over Bluetooth");
+    retry_waiting_ = false;
+    refresh_counts(true);
+    publish_status();
+  }
+
+  const auto& progress = ble_sync_.progress();
+  if (progress.active) {
+    // An e-paper panel flashes on every repaint: once per 10% is enough to see
+    // it move, and the status line keeps the counts otherwise.
+    if (progress.pct / 10 != ble_pct_ / 10) {
+      ble_pct_ = progress.pct;
+      publish_status();
+    }
+  } else if (ble_pct_ != 100) {
+    ble_pct_ = 100;
+    if (!progress.error.empty()) ESP_LOGW(TAG, "Bluetooth transfer stopped: %s", progress.error.c_str());
+    refresh_counts(true);
+    publish_status();
+  }
+}
+
 void NotesModeImpl::refresh_counts(bool publish) {
   if (!ensure_sd()) {
     if (publish) publish_status();
@@ -380,6 +506,13 @@ NoteStatus NotesModeImpl::status() const {
 std::string NotesModeImpl::status_line() const {
   if (mode_ == Mode::Recording) return {};  // the Recording phase owns the line
   char buf[64];
+  // A phone taking a note over Bluetooth owns the line while it does: that is
+  // the one thing on this screen a person has to be able to watch.
+  const auto& ble = ble_sync_.progress();
+  if (ble.active) {
+    std::snprintf(buf, sizeof(buf), "Bluetooth %u%%", static_cast<unsigned>(ble.pct));
+    return buf;
+  }
   if (counts_.failed)
     std::snprintf(buf, sizeof(buf), "%u pending, %u failed", static_cast<unsigned>(counts_.pending),
                   static_cast<unsigned>(counts_.failed));
@@ -392,7 +525,11 @@ std::string NotesModeImpl::status_line() const {
     std::snprintf(buf, sizeof(buf), "No SD card");
   else
     std::snprintf(buf, sizeof(buf), "No notes");
-  return buf;
+  // A phone that is connected and idle is worth a mark: it means the notes on
+  // the card can leave over Bluetooth without a network.
+  std::string line = buf;
+  if (ble_ && ble_->available() && ble_->connected()) line += " · BT";
+  return line;
 }
 
 void NotesModeImpl::publish_status() {
@@ -447,14 +584,22 @@ std::string NotesModeImpl::console(std::string_view args) {
 
   if (cmd.empty() || cmd == "status") {
     char buf[320];
+    const auto& ble = ble_sync_.progress();
+    std::string ble_state = "off";
+    if (ble_ && ble_->available()) {
+      char b[40];
+      if (ble.active) std::snprintf(b, sizeof(b), "%u%%", static_cast<unsigned>(ble.pct));
+      else std::snprintf(b, sizeof(b), "%s", ble_ && ble_->connected() ? "idle" : "away");
+      ble_state = b;
+    }
     std::snprintf(buf, sizeof(buf),
-                  "@notes stored %u pending %u sent %u failed %u | card %s | %s | mode %s | %u B queued",
+                  "@notes stored %u pending %u sent %u failed %u | card %s | %s | mode %s | %u B queued | ble %s",
                   static_cast<unsigned>(counts_.stored), static_cast<unsigned>(counts_.pending),
                   static_cast<unsigned>(counts_.synced), static_cast<unsigned>(counts_.failed),
                   sd_ready_ ? "ok" : (sd_error_.empty() ? "down" : sd_error_.c_str()),
                   notes_url().empty() ? "no url" : notes_url().c_str(),
                   mode_ == Mode::Recording ? "recording" : mode_ == Mode::Syncing ? "syncing" : "idle",
-                  static_cast<unsigned>(queued_bytes_));
+                  static_cast<unsigned>(queued_bytes_), ble_state.c_str());
     std::string out = buf;
     // Notes recorded before the board ever had a clock (their id says 1970):
     // they upload stamped with the time they are finally sent, and this is how
@@ -556,12 +701,28 @@ std::string NotesModeImpl::console(std::string_view args) {
     }
     return "@ok formatting the card";
   }
+  if (cmd == "ble") {
+    if (!ble_ || !ble_->available()) return "@error this build has no Bluetooth note sync";
+    const auto& p = ble_sync_.progress();
+    char buf[240];
+    if (p.active)
+      std::snprintf(buf, sizeof(buf), "@notes ble link %s mtu %u transfer %s %u%% (%u/%u B)",
+                    ble_->connected() ? "up" : "down", static_cast<unsigned>(ble_->mtu()), p.id.c_str(),
+                    static_cast<unsigned>(p.pct), static_cast<unsigned>(p.sent), static_cast<unsigned>(p.total));
+    else if (!p.error.empty())
+      std::snprintf(buf, sizeof(buf), "@notes ble link %s mtu %u idle, last transfer stopped: %s",
+                    ble_->connected() ? "up" : "down", static_cast<unsigned>(ble_->mtu()), p.error.c_str());
+    else
+      std::snprintf(buf, sizeof(buf), "@notes ble link %s mtu %u idle",
+                    ble_->connected() ? "up" : "down", static_cast<unsigned>(ble_->mtu()));
+    return buf;
+  }
   if (cmd == "prune") {
     const uint32_t removed = store_.prune_sent();
     refresh_counts(true);
     return "@ok pruned " + std::to_string(removed);
   }
-  return "@error usage: notes [status | record | stop | sync | list | mount | format | prune | delete]";
+  return "@error usage: notes [status | record | stop | sync | ble | list | mount | format | prune | delete]";
 }
 
 }  // namespace hgp

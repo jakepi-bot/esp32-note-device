@@ -39,7 +39,7 @@ Configuration under `platforms.gadget.extra`:
 |---|---|---|
 | `notes_port` | `8766` | Upload port; `0` (or `null`) disables the endpoint |
 | `notes_host` | the hub's `host` | Bind address |
-| `notes_obsidian_dir` | `~/obsidian/Notes/voice notes` | Where notes are written (created with its parents on first write) |
+| `notes_obsidian_dir` | `~/obsidian/voice notes` | Where notes are written (created on first write) |
 
 Environment: `GADGET_ACCESS_TOKEN` (or `extra.access_token`) — when set, every
 request must also carry it in `X-Gadget-Token`, compared in constant time.
@@ -154,8 +154,8 @@ HTTP/1.1 202 Accepted
 
 Then `curl -s http://127.0.0.1:8766/health` shows the job in `inbox`, and once
 the pipeline has run (the profile needs speech-to-text and a model configured)
-the note appears under `~/obsidian/Notes/voice notes/` as
-`YYYY-MM-DD_HHMM_<device-id>_<short-id>.md` with its audio beside it in
+the note appears under `~/obsidian/voice notes/` as
+`YYYY-MM-DD <title>.md` with its audio beside it in
 `_audio/`. Sending the exact same command again answers
 `200 {"status":"duplicate","job_id":…}` and still writes only one note.
 
@@ -245,14 +245,19 @@ scan then finds nothing and rewrites it.
 
 ## Notes in the vault
 
-- **Folder**: `voice notes` — lowercase, one space. On a case-sensitive
-  filesystem `Voice Notes` would be a *different* folder and split the vault
-  in two; the prototype's spelling is gone. Default `notes_obsidian_dir` is
-  `~/obsidian/Notes/voice notes`, created with its parents on first write.
-- **Filename**: `YYYY-MM-DD_HHMM_<device-id>_<short-id>.md`, e.g.
-  `2026-11-20_0815_hg-0123456789abcdef_3f9a1c7d.md` — `recorded_at` converted
-  to the **host's local timezone** (DST-aware), the device id as sent, and
-  `job_id[:8]`, so a retry rebuilds the identical name.
+- **Folder**: `voice notes` — lowercase, one space, at the **vault root**.
+  One spelling only: on a case-sensitive filesystem `Voice Notes` would be a
+  *different* folder, so a second spelling would split the vault and put
+  Syncthing into a delete/create loop against the iPhone and the MacBook. The
+  legacy `Notes/voice notes` tree is migrated by
+  `~/bin/obsidian-voice-notes-migrate`. Default `notes_obsidian_dir` is
+  `~/obsidian/voice notes`.
+- **Filename**: `YYYY-MM-DD <title>.md`, e.g.
+  `2026-11-20 Pick up the dry cleaning.md` — `recorded_at` converted to the
+  **host's local timezone** (DST-aware) so the folder sorts chronologically,
+  then the summary's own title, punctuation stripped and cut at a word
+  boundary at 60 characters. A title already used that day takes ` (2)`,
+  ` (3)`, … — never an overwrite.
 - **Audio**: copied byte-identical beside the notes as
   `_audio/<same stem>.wav` or `_audio/<same stem>.opus`; the frontmatter
   `audio:` link is relative to the note: `_audio/<file>`.

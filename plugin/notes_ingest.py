@@ -88,7 +88,7 @@ H_TS = "x-gadget-ts"
 H_MAC = "x-gadget-mac"
 H_TOKEN = "x-gadget-token"
 
-DEFAULT_OBSIDIAN_DIR = "~/obsidian/Notes/voice notes"
+DEFAULT_OBSIDIAN_DIR = "~/obsidian/voice notes"
 
 _AUDIO = "audio"
 _DEVICE = "device_id"

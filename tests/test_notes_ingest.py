@@ -645,6 +645,15 @@ def test_stage_only_serves_the_endpoint_without_a_pipeline(tmp_path):
     assert not (tmp_path / "vault").exists() or not list((tmp_path / "vault").glob("*.md"))
 
 
+def test_the_default_vault_folder_is_lowercase_at_the_vault_root(tmp_path, monkeypatch):
+    """§5.4: one spelling, ``~/obsidian/voice notes``. ``Notes/voice notes`` and
+    ``Voice Notes`` were both wrong on a case-sensitive host, and the mixed
+    spelling split the vault's Syncthing pair."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    default = NotesServer(FakeStore(), tmp_path / "notes", host="127.0.0.1", port=0)
+    assert default.pipeline.obsidian_dir == tmp_path / "home" / "obsidian" / "voice notes"
+
+
 def test_the_route_answers_400_for_a_non_multipart_request(server):
     client = TestClient(create_app(server))
     response = client.post("/notes/v1", content=b"hello",

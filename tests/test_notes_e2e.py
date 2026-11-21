@@ -81,6 +81,7 @@ IDEMPOTENCY_KEY = "hg-630dcd2966c43366-20261120T141504Z-0001"
 
 TRANSCRIPT = "Call the plumber tomorrow about the kitchen sink leak before noon."
 TITLE = "Call the plumber about the kitchen sink leak"
+NOTE_SLUG = "Call the plumber about the kitchen sink leak"
 SUMMARY = "A kitchen sink leak needs a plumber tomorrow before noon."
 KEY_POINTS = ("Call the plumber tomorrow", "Mention the kitchen sink leak before noon")
 
@@ -107,9 +108,9 @@ JOB_ID = job_id_for()
 
 
 def expected_note_name(job_id: str, device: str = DEVICE) -> str:
-    """§5.5: recorded_at_utc in the host's local zone, device id, job_id[:8]."""
+    """§5.5: recorded_at_utc in the host's local zone, then the note's title."""
     when = datetime.fromisoformat(RECORDED_AT_UTC.replace("Z", "+00:00")).astimezone()
-    return f"{when:%Y-%m-%d}_{when:%H%M}_{device}_{job_id[:8]}.md"
+    return f"{when:%Y-%m-%d} {NOTE_SLUG}.md"
 
 
 # -- multipart wire building ------------------------------------------------------------

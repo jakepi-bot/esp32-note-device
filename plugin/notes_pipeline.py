@@ -7,8 +7,8 @@ on a worker thread, so the device never waits on a model round-trip. One pass
 one becomes due; the server wakes it on each upload and polls as a safety net.
 
 The contract is ``docs/voice-note-ingestion.md`` §5: the filename
-``YYYY-MM-DD_HHMM_<device-id>_<short-id>.md`` from ``recorded_at`` in the host's
-local timezone, the fixed frontmatter keys, the dedupe scan before any write,
+``YYYY-MM-DD <title>.md`` from ``recorded_at`` in the host's local timezone,
+the fixed frontmatter keys, the dedupe scan before any write,
 the atomic audio-then-markdown ordering (§5.7), and the retryable-vs-terminal
 taxonomy with ``min(30 s * 2**(n-1), 3600 s)`` backoff over 8 attempts (§5.8).
 
@@ -34,6 +34,7 @@ import os
 import re
 import shutil
 import time
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -55,6 +56,12 @@ TMP_MAX_AGE_S = 24 * 3600
 #: ``title`` is model-written but capped (§5.6).
 TITLE_MAX = 60
 AUDIO_DIRNAME = "_audio"
+
+#: Characters a filename must never carry on Windows, macOS or Syncthing.
+_UNSAFE_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+#: Same idea, wider: anything that is not a word character, space, apostrophe
+#: or hyphen goes, so ``#``, ``,``, ``“”`` and friend never reach a filename.
+_FILENAME_PUNCT = re.compile(r"[^\w\s'\-]")
 
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _DEVICE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -351,13 +358,28 @@ def _coerce_summary(result: Any) -> Summary:
                    summary=summary, key_points=points)
 
 
-def note_filename(meta: NoteMeta) -> str:
-    """``2026-11-20_0815_hg-0123456789abcdef_3f9a1c7d.md`` — ``recorded_at``
-    converted to the host's local timezone (DST-aware), the device id as sent,
-    and ``job_id[:8]``, so a retry rebuilds the identical name (§5.5)."""
+def note_slug(title: str, limit: int = TITLE_MAX) -> str:
+    """A filename-safe, human-readable form of a note title: punctuation and
+    characters Syncthing or a shell dislike become spaces, runs collapse, and a
+    long title is cut at a word boundary rather than mid-word."""
+    text = unicodedata.normalize("NFKC", str(title))
+    text = (text.replace("\u2019", "'").replace("\u201c", '"').replace("\u201d", '"')
+                .replace("\u2013", "-").replace("\u2014", "-"))
+    text = _UNSAFE_FILENAME.sub(" ", text)
+    text = _FILENAME_PUNCT.sub(" ", text)
+    text = re.sub(r"\s+", " ", text).strip(" -'")
+    if len(text) > limit:
+        text = (text[:limit].rsplit(" ", 1)[0] or text[:limit]).rstrip(" -'")
+    return text or "Voice note"
+
+
+def note_filename(meta: NoteMeta, title: str) -> str:
+    """``2026-11-20 Pick up the dry cleaning.md`` — ``recorded_at`` in the host's
+    local timezone (DST-aware) so a folder sorts chronologically, then the
+    note's own title so a reader can find it without opening it (§5.5)."""
     when = datetime.strptime(meta.recorded_at_utc, "%Y-%m-%dT%H:%M:%SZ") \
         .replace(tzinfo=timezone.utc).astimezone()
-    return f"{when:%Y-%m-%d}_{when:%H%M}_{meta.device_id}_{meta.job_id[:8]}.md"
+    return f"{when:%Y-%m-%d} {note_slug(title)}.md"
 
 
 def _yaml_scalar(value: object) -> str:
@@ -691,13 +713,13 @@ class NotesPipeline:
         (§5.7): the markdown replace is the commit point, so a failure before
         it leaves no ``.md``, and an orphaned audio copy is harmless and gets
         replaced idempotently on the next attempt."""
-        name = note_filename(meta)
+        name = note_filename(meta, summary.title)
         stem = os.path.splitext(name)[0]
         target = self.obsidian_dir / name
         taken = 1
-        while target.exists():  # a 32-bit short-id clash: suffix, never overwrite (§5.5)
+        while target.exists():  # two notes, one title and day: suffix, never overwrite (§5.5)
             taken += 1
-            target = self.obsidian_dir / f"{stem}-{taken}.md"
+            target = self.obsidian_dir / f"{stem} ({taken}).md"
         audio_name = f"{os.path.splitext(target.name)[0]}.{meta.codec}"
         audio_dir = self.obsidian_dir / AUDIO_DIRNAME
         audio_dir.mkdir(parents=True, exist_ok=True)

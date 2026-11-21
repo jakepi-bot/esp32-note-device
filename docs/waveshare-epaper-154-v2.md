@@ -24,7 +24,7 @@ on the physical board.
 | D2 | Transport is **Wi-Fi only** for talking to Hermes. BLE stays off the table for v1. | The gadget firmware has no Bluetooth stack (`docs/hardware.md`: "Boards whose firmware enables Bluetooth: none yet"). BLE exists only in other firmwares (Pika Note uses BLE + an Android app). Offline recording works without any transport, which is the only "no connection" behaviour v1 must satisfy. |
 | D3 | Voice notes upload over **HTTP `POST` to a new endpoint inside the gadget plugin**, not over the gadget WebSocket. | The WS path is owned by the SDK core (forking it costs an upstream merge on every pull), the dashboard's plugin API runs in a *different* process behind dashboard auth, and an HTTP POST is what the ingestion task's integration test wants (`curl` with a WAV). Live voice keeps using the unmodified WS session. |
 | D4 | Note audio is **WAV PCM16 mono @ 24 000 Hz**, max 5 min default (10 min hard cap). | `CodecAudio::kRate` is 24 000 Hz and `CodecAudio::start()` warns and refuses any other rate, so 24 kHz is the only rate the ES8311 path gives us. WAV needs no decoder on the server. |
-| D5 | Obsidian destination: **`~/obsidian/Notes/voice notes/`** (note file), audio copy in `voice notes/_audio/<same stem>.<ext>`. | The vault has `Notes/` with subfolders (`AI Process`, `Attachments`, `Hermes`, `Jobs`); there is no voice-notes folder yet. Lowercase `voice notes` is the contract's canonical spelling — on a case-sensitive filesystem a `Voice Notes` folder would be a second vault. Root `Voice.md` is a writing-style note — do not collide with it. |
+| D5 | Obsidian destination: **`~/obsidian/voice notes/`** (note file), audio copy in `voice notes/_audio/<same stem>.<ext>`. | One folder at the vault root, the same level as `Jobs/`, `ToDo/` and `Hermes/`: dictated notes are a machine-written stream, not working notes, so they do not belong under `Notes/`. Lowercase `voice notes` is the contract's canonical spelling — on a case-sensitive filesystem a `Voice Notes` folder would be a second vault, and against the case-insensitive iPhone and MacBook it puts Syncthing into a delete/create loop. Root `Voice.md` is a writing-style note — do not collide with it. |
 | D6 | The repo for firmware + spec is this checkout: **`hermes-gadget-sdk`** (clone of `Adolanium/hermes-gadget-sdk`, `main`, 1 commit behind nothing). | No repo existed for this project; the SDK is the codebase we extend, and sibling tasks (firmware foundation, ingestion pipeline, flash/validation) all need one shared path. |
 | D7 | Companion/phone side = **the Web Bluetooth relay page on an iPhone** (Bluefy), served by the Docker container in `deploy/bluetooth-sync`; no native app. | Per Jake: he works from an iPhone. iOS has no BLE API for web pages outside a Web Bluetooth browser, so the phone side is a page, not an app: it reaches the radio, signs the upload with the board's key and posts it, and nothing has to be installed beyond Bluefy. Pairing a new phone needs an acknowledgement on the device itself. |
 
@@ -559,8 +559,8 @@ nothing for the pipeline to process.
 including a `curl` upload and troubleshooting, is
 [`plugin/NOTES.md`](../plugin/NOTES.md)): inbox → STT (host transcription,
 same provider family the gadget voice path uses) → summarize with the
-profile's model → write markdown to **`~/obsidian/Notes/voice notes/`** as
-`YYYY-MM-DD_HHMM_<device-id>_<short-id>.md` with frontmatter `idempotency_key`
+profile's model → write markdown to **`~/obsidian/voice notes/`** as
+`YYYY-MM-DD <title>.md` with frontmatter `idempotency_key`
 (dedupe: a note that already carries this key closes the job without a second
 write), copy the audio byte-identical to `voice notes/_audio/<same stem>.<ext>`,
 then move the inbox entry to `done/`. Response 202 is sent as soon as the file
@@ -726,7 +726,7 @@ new, ≈ = modified, ○ = existing (no change expected).
 | File | Change | Contents |
 |---|---|---|
 | `plugin/notes_ingest.py` | ★ | the multipart upload endpoint on `platforms.gadget.extra.notes_port` (8766): six-part parse, fixed validation order (400 → 413 → 422 → 415 → 401 → 409 → idempotency), HMAC/ts/checksum via `protocol.note_mac`, durable `.staging/<job_id>-*` → `inbox/<job_id>/`, duplicate/conflict/requeue ledger, 202-before-STT |
-| `plugin/notes_pipeline.py` | ★ | inbox → STT → summarize → `~/obsidian/Notes/voice notes/` markdown (`YYYY-MM-DD_HHMM_<device-id>_<short-id>.md`) + `_audio/` copy, dedupe on frontmatter `idempotency_key`, `min(30 s × 2^(n−1), 3600 s)` × 8 attempts then `failed/`, then `done/` |
+| `plugin/notes_pipeline.py` | ★ | inbox → STT → summarize → `~/obsidian/voice notes/` markdown (`YYYY-MM-DD <title>.md`) + `_audio/` copy, dedupe on frontmatter `idempotency_key`, `min(30 s × 2^(n−1), 3600 s)` × 8 attempts then `failed/`, then `done/` |
 | `plugin/adapter.py` | ≈ | start/stop the notes server with the platform; expose pending counts if the device message path (§11 core change) is taken |
 | `plugin/protocol.py` | ≈ | add `NOTE_CONTEXT = b"hermes-gadget/v1|note|"` + `note_mac()` helper (same shape as `auth_mac`) |
 | `plugin/NOTES.md` | ★ | the endpoint's API reference and runbook: request fields, auth, the `curl` example, response codes, idempotency, vault layout, retry/backoff, troubleshooting, and the test commands (contract tests + `tests/test_notes_e2e.py`) |

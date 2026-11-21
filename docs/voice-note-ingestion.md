@@ -246,37 +246,43 @@ For a request whose `job_id` already exists:
 
 ### 5.4 Obsidian destination
 
-- Canonical folder: **`voice notes`** — lowercase, one space — created with
-  its parents on first write. Default `notes_obsidian_dir` is
-  `~/obsidian/Notes/voice notes`. (This replaces the prototype's
-  `Voice Notes`; on a case-sensitive filesystem two spellings would split the
-  vault in two.)
+- Canonical folder: **`voice notes`** — lowercase, one space — at the **vault
+  root**, created on first write. Default `notes_obsidian_dir` is
+  `~/obsidian/voice notes` (`platforms.gadget.extra.notes_obsidian_dir`).
+  One spelling only: on a case-sensitive filesystem a second spelling is a
+  second folder, which splits the vault and makes Syncthing churn against the
+  case-insensitive iPhone and MacBook. The prototype's `Voice Notes` and the
+  `Notes/voice notes` layout are both migrated away by
+  `~/bin/obsidian-voice-notes-migrate`.
 - The audio copy lives beside the notes under `_audio/`, and the `audio:`
   frontmatter link is relative to the note: `_audio/<file>`.
 
 ### 5.5 Filename
 
 ```
-<YYYY-MM-DD>_<HHMM>_<device-id>_<short-id>.md
-2026-11-20_0815_hg-0123456789abcdef_3f9a1c7d.md
+<YYYY-MM-DD> <title>.md
+2026-11-20 Pick up the dry cleaning.md
 ```
 
-- Date and time: `recorded_at_utc` converted to the **host's local
-  timezone** (DST-aware), zero-padded `YYYY-MM-DD`, 24-hour `HHMM`. The
-  example above is `14:15:04Z` on a CST host.
+- Date: `recorded_at_utc` converted to the **host's local timezone**
+  (DST-aware), zero-padded `YYYY-MM-DD`, so a folder of notes sorts in the
+  order they were spoken. The example above is `14:15:04Z` on a CST host, so
+  the local date is 2026-11-20.
 - That date is the device's word for it, and a board with no RTC is trusted to
   know better than 1970: one that recorded the note before its first clock sync
   sends the time it finally uploaded instead ([§2.4](#24-limits)), so such a
   note is dated when it was sent. Nothing here tries to guess when it was
   spoken.
-- `device-id` is `device_id` as sent — its charset makes it filename-safe.
-- `short-id` is `job_id[:8]`: deterministic, so a retry or a restart after a
-  crash rebuilds the identical name. The audio copy is
-  `_audio/<same stem>.wav` or `_audio/<same stem>.opus`.
-- Collision — same name but the existing file's frontmatter carries a
-  different `idempotency_key` (a 32-bit short-id clash) — append `-2`, `-3`,
-  … before `.md` until the name is free, use the same stem for the audio
-  copy, and log it.
+- `title` is the summary's own `title`, normalized to a filename: Unicode
+  NFKC, curly quotes and dashes folded, everything outside letters, digits,
+  spaces, apostrophes and hyphens replaced by a space, runs collapsed, and
+  trimmed at a word boundary to 60 characters. Empty result: `Voice note`.
+  The identity of the note is its frontmatter `idempotency_key`, not its
+  name, so dedupe never depends on the title.
+- The audio copy is `_audio/<same stem>.wav` or `_audio/<same stem>.opus`.
+- Collision — a different note already owns that stem on that day — append
+  ` (2)`, ` (3)`, … before `.md` until the name is free, use the same stem
+  for the audio copy, and log it.
 
 ### 5.6 Note format
 
@@ -391,7 +397,7 @@ Under `platforms.gadget.extra`:
 |---|---|---|
 | `notes_port` | `8766` | Upload port; `0` or `null` disables the endpoint (logged; the platform is unaffected) |
 | `notes_host` | the hub's `host` | Bind address |
-| `notes_obsidian_dir` | `~/obsidian/Notes/voice notes` | Where notes are written |
+| `notes_obsidian_dir` | `~/obsidian/voice notes` | Where notes are written |
 
 Environment: `GADGET_ACCESS_TOKEN` — if set, every request must carry it in
 `X-Gadget-Token`.
@@ -418,7 +424,7 @@ retries. What changed in code from that prototype:
 | octet-stream body + `X-Gadget-Device`/`Note-Id`/`Duration-Ms`/`Sample-Rate`/`Sha256` headers | multipart parts `audio`, `device_id`, `recorded_at`, `duration_seconds`, optional `idempotency_key`, `checksum` |
 | idempotency = device-supplied `note_id` | supplied key, else `sha256hex(device_id\|recorded_at\|sha256)` |
 | WAV PCM16 only | WAV PCM16 mono + Ogg Opus mono |
-| `Voice Notes/` + `YYYY-MM-DD HHMMSS <slug>.md` | `voice notes/` + `YYYY-MM-DD_HHMM_<device-id>_<short-id>.md` |
+| `Voice Notes/` + `YYYY-MM-DD HHMMSS <slug>.md` | `voice notes/` at the vault root + `YYYY-MM-DD <title>.md` |
 | `{"error": "code"}` | `{"error": {code, message, field, retryable}}` |
 | fixed 30/120/600/3600 s ladder, 5 attempts | `30 s × 2` capped at 3600 s, 8 attempts |
 | frontmatter `note_id` dedupe | `idempotency_key`, or (`device_id`, `recorded_at`, `audio_sha256`) dedupe |

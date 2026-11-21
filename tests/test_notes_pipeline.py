@@ -44,7 +44,7 @@ TITLE = "Pick up the dry cleaning"
 SUMMARY = "Dry cleaning is ready before five. Call Anna about the tickets."
 KEY_POINTS = ("Dry cleaning ready before five", "Call Anna about the tickets")
 TRANSCRIPT = "buy milk and call Anna about the tickets\nthe second line keeps its spacing"
-NOTE_STEM = f"2026-11-20_0815_{DEVICE}_{JOB_ID[:8]}"
+NOTE_STEM = f"2026-11-20 {TITLE}"                       # date + the note's own title
 
 
 @pytest.fixture(autouse=True)
@@ -193,7 +193,7 @@ def test_a_summer_timestamp_uses_daylight_time(tmp_path):
           recorded_raw="2026-07-20T09:15:04-05:00")
     pipe.run_once()
     assert [p.name for p in (tmp_path / "vault").glob("*.md")] == \
-        [f"2026-07-20_0915_{DEVICE}_{JOB_ID[:8]}.md"]  # CDT, one hour off the winter stamp
+        [f"2026-07-20 {TITLE}.md"]  # the local date, one day/zone off the winter stamp
 
 
 def test_a_title_longer_than_sixty_characters_is_capped(tmp_path):
@@ -217,6 +217,37 @@ def test_a_hostile_title_is_quoted_so_the_frontmatter_stays_parseable(tmp_path):
     text = next((tmp_path / "vault").glob("*.md")).read_text(encoding="utf-8")
     assert f"title: {json.dumps(hostile)}" in text  # double-quoted, exactly as JSON writes it
     assert f"# {hostile}" in text  # the body keeps the real title
+
+
+# -- acceptance: the filename is a title, not an id (§5.5) ------------------------------
+
+def test_a_hostile_title_never_reaches_the_filename(tmp_path):
+    """The frontmatter keeps the real title; the filename carries only what a
+    shell, Windows and Syncthing all accept, so a note is findable and portable."""
+    hostile = 'Note: "urgent" #1 - buy/milk? *now*'
+    pipe = make_pipeline(tmp_path, summarize=lambda text: Summary(hostile, SUMMARY, ()))
+    stage(pipe)
+    pipe.run_once()
+    names = [p.name for p in pipe.obsidian_dir.glob("*.md")]
+    assert names == ["2026-11-20 Note urgent 1 - buy milk now.md"]
+    assert set(names[0]) <= set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-_")
+
+
+def test_a_filename_longer_than_sixty_characters_is_cut_at_a_word(tmp_path):
+    long_title = "A title that runs far past sixty characters and must be cut down to size"
+    pipe = make_pipeline(tmp_path, summarize=lambda text: Summary(long_title, SUMMARY, ()))
+    stage(pipe)
+    pipe.run_once()
+    stem = next(pipe.obsidian_dir.glob("*.md")).stem
+    assert stem == "2026-11-20 A title that runs far past sixty characters and must be"
+    assert len(stem) - len("2026-11-20 ") <= 60
+
+
+def test_a_title_with_nothing_usable_still_names_the_note(tmp_path):
+    pipe = make_pipeline(tmp_path, summarize=lambda text: Summary("!!!", SUMMARY, ()))
+    stage(pipe)
+    pipe.run_once()
+    assert [p.name for p in pipe.obsidian_dir.glob("*.md")] == ["2026-11-20 Voice note.md"]
 
 
 # -- acceptance: duplicate handling -----------------------------------------------------
@@ -284,10 +315,10 @@ def test_a_short_id_clash_with_a_different_key_gets_a_suffix(tmp_path):
     pipe.run_once()
 
     assert clashing.read_text(encoding="utf-8").startswith(f"---\nidempotency_key: {clash_job}")
-    written = pipe.obsidian_dir / f"{NOTE_STEM}-2.md"
+    written = pipe.obsidian_dir / f"{NOTE_STEM} (2).md"
     assert written.is_file()
     assert f"idempotency_key: {JOB_ID}" in written.read_text(encoding="utf-8")
-    assert (pipe.obsidian_dir / "_audio" / f"{NOTE_STEM}-2.wav").read_bytes() == AUDIO
+    assert (pipe.obsidian_dir / "_audio" / f"{NOTE_STEM} (2).wav").read_bytes() == AUDIO
 
 
 # -- acceptance: atomic write -----------------------------------------------------------

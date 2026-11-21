@@ -88,7 +88,10 @@ mkdir -p data/notes data/vault data/gadget
 - `data/vault` — the Obsidian vault: one markdown note per voice note, its audio
   under `_audio/`. To write into the real vault instead, add a line to the
   `volumes:` of the `note-sync` service and point `VAULT_DIR` at it there:
-  `- ~/obsidian/Voice Notes:/vault` with `VAULT_DIR: /vault`.
+  `- /srv/obsidian/voice notes:/vault` with `VAULT_DIR: /vault`.
+  Lowercase `voice notes` at the vault root is the one spelling: on a
+  case-sensitive host `Voice Notes` is a different folder, and against the
+  iPhone and MacBook it splits the vault and makes Syncthing churn.
 - `data/gadget` — `devices.json`, the enrolled device keys.
 
 ## Step 4 — give the server the gadget's key

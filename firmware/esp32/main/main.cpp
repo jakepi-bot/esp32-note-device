@@ -674,6 +674,8 @@ extern "C" void app_main(void) {
   profile.talk_key = board.buttons.talk >= 0;
   profile.talk_label = board.talk_label;
   profile.cancel_label = board.cancel_label;
+  if (board.pair_allow_label) profile.pair_allow_label = board.pair_allow_label;
+  if (board.pair_refuse_label) profile.pair_refuse_label = board.pair_refuse_label;
 #if CONFIG_HG_BOARD_CARDPUTER_ADV
   profile.has_cancel_button = keyboard;
   profile.has_scroll_buttons = keyboard;

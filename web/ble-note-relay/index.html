@@ -38,7 +38,7 @@
 <body>
 <h1>Hermes note relay</h1>
 <p class="hint">Takes the voice notes waiting on the e-paper gadget over Bluetooth and posts them to Hermes. Works with no Wi-Fi on the device, only Bluetooth between it and this phone.</p>
-<p class="hint" id="pairing-hint"><strong>First time with this phone:</strong> the gadget asks before it trusts a new phone. Press <em>Pair</em> on the gadget (Settings &rarr; Phone app), tap <strong>Allow</strong> on its screen when it names this phone, then tap Connect here. The gadget then shows a 6-digit code and iOS shows the same one: tap <em>Pair</em> only if they match.</p>
+<p class="hint" id="pairing-hint"><strong>First time with this phone:</strong> the gadget asks before it trusts a new phone. Open <em>Phone app</em> on the gadget (Settings &rarr; Phone app, or <code>phone pair</code>), then press <strong>BOOT</strong> on the device when it names this phone (BOOT allows, PWR refuses, and no answer within 20 s refuses). Then tap Connect here. The gadget shows a 6-digit code and iOS shows the same one: tap <em>Pair</em> only if they match.</p>
 
 <fieldset>
   <legend>Hermes and the device</legend>
@@ -159,10 +159,10 @@ function settings() {
 function pairingFailure(error) {
   const name = error?.name || '';
   const message = String(error?.message || error);
-  if (name === 'NotFoundError') return 'no gadget chosen (or none was advertising: press Pair on the device)';
+  if (name === 'NotFoundError') return 'no gadget chosen (or none was advertising: open the pairing window on the device, Settings > Phone app or phone pair)';
   if (name === 'NetworkError' || name === 'SecurityError' || /auth|pair|insufficient/i.test(message)) {
     return `${message} — the gadget has not allowed this phone. On the gadget: Settings > Phone app, ` +
-      'then tap Allow when it names this phone, and connect again.';
+      'then press BOOT on the device when it asks (BOOT allows, PWR refuses, and 20 s without an answer refuses), and connect again.';
   }
   return message;
 }
@@ -172,7 +172,7 @@ async function connect() {
     log('this browser has no Web Bluetooth. On iOS use Bluefy; on a computer use Chrome or Edge.');
     return;
   }
-  log('if this phone is new to the gadget, tap Allow on its screen when it asks');
+  log('if this phone is new to the gadget, press BOOT on the device when it asks (PWR refuses)');
   device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
   device.addEventListener('gattserverdisconnected', () => {
     log('disconnected');

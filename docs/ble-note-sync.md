@@ -234,22 +234,23 @@ The note service needs the same paired, encrypted link as the console channel, s
 the first phone goes through the device's pairing window — and through an
 acknowledgement that only someone holding the device can give:
 
-1. **Settings → Phone app** on the device (or `phone pair`) opens the window for
-   two minutes and starts advertising.
+1. **Settings → Phone app** on the device (or `phone pair` on the console) opens
+   the window for two minutes and starts advertising.
 2. The phone connects and asks to pair. The device does **not** answer it: the
    screen shows *Allow this phone?* and the phone's Bluetooth address, and waits
    up to 20 s.
-3. A tap on the screen allows it (the talk control on a board without touch, or
-   `phone allow` on the console). A swipe down, `phone deny`, the window closing,
-   or the 20 s running out refuses it: that link is dropped and the phone's
-   pairing fails with an authentication error. A second phone asking while one
-   waits is refused outright.
+3. **BOOT allows, PWR refuses, no answer within 20 s refuses.** BOOT is a tap;
+   PWR is a short press (a 2 s hold is not an answer). The console's `phone allow`
+   and `phone deny` do the same thing, and a second phone asking while one waits
+   is refused outright. A refusal drops that link and the phone's pairing fails
+   with an authentication error; the window stays open, so the same phone can ask
+   again.
 4. Allowed, the device shows a six-digit passkey; iOS shows the same code to
    confirm. That is LE Secure Connections with passkey entry — the passkey proves
    the link is not being relayed, and the acknowledgement proves that somebody at
    the device wanted *this* phone paired.
 
-The order is the point: without the tap there is no code and no bond, so a phone
+The order is the point: without that press there is no code and no bond, so a phone
 in radio range cannot pair itself with a device nobody is holding, and the address
 on the screen is something to compare rather than decoration. Bonds persist (up
 to three phones, oldest forgotten); `phone forget` removes them all. The state is

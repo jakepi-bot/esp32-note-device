@@ -5040,6 +5040,40 @@ TEST("phone: a phone asking to pair waits for Allow, and only then gets the code
   CHECK(r.app.phone_pairing_open());
 }
 
+TEST("notes device: its faces name PWR and BOOT, and the ask names them the other way round") {
+  // The desk unit's labels are the ones printed on the case: PWR talks, BOOT
+  // records. The settings hint therefore names PWR where the core's default says
+  // TALK. A pairing ask runs the other way (the record key allows), which the
+  // board's own pair labels carry.
+  hg::DeviceProfile p = Rig::profile("ws://hermes.local:8765/gadget");
+  p.talk_label = "PWR";
+  p.cancel_label = "BOOT";
+  p.pair_allow_label = "BOOT";
+  p.pair_refuse_label = "PWR";
+  const uint8_t peer[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+
+  Rig r(p);
+  FakePhone phone;
+  phone.attach(r.app);
+  r.bring_online(true);
+  CHECK(r.app.start_phone_pairing());
+  r.app.on_phone_ask(peer);
+  CHECK_EQ(r.app.model().hint, std::string("BOOT to allow / PWR to refuse"));
+  CHECK_EQ(r.app.console("phone deny"), std::string("@ok phone denied"));
+  CHECK_EQ(r.app.console("phone pair close"), std::string("@ok phone pairing closed"));
+  CHECK(r.app.open_settings());
+  CHECK_EQ(r.app.model().hint, std::string("PWR: change | BOOT: next"));
+
+  // A board that names no pairing keys keeps the core's TALK/CANCEL wording.
+  Rig plain;
+  FakePhone plain_phone;
+  plain_phone.attach(plain.app);
+  plain.bring_online(true);
+  CHECK(plain.app.start_phone_pairing());
+  plain.app.on_phone_ask(peer);
+  CHECK_EQ(plain.app.model().hint, std::string("TALK to allow / CANCEL to refuse"));
+}
+
 TEST("phone: Wi-Fi setup, a question and failed pairing each end the window") {
   Rig r;
   FakePhone phone;

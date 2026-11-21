@@ -25,7 +25,7 @@ logic shared through `port.hpp`, inert on every board that does not set
 | Durable config | `main/device_config.{hpp,cpp}` | `DeviceConfig`: NVS-backed typed settings that survive reboots |
 | Mode interfaces | `main/modes/live_mode.hpp`, `main/modes/notes_mode.hpp` | `LiveMode` (implemented: `LiveModeImpl` over the hardware-free `LiveState`) and `NotesMode`, still the stub the offline task replaces |
 | Status screen | `main/modes/status_screen.{hpp,cpp}`, `main/modes/notes_screen.{hpp,cpp}` | `compose_status` + `StatusScreen` (the 200x200 resting face, hardware-free) and `NotesScreen` (the hand-off that feeds it) |
-| Button router | `main/modes/mode_router.{hpp,cpp}` | `ModeRouter`: PWR → Home (`App::go_home`), BOOT → record note / hold to talk (`HomeKeys`). Every loop pass ticks both modes; a touch press when the ask strip is drawn is routed to `NotesScreen::touch` to answer YES/NO. |
+| Button router | `main/modes/mode_router.{hpp,cpp}` | `ModeRouter`: PWR short → live turn (`App::talk_toggle`), BOOT tap → note toggle, BOOT hold → cancel (`HomeKeys`); while a phone asks to pair, BOOT allows and PWR refuses. Every loop pass ticks both modes. The board has no touch input, so nothing is routed from a screen. |
 
 `main.cpp` wires them, all under `#if CONFIG_HG_BOARD_WS_EPAPER_154`:
 
@@ -142,7 +142,7 @@ struct NoteCounts { uint32_t stored, pending, synced, failed; };
 class NotesMode {
  public:
   virtual void begin(hg::App&, UiState&, DeviceConfig&, const NotesIo& io) = 0;
-  virtual void on_note_button() = 0;      // a PWR tap
+  virtual void on_note_button() = 0;      // a BOOT tap
   virtual void tick(uint32_t now_ms) = 0;
   virtual NoteCounts counts() const = 0;
   virtual std::string console(std::string_view args) = 0;  // the `notes` command
@@ -380,10 +380,24 @@ the first stamp. Never identify an image by the date and time.
 
 | Input | Owner | Behavior |
 |---|---|---|
-| `Button::Talk` | `buttons.talk = 0` (GPIO 0) | The `talk_mode` setting: hold to talk (default) or tap to talk. No cancel button is wired (`buttons.cancel = -1`), so holding BOOT for 2 s taps CANCEL instead (`main/talk_hold.hpp`, board opt-in `ButtonConfig.talk_hold_cancel_ms`). The press arms it only when it found a turn in flight or an overlay on screen: a press from the idle screen is talk for as long as it is held. |
-| PWR tap (GPIO 18, < 1.5 s) | `ModeRouter` → `NotesMode` | Starts or stops a voice note. |
-| PWR hold (GPIO 18, 2.5 s) | `LatchPower` | Releases the battery latch: power off on battery, screen dark on USB. |
-| Touchscreen | none | This board has no touch panel. |
+| `buttons` = `{-1,-1,-1,-1}`, `buttons.record = 0` | `ModeRouter` (`main/modes/mode_router.cpp`) | The core's `Button::Talk` is not wired on this board: the router owns both keys through `HomeKeys` (`main/modes/home_keys.cpp`, host cases in `firmware/tests/test_epaper_keys.cpp`). |
+| BOOT tap (GPIO 0, < 1.5 s) | `ModeRouter` → `NotesMode` | Starts or stops an offline voice note (`NotesMode::on_note_button`). Never talks. BOOT is also the flash-download and deep-sleep wake pin. |
+| BOOT held ≥ 2 s | `ModeRouter` → `App::on_button(Cancel)` | Fires once at the threshold, while the key is still down: it drops the note being recorded, or otherwise taps CANCEL for a live turn, an overlay, a pairing window or a question. |
+| PWR short press (GPIO 18, < 1.5 s) | `ModeRouter` → `App::talk_toggle` | Starts a live Hermes turn; the next short press ends it. While a phone asks to pair, PWR refuses instead. |
+| PWR hold (GPIO 18, 2.5 s) | `LatchPower` | Releases the battery latch: power off on battery, screen dark on USB. The firmware acts nothing on a hold. |
+| Touchscreen | none | This board has no touch panel and no touch input path: no tap, no swipe, no gesture. |
+
+The two keys are the whole input surface, and the settings hint names them in the
+case's own words: `talk_label = "PWR"` and `cancel_label = "BOOT"` (the core's
+Talk control changes a setting and its Cancel control steps to the next one), so
+the face reads `PWR: change | BOOT: next`. A pairing ask runs the other way round,
+and the board names its keys for that too (`pair_allow_label` / `pair_refuse_label`
+in `board.cpp`): **BOOT allows, PWR refuses, no answer within 20 s refuses**
+(`App::kPhoneAskMs`).
+
+The panel returns to its resting face after 60 s without a key press
+(`modes/auto_home.cpp`, `kAutoHomeSeconds`); an error face stays until a key press,
+because the error is the one message that needs a person (`docs/features.md`).
 
 The PWR key is also the latch's power key (`latch_power.key = 18`), so the
 tap must survive the latch's own press detection; whether the tap arrives

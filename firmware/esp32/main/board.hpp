@@ -413,6 +413,10 @@ struct BoardConfig {
   int speaker_dac = -1;
   const char* talk_label = "TALK";
   const char* cancel_label = "CANCEL";
+  // A board whose keys answer a pairing ask in another order than the core's TALK
+  // allows / CANCEL refuses names them here; null keeps the two labels above.
+  const char* pair_allow_label = nullptr;
+  const char* pair_refuse_label = nullptr;
 };
 
 // GPIO held high to power the panel's peripheral rail. Boards without one

@@ -86,7 +86,7 @@ The screenshots come from the desktop simulator, which runs the same device core
 - **Diagnostics report.** Save a report from the browser installer or with `hermes-gadget diag` to attach to a bug report. [Save a board report](troubleshooting.md#save-a-board-report)
 - **Away from home.** Reach Hermes from another network through Tailscale Funnel. [Connect from another network](tailscale-funnel.md)
 - **Tailnet.** Experimental, and not in release images: a source build can join your Tailscale tailnet itself. [Reach Hermes over your tailnet](tailnet.md)
-- **Two keys and no home button.** The e-paper notes device has no touch glass: PWR talks to Hermes, BOOT records a note (a 2 s hold drops it), the same two keys allow or refuse a new phone, and the panel returns to its home screen after 60 seconds with no input. [Voice notes with an iPhone](ios-bluetooth-sync.md)
+- **Two keys and no home button.** The e-paper notes device has no touch glass: PWR talks to Hermes, BOOT records a note (a 2 s hold drops it), the same two keys allow or refuse a new phone, and the panel returns to its home screen after 60 seconds with no input. An error face is the exception: it stays until a key press, because an error is the one message that needs someone to see it. [Voice notes with an iPhone](ios-bluetooth-sync.md)
 - **Phone app and note sync over Bluetooth.** The ePaper-1.54 image always has it: pair a phone once, then take notes off the card with no Wi-Fi anywhere. Another board enables it with a `BoardConfig` flag. [Bluetooth note sync](ble-note-sync.md), [iPhone walk-through](ios-bluetooth-sync.md)
 
 ## Hermes profiles

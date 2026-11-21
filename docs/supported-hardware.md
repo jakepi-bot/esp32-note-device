@@ -10,7 +10,7 @@ Hardware ports remain experimental until the [verification table](hardware-valid
 |---|---|---|
 | [M5Stack Cardputer ADV / Stamp-S3A](hardware.md#m5stack-cardputer-adv) | Hold G0 to talk; keyboard to type; Fn+Esc cancels; Fn+; / Fn+. scroll; Tab opens settings | Onboard ES8311 microphone and speaker. Experimental; ADV only |
 | [Waveshare ESP32-S3-LCD-1.54](hardware.md#waveshare-esp32-s3-lcd-154) | Hold BOOT to talk | Onboard microphones and speaker |
-| [Waveshare ESP32-S3-ePaper-1.54](hardware.md#waveshare-esp32-s3-epaper-154) | Hold BOOT to talk; a PWR tap is the voice-note key (offline notes in progress); hold PWR to power off | Onboard microphone and speaker (one ES8311). Experimental |
+| [Waveshare ESP32-S3-ePaper-1.54](hardware.md#waveshare-esp32-s3-epaper-154) | Tap PWR to talk (a short press starts or ends a live turn); tap BOOT to record a note, hold it 2 s to drop it; hold PWR to power off; no touch | Onboard microphone and speaker (one ES8311). Experimental |
 | [Waveshare ESP32-S3-Touch-LCD-1.83](hardware.md#waveshare-esp32-s3-touch-lcd-183) | Hold the screen or BOOT to talk; PWR turns the screen off and on | Onboard microphones and speaker. Experimental |
 | [Waveshare ESP32-S3-Touch-LCD-1.46](hardware.md#waveshare-esp32-s3-touch-lcd-146) | Hold the screen or BOOT to talk | Onboard microphone and speaker. Experimental |
 | [Seeed Studio SenseCAP Watcher W1-A](hardware.md#sensecap-watcher-w1-a) | Hold the screen to talk; rotate the wheel to scroll; press the wheel or swipe down to cancel | ES8311 speaker and ES7243E microphone. Battery voltage and power-off. Keeps Seeed's factory data partition. Experimental |

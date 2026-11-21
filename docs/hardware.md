@@ -136,9 +136,9 @@ The USB-C port is the S3's own USB Serial/JTAG, so flashing and the serial conso
 
 1. **Boot log:** `200x200 e-paper ready: sclk=12 ...`, `durable config ready: boot 1, note_max_s 300`, `codecs: speaker ready, microphones ready`, and in `hermes-gadget diag` an `i2c` list with `0x18` (ES8311) and `display: ssd1681`.
 2. **Screen:** the first frame appears after a full refresh (one to three seconds; e-paper is slow by nature), upright and not mirrored, dark background with light text. Later updates arrive as partial refreshes about twice a second at most; every twentieth is a full one and briefly flashes the whole panel. A blank panel points at BUSY (GPIO 8) or the rail (GPIO 6) first: the boot log says if BUSY never cleared.
-3. **Microphone:** say something while holding BOOT; the waves move with your voice and Hermes's transcript is right. The ES8311's ADC reads the analog microphone on the same I2S bus the DAC plays on.
+3. **Microphone:** press PWR and say something; the waves move with your voice and Hermes's transcript is right. The ES8311's ADC reads the analog microphone on the same I2S bus the DAC plays on.
 4. **Speaker:** replies are clear and loud enough (`set volume 80`); no hiss between replies.
-5. **Buttons:** BOOT holds to talk. A PWR tap logs `PWR tapped` in the notes module (capture arrives with the offline-mode task); holding PWR for 2.5 s powers off on battery and darkens the screen on USB.
+5. **Buttons:** PWR is the talk key — a short press starts a live turn and the next short press ends it (a 2.5 s hold powers off on battery and darkens the screen on USB, acting nothing in the firmware). BOOT is the record key: a tap starts or stops an offline note, and holding it 2 s drops the note being recorded. There is no touch glass.
 6. **SD card:** with a FAT32 card inserted, `set sd_log on` mounts the slot (1-bit: only CLK, CMD and D0 are wired) and `hermes.log` appears on the card.
 7. **Wi-Fi:** `wifi list` returns nearby networks; `wifi-setup` starts the setup portal.
 

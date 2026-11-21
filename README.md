@@ -2,9 +2,9 @@
 
 Firmware for a pocket voice-note and assistant device built on the **Waveshare
 ESP32-S3-ePaper-1.54 (V2)**: press PWR to talk to Hermes, tap BOOT to record an
-offline voice note to the microSD card, and the panel goes back to its home
-screen after a minute with no input, and let the device upload the queue to
-Hermes whenever it is next online.
+offline voice note to the microSD card, and let the device upload the queue to
+Hermes whenever it is next online. The panel returns to its home screen after a
+minute with no input.
 
 This repository is the canonical home of that firmware. It is a focused fork of
 the [Hermes Gadget SDK](https://github.com/Adolanium/hermes-gadget-sdk) (MIT) and
@@ -243,7 +243,8 @@ the byte the phone really has. Protocol and packet layout:
    model it is still a server: it verifies uploads and keeps them.
 3. **Pair the phone once.** Settings → **Phone app** (or `phone pair`) opens a
    two-minute window. The phone asks, the board names it on screen — *Allow this
-   phone?* — and **nothing is shared until someone taps Allow**; then it shows a
+   phone?* — and **nothing is shared until someone presses BOOT on the device**:
+   BOOT allows, PWR refuses, and no answer within 20 s refuses. Then it shows a
    six-digit passkey and iOS asks you to confirm the same code. That acknowledgement
    is what keeps a phone in radio range from pairing itself with a device nobody is
    holding. `phone`, `status` and `phone allow`/`deny` cover it from the console.

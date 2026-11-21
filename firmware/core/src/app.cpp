@@ -2967,11 +2967,16 @@ void App::update_model() {
     if (!phone_ask_.empty()) {
       // A phone asked while the window is open: nothing is shared until someone
       // here allows it, and the address is on screen to compare with the phone.
+      // The keys named are the ones that answer it on this board.
+      const std::string allow =
+          control(profile_.pair_allow_label.empty() ? profile_.talk_label : profile_.pair_allow_label);
+      const std::string refuse =
+          control(profile_.pair_refuse_label.empty() ? profile_.cancel_label : profile_.pair_refuse_label);
       m.headline = tr(Msg::PhoneAsk);
       m.detail = tr(Msg::BluetoothName, {name_});
       m.body = tr(Msg::PhoneAskBody, {phone_ask_});
       m.hint = profile_.touch_screen ? std::string(tr(Msg::PhoneAskHint))
-                                     : tr(Msg::PhoneAskHintKeys, {talk, cancel});
+                                     : tr(Msg::PhoneAskHintKeys, {allow, refuse});
     } else if (phone_passkey_.empty()) {
       m.headline = tr(Msg::PairAPhone);
       m.detail = tr(Msg::BluetoothName, {name_});

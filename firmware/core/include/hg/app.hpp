@@ -52,6 +52,12 @@ struct DeviceProfile {
   bool has_scroll_buttons = false;
   std::string talk_label = "TALK";
   std::string cancel_label = "CANCEL";
+  // The two keys that answer a pairing ask, when the board's key map does not run
+  // the core way (TALK allows, CANCEL refuses): the record key allows on the notes
+  // device, so it names BOOT there and PWR where it refuses. Empty keeps
+  // talk_label / cancel_label.
+  std::string pair_allow_label;
+  std::string pair_refuse_label;
   // The screen stands in for the buttons (hold to talk, tap to answer yes,
   // swipe to cancel); on-screen hints are worded for touch.
   bool touch_screen = false;

@@ -284,15 +284,17 @@ is shorter for it and nothing waits 100 ms for a controller that is not there.
 While a phone asks to pair the two keys answer it: **BOOT allows**, **PWR refuses**, and 20 s of neither refuses (`App::kPhoneAskMs`). The ask face prints the address and both keys. The auto-home timer is suspended while it shows.
 
 
-On boards that use the core talk key, the 2 s long press arms only when the press found something to cancel — a turn
-in flight, or an overlay/question on the screen. A press from the idle screen
+On the boards that do use the core talk key (not this one: its PWR and BOOT are the
+router's, see 6.1), the 2 s long press arms only when the press found something to cancel — a turn
+in flight, or an overlay/question on the screen. There a press from the idle screen
 starts the recording and holding it is talk for as long as it lasts, so
 hold-to-talk keeps working past 2 s (an arming press that started a fresh
 recording would cut every utterance at the threshold). Implemented in
 `main/talk_hold.hpp` (`hold_cancel_armed` / `TalkHold`), driven from
 `port_buttons.cpp`, threshold in `ButtonConfig.talk_hold_cancel_ms`; the state
 machine is covered by the host tests in `firmware/tests/test_epaper_live_mode.cpp`,
-the gesture itself is a hardware-validation item.
+the gesture itself is a hardware-validation item. This board's own long press is
+BOOT held 2 s, which cancels through `ModeRouter` and never talks.
 
 Settings UI, clock, hero/mascot, cards, `display.choices`, auto-paging replies all
 come from the core unchanged.
@@ -713,7 +715,7 @@ new, ≈ = modified, ○ = existing (no change expected).
 | `firmware/esp32/main/notes/notes_capture.hpp/.cpp` | ★ | microphone → `recording.wav`: header written first and patched at stop, the duration/byte caps, a clean abort |
 | `firmware/esp32/main/notes/notes_uploader.hpp/.cpp` | ★ | walks `pending/`, signs headers per §8, `esp_http_client` POST to `:8766/notes/v1`, sliced per loop pass, honours `accepted`/`duplicate`/`4xx`, updates `note.json.attempts` |
 | `firmware/esp32/main/notes/sd_mount.hpp/.cpp` | ★ | the single mount owner the `SdLogger` and the note store share; `notes format` runs the one explicit format |
-| `firmware/esp32/main/modes/notes_mode.hpp/.cpp` | ★ | the mode itself: PWR tap → record/stop, the status line, the sync clock, the `notes` console command |
+| `firmware/esp32/main/modes/notes_mode.hpp/.cpp` | ★ | the mode itself: BOOT tap → record/stop, the status line, the sync clock, the `notes` console command |
 | `firmware/esp32/main/main.cpp` | ≈ | `NotesModeImpl` with the board's mic, battery and card; the `notes`/`screen` console lines |
 | `firmware/core/include/hg/app.hpp` + `core/src/app.cpp` | ≈ *(additive only)* | `App::on_mic_samples_extra` (a mode's own copy of every mic buffer), `App::on_console` (a board module's own console lines), `App::access_token()`/`App::sign()` (the module signs its own request with the core's key) |
 | `firmware/esp32/main/ui_state.hpp/.cpp` | ≈ | `UiState::set_status()` — a mode's own line, shown while the phase is Idle, republished only when it changes or its TTL runs low |

@@ -773,11 +773,17 @@ BoardConfig make() {
   b.latch_power.key = 18;
   // Neither key is the core's TALK: the mode router owns both of them
   // (modes/mode_router.cpp). BOOT is the record key (a tap records a note, held
-  // it cancels) and PWR talks.
+  // it cancels) and PWR talks. The labels are the names printed on the case, so
+  // the settings menu's "{0}: change | {1}: next" reads PWR then BOOT — the core's
+  // Talk release changes an item and its Cancel release steps to the next one.
+  // A pairing ask runs the other way round (BOOT allows, PWR refuses), which the
+  // pair labels below say.
   b.buttons = {-1, -1, -1, -1};
   b.buttons.record = 0;
-  b.talk_label = "BOOT";
+  b.talk_label = "PWR";
   b.cancel_label = "BOOT";
+  b.pair_allow_label = "BOOT";
+  b.pair_refuse_label = "PWR";
   // No touch block: the desk unit's glass has no controller (Jake, 2026-11-21),
   // and the board config is what the port reads, so nothing probes the I2C bus
   // for one at boot.

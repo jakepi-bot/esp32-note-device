@@ -17,7 +17,7 @@
 // `set_backlight` and the core's brightness setting do nothing on it. The
 // request's "brightness button" is this second key, BOOT.
 //
-// The desk unit has no touch glass (Jake, 2026-11-21: the round-2 I2C probe was
+// The desk unit has no touch glass (2026-11-21: the round-2 I2C probe was
 // right), so both keys are the whole input surface and the screen has no strip.
 #pragma once
 

@@ -1,6 +1,6 @@
 // Auto-home: the notes device has no home button, so after a minute with
 // nobody touching it the glass goes back to the resting face by itself
-// (Jake, 2026-11-21: "after a time of no interaction it will return to home").
+// (2026-11-21: "after a time of no interaction it will return to home").
 //
 // Hardware-free on purpose: the app loop feeds it one pass at a time and the
 // host tests run the whole minute in a loop (firmware/tests/test_epaper_auto_home.cpp).

@@ -784,7 +784,7 @@ BoardConfig make() {
   b.cancel_label = "BOOT";
   b.pair_allow_label = "BOOT";
   b.pair_refuse_label = "PWR";
-  // No touch block: the desk unit's glass has no controller (Jake, 2026-11-21),
+  // No touch block: the desk unit's glass has no controller (the owner, 2026-11-21),
   // and the board config is what the port reads, so nothing probes the I2C bus
   // for one at boot.
   // Bluetooth LE: the phone link and the note sync (docs/ble-note-sync.md).

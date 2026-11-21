@@ -409,7 +409,7 @@ extern "C" void app_main(void) {
   hgp::events::init();
   ESP_ERROR_CHECK(g_storage.begin() ? ESP_OK : ESP_FAIL);
   // The e-paper board's touch block stays disabled: the desk unit has no touch
-  // glass (Jake, 2026-11-21 — the round-2 I2C probe's "nothing at 0x38" was the
+  // glass (the owner, 2026-11-21 — the round-2 I2C probe's "nothing at 0x38" was the
   // truth, not a reset bug). One image serves the whole product line, and every
   // other board reads this exactly as the factory made it.
   static hgp::BoardConfig board_store;

@@ -14,7 +14,7 @@
 // ghosted, and the panel's own "full every 20 partials" rule is too slow to
 // hide it.
 //
-// There is no touch glass on this product (Jake, 2026-11-21), so this screen has
+// There is no touch glass on this product (2026-11-21), so this screen has
 // no targets: the two keys are the whole input surface and every hint says which
 // key does what. The one screen it takes from the core's Setup is the pairing
 // ask, because the answer has to be readable on paper and the buttons answer it.

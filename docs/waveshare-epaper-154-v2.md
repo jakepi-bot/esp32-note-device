@@ -25,8 +25,8 @@ on the physical board.
 | D3 | Voice notes upload over **HTTP `POST` to a new endpoint inside the gadget plugin**, not over the gadget WebSocket. | The WS path is owned by the SDK core (forking it costs an upstream merge on every pull), the dashboard's plugin API runs in a *different* process behind dashboard auth, and an HTTP POST is what the ingestion task's integration test wants (`curl` with a WAV). Live voice keeps using the unmodified WS session. |
 | D4 | Note audio is **WAV PCM16 mono @ 24 000 Hz**, max 5 min default (10 min hard cap). | `CodecAudio::kRate` is 24 000 Hz and `CodecAudio::start()` warns and refuses any other rate, so 24 kHz is the only rate the ES8311 path gives us. WAV needs no decoder on the server. |
 | D5 | Obsidian destination: **`~/obsidian/voice notes/`** (note file), audio copy in `voice notes/_audio/<same stem>.<ext>`. | One folder at the vault root, the same level as `Jobs/`, `ToDo/` and `Hermes/`: dictated notes are a machine-written stream, not working notes, so they do not belong under `Notes/`. Lowercase `voice notes` is the contract's canonical spelling — on a case-sensitive filesystem a `Voice Notes` folder would be a second vault, and against the case-insensitive iPhone and MacBook it puts Syncthing into a delete/create loop. Root `Voice.md` is a writing-style note — do not collide with it. |
-| D6 | The repo for firmware + spec is this checkout: **`hermes-gadget-sdk`** (clone of `Adolanium/hermes-gadget-sdk`, `main`, 1 commit behind nothing). | No repo existed for this project; the SDK is the codebase we extend, and sibling tasks (firmware foundation, ingestion pipeline, flash/validation) all need one shared path. |
-| D7 | Companion/phone side = **the Web Bluetooth relay page on an iPhone** (Bluefy), served by the Docker container in `deploy/bluetooth-sync`; no native app. | Per Jake: he works from an iPhone. iOS has no BLE API for web pages outside a Web Bluetooth browser, so the phone side is a page, not an app: it reaches the radio, signs the upload with the board's key and posts it, and nothing has to be installed beyond Bluefy. Pairing a new phone needs an acknowledgement on the device itself. |
+| D6 | The repo for firmware + spec is this checkout: **this checkout** (clone of `Adolanium/hermes-gadget-sdk`, `main`). | No repo existed for this project; the SDK is the codebase we extend, and sibling tasks (firmware foundation, ingestion pipeline, flash/validation) all need one shared path. |
+| D7 | Companion/phone side = **the Web Bluetooth relay page on an iPhone** (Bluefy), served by the Docker container in `deploy/bluetooth-sync`; no native app. | Per the owner: he works from an iPhone. iOS has no BLE API for web pages outside a Web Bluetooth browser, so the phone side is a page, not an app: it reaches the radio, signs the upload with the board's key and posts it, and nothing has to be installed beyond Bluefy. Pairing a new phone needs an acknowledgement on the device itself. |
 
 ---
 
@@ -58,7 +58,7 @@ on the physical board.
   firmware-readable as a tap, not just a hardware latch.
 - **Touch** — the product line has four SKUs: `ESP32-S3-ePaper-1.54`, `-EN`, and
   `ESP32-S3-Touch-ePaper-1.54`, `-EN`. Only the Touch SKUs carry the FT6336
-  controller. **The desk unit is not one of them** (Jake, 2026-11-21, after the
+  controller. **The desk unit is not one of them** (the owner, 2026-11-21, after the
   round-2 probe below): its glass has no controller, the firmware wires no touch
   input, and both keys are the whole input surface.
 - **Power** USB-C 5 V in, onboard charger (**ETA6098**, schematic), 3.3 V buck
@@ -149,7 +149,7 @@ ws://<hermes-host>:8765/gadget          subprotocol: hermes-gadget.v1
 
 - Default port **8765**, path `/gadget`, `ws` (or `wss` when the gateway is
   configured with TLS). On this host the hub is verified listening on
-  `0.0.0.0:8765` (gateway pid on hermes-host, LAN 192.168.1.20) and the existing Office
+  `0.0.0.0:8765` (the gateway pid, LAN 192.168.1.20) and the existing Office
   gadget connects from 192.168.1.21.
 - The authoritative URL comes from **`hermes gadget info`** (prints device URL and
   gadget configuration) or `config.yaml` `platforms.gadget.*`. Changing the port
@@ -246,7 +246,7 @@ Details:
   `audio_seconds ≥ 0.5`, ≤ 3.0, `playback_lead_ms` defaults 1000 — do not change.
 - Recommended `rate_kbps: 24` only if opus is enabled on both ends; PCM16 over LAN
   costs 96 KB/s ≪ 40 MB/s Wi-Fi capacity, so PCM16 is the default and simplest.
-- **No touch glass** (Jake, 2026-11-21): the desk unit's glass has no controller, so the firmware probes for none, draws no strip, and the two keys carry every action — including allowing or refusing a new phone.
+- **No touch glass** (the owner, 2026-11-21): the desk unit's glass has no controller, so the firmware probes for none, draws no strip, and the two keys carry every action — including allowing or refusing a new phone.
   set them from the Waveshare demo's observed noise floor during bring-up **[verify]**.
 
 ---
@@ -268,7 +268,7 @@ I (1156) hg.main: no touch controller at 0x38: the home strip is not drawn
 
 A full scan of the board's only I2C bus returns `0x18` (ES8311), `0x51`
 (PCF85063 RTC) and `0x70`; none of the three touch addresses answers (FT6336
-0x38, GT911 0x5D / 0x14). Jake confirmed by eye that the desk unit has no
+0x38, GT911 0x5D / 0x14). The owner confirmed by eye that the desk unit has no
 touch glass, so round 3 deleted the probe, the reset pulse, the strip and the
 touch input path instead of keeping them for a SKU this unit is not. The boot
 is shorter for it and nothing waits 100 ms for a controller that is not there.
@@ -677,7 +677,7 @@ Windows; `pio device list` shows it), and that port is what `hermes-gadget conso
 
 ## 11. Proposed firmware module breakdown
 
-Paths are relative to the repo root (`hermes-gadget-sdk`). ★ =
+Paths are relative to the repo root. ★ =
 new, ≈ = modified, ○ = existing (no change expected).
 
 ### Board definition (follows `docs/porting.md` exactly)
@@ -804,7 +804,7 @@ Installed on this host:
   `hg-0123456789abcdef`, board `esp32-s3-box`, fw 0.6.0)
 - `~/.hermes/config.yaml` (`platforms.gadget.enabled`, home channel "Office",
   `voice.speech_server ws://127.0.0.1:8770/v1/realtime`)
-- Live listeners verified on hermes-host: `0.0.0.0:8765` (gadget hub), `127.0.0.1:8770`
+- Live listeners verified on the test host: `0.0.0.0:8765` (gadget hub), `127.0.0.1:8770`
   (speech), `127.0.0.1:11436` (local-live model); 8766 free
 
 Community:

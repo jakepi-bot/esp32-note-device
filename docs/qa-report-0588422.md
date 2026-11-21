@@ -271,7 +271,7 @@ rather than a separate app. The server half is now a container
 
 1. Apply the D1 one-line fix, rebuild, flash, and re-run at least T17–T20.
 2. Fix or document D2 before the release notes claim "battery and time status".
-3. Do not publish the release or message Jake that Bluetooth sync works until an
+3. Do not publish the release or message the owner that Bluetooth sync works until an
    iPhone has completed T21/T22. If no iPhone is available to the agent, the
    release must carry that limitation explicitly.
 4. Commit this report (or a link to it) and update `docs/ble-note-sync.md` §11:

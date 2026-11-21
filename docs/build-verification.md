@@ -118,6 +118,36 @@ The size, RAM and slot figures reproduce the earlier run to within the added
 pointer; the binary is not bit-reproducible because ESP-IDF stamps the build
 time into `app_desc`.
 
+## Fourth verification: the 0.7.0 release build and package
+
+Recorded 2026-11-20 on the 0.7.0 tree (`414a3ac`), in a fresh clone with no `.pio`
+directory and no generated `sdkconfig`, using the release workflow's own commands:
+
+```
+RAM:   [===       ]  26.4% (used 86492 bytes from 327680 bytes)
+Flash: [=====     ]  50.0% (used 2030671 bytes from 4063232 bytes)
+check_size: app 1984 KB in the 3968 KB 'ota_0' slot, 50% free
+======================== [SUCCESS] Took 110.01 seconds ========================
+package_release: hermes-gadget-waveshare-epaper-154-0.7.0.bin (2111 KB),
+                 hermes-gadget-waveshare-epaper-154-0.7.0-app.bin (1983 KB)
+```
+
+| Fact | Value |
+|---|---|
+| App image | 2 030 671 B (1984 KB), 50% of the `ota_0` slot free — the same size as the third verification, because 0.7.0 changes documentation and the version string only; the SHA-256 differs because `app_desc` carries the build time |
+| `firmware.bin` | 2 031 184 B, SHA-256 `b9708db63404fdeafa63874801d3e4644737ef7adc1dd38e8bbbfe8714cc8c82` |
+| Merged flash image | `hermes-gadget-waveshare-epaper-154-0.7.0.bin`, 2 162 256 B, SHA-256 `ab458d8d88bc4081fe133c04551c2887dea82f8bb9159705f6c3b28ce1d8fedf` |
+| License bundle | `hermes-gadget-0.7.0-licenses.zip`, 294 140 B, SHA-256 `22ea0adaed000dba3f194a795fad430dfba2f31b0530e91f382171950c034310` |
+| Manifest | one build, `waveshare-epaper-154`, ESP32-S3, 8 MB flash, octal PSRAM, settings `0x9000`+24576 — read back out of the image, not passed in |
+| Version gates | `check_versions.py --tag v0.7.0` (all four files), `--expect-version 0.7.0` against the built app |
+| Host tests | `ctest` 8/8, relay `selftest.mjs` 11/11, `site` `node --test` 32/32 |
+
+`python -m pytest tests/` on this host gives **617 passed, 377 skipped, 20 failed**,
+and those same 20 fail on the pre-release commit `d20f578` in a second worktree —
+they are the simulator's timing and widget tests plus one dashboard race, not this
+release. Two files (`test_sim_window.py`, `test_linux_peripherals.py`) cannot even
+be collected here because the host's Python has no `tkinter`; CI runs them.
+
 ## Consequence worth knowing before adding features
 
 The board now builds against `partitions-epaper-8mb.csv`, not `partitions.csv`,

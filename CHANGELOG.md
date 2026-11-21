@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
+
+The first release published from this repository. The e-paper gains a designed face
+and the notes gain a second way out: the Waveshare ESP32-S3-ePaper-1.54 now draws a
+status screen that says what it is doing at a glance instead of the SDK's generic
+white-on-black layout, and a paired phone can take a voice note off the card over
+Bluetooth LE when there is no Wi-Fi anywhere. Bluetooth did not fit the shared app
+slots, so this board now builds an 8 MB partition table and needs one USB flash.
+The hardware QA pass is committed in the tree with its FAIL verdict intact: it found
+the null `access_cb` that kept the Bluetooth stack from registering, which is fixed
+and verified on the board below, and its four remaining findings are recorded as
+known limitations in the README rather than quietly dropped. An iPhone has still not
+completed a transfer — no phone or BLE central was available to QA, and that half is
+unverified.
 
 - **Bluetooth came up dead on the board: the note data characteristic had no access callback.** `g_note_chrs[1]` was declared with `BLE_GATT_CHR_F_NOTIFY` and a value handle but no `access_cb`, and NimBLE's `ble_gatts_chr_is_sane()` refuses that table: `ble_gatts_count_resources()` returned `BLE_HS_EINVAL` (3), `PhoneLink::begin()` logged `can't register the phone service (3)` and returned before registering *any* service, so there was no advertising, `phone` answered `@error Bluetooth is not enabled on this board`, `notes ble` answered `@error this build has no Bluetooth note sync` and `notes status` ended `| ble off`. The characteristic is notify-only, so `on_note_access` (which rejects anything that is not a WRITE) is attached purely to satisfy the validator; no READ path was opened. Verified on the board with the board's own boot log: `I (1282) hg.phone: Bluetooth ready` and zero `E (` lines, `phone` → `@phone {"paired":0,"connected":false,"pairing":false}`, `notes ble` → `@notes ble link down mtu 23 idle`, `notes status` → `… | ble away`, `phone pair` → `@ok phone pairing open` with `GAP procedure initiated: advertise`; clean build 2,030,671 B app in the 3,968 KB slot (50% free, 86,492 B RAM), `firmware.bin` 2,031,184 B, flashed over USB (`Hash of data verified`). The protocol's 16 host cases could not have caught this because `port_ble.cpp` is ESP-only, so the new `hg_ble_gatt_table_tests` applies NimBLE's rule to the source: every characteristic that names a UUID must name an access callback, the data characteristic must stay notify-only behind `on_note_access`, and the cases fail if they stop recognising the tables — removing the one line turns it red with `g_note_chrs[1] has a UUID and no access_cb`. `ctest` 8/8. Still unverified: an iPhone pairing, the MTU iOS negotiates, throughput, resumption and a real note pull — no phone or BLE central was available. [Bluetooth note sync](docs/ble-note-sync.md), [QA report](docs/qa-report-0588422.md)
 
@@ -23,6 +36,10 @@
 - The **Waveshare ESP32-S3-ePaper-1.54 (V2)** gains an experimental board profile: the 200×200 e-paper display driver (partial refresh, a full one every twentieth and after a failed transfer), the ES8311 speaker and microphone, the 1-bit microSD slot, BOOT and PWR keys, and the mode foundation the live and offline voice modes build on (a four-phase UI state machine, NVS-backed durable config and the `LiveMode` / `NotesMode` module interfaces). Wi-Fi only: this board has no BLE. [Firmware module interfaces](docs/firmware-modules.md), [hardware and wiring](docs/hardware.md#waveshare-esp32-s3-epaper-154), [integration spec](docs/waveshare-epaper-154-v2.md)
 - **`profile_mode: virtual` is removed.** It added `gateway.profile_routes` entries to the running gateway, and a plugin must not change the gateway's routing state. The key is now ignored: a device that picks another profile marks its own chat with that profile, as without the option. On Hermes versions with native session admission (v0.22.5 and later, `main` included), switching to a profile other than the default one stays unavailable until Hermes has the `validate_native_profile_route` hook (NousResearch/hermes-agent#147690), and `hermes gadget bot-chat` for such a profile needs it too. Conversations a device had in a `<device id>~<profile>` chat are not continued: its next turn in that profile starts in the device's own chat. They stay in that profile's session list (`hermes -p <profile> sessions list`). The routes lived only in the gateway's memory, so there is nothing to remove from `config.yaml`. The CLI's hint and the docs no longer say a released Hermes has the hook. [Hermes integration](docs/hermes-integration.md#running-against-a-profile-or-a-multiplexed-gateway)
 - ffmpeg now runs with only `PATH`, the locale variables and, on Windows, `SYSTEMROOT` from Hermes's environment, instead of all of it, so API keys and other secrets don't reach it.
+
+## Unreleased
+
+Nothing yet: entries land here and the heading is renamed to the version at release.
 
 ## 0.6.0
 

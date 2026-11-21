@@ -192,6 +192,20 @@ Uploader::Step Uploader::step() {
       phase_ = Phase::Finished;
       return Step::Retry;
     }
+    // 20 s is the right clock for "is Hermes there" (connect and head), and the
+    // wrong one for the body: esp_transport applies timeout_ms to every write's
+    // poll, so one quiet stretch mid-body aborts the POST and discards everything
+    // already streamed -- the 10 s backoff then resends from byte 0.
+    //
+    // On this board a body that follows a recording can be quiet for 66-81 s
+    // before its first bytes leave the chip (t_021f43e2: the hub's SYN-ACK goes
+    // unanswered and nothing is transmitted on the notes flow, while the ws flow
+    // keeps working; when it clears, the body itself streams at 1.3-1.6 MB/s, so
+    // it is the flow's first write that stalls, not the transfer). 60 s still cut
+    // two of five measured runs off; 120 s is above every measured stall and
+    // still ends a body that has really stopped. A hub that is not there is
+    // caught by the 20 s connect/head clock above, which this does not touch.
+    esp_http_client_set_timeout_ms(client, 120000);
     if (!write_all(request_.head.data(), request_.head.size())) {
       close();
       phase_ = Phase::Finished;

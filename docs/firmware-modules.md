@@ -193,6 +193,16 @@ read is a `Retry` with the byte counts in the error line. The size, not
 before one such stop with the error flag clear, because the failed read reaches
 `fread` as a short file.
 
+The body has its own clock. `cfg.timeout_ms` (20 s) reaches every write's
+`select()` through `esp_transport`, so one quiet stretch mid-body used to abort
+the POST and throw away everything already on the wire. On this board a body
+that follows a recording can be quiet for 66-81 s before its first bytes leave
+the chip — the hub's SYN-ACK goes unanswered while the WebSocket flow keeps
+working, and when it clears the body runs at 1.3-1.6 MB/s — so the uploader
+raises the clock to 120 s right after `esp_http_client_open` and keeps 20 s for
+the connect, the head and the answer. A hub that is not there still fails in
+20 s; a body that has really stopped still ends.
+
 The card no longer depends on the internal heap being in one piece while that
 runs. Every buffer the notes read into is in PSRAM (the 128 KB capture ring, the
 64 KB transfer buffer) and this chip cannot DMA out of PSRAM, so the sdmmc host

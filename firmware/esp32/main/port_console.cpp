@@ -73,7 +73,7 @@ void begin() {
   // The panel image as hex: what the e-paper is showing, without a camera.
   esp_console_cmd_t screen = {};
   screen.command = "screen";
-  screen.help = "The 200x200 panel image, 1 bit per pixel, hex";
+  screen.help = "The 200x200 panel image, 1 bit per pixel, hex; `screen <first> <count>` for a slice";
   screen.func = &run;
   esp_console_cmd_register(&screen);
 #endif

@@ -118,6 +118,7 @@ void NotesModeImpl::start_note(uint32_t now) {
   }
   meta_ = std::move(meta);
   mode_ = Mode::Recording;
+  rec_started_ms_ = now;
   stop_error_.clear();
   ui_->set(UiPhase::Recording);
   mic_->start(notes::kSampleRate);
@@ -302,7 +303,78 @@ void NotesModeImpl::refresh_counts(bool publish) {
   counts_.failed = failed;
   counts_.stored = pending + sent + failed;
   queued_bytes_ = store_.pending_bytes();
+  refresh_newest();
   if (publish) publish_status();
+}
+
+// The newest note on the card: the resting status screen says which note it is
+// and how long it ran. The ids sort by time (`<device>-YYYYMMDDTHHMMSS-<seq>`),
+// so the scan needs no meta read for everything it skips, and it re-reads only
+// when the newest id changes.
+void NotesModeImpl::refresh_newest() {
+  std::string newest;
+  for (notes::NoteState state : {notes::NoteState::Pending, notes::NoteState::Sent}) {
+    for (const auto& id : store_.list(state)) {
+      if (id > newest) newest = id;
+    }
+  }
+  if (newest == newest_id_) return;
+  newest_id_ = newest;
+  newest_valid_ = false;
+  newest_duration_s_ = 0;
+  notes::Meta meta;
+  if (newest.empty() || !store_.read_meta(newest, meta)) return;
+  newest_duration_s_ = meta.duration_s;
+  // created_ms is the wall clock at record time; a note from before the first
+  // sync reads 1970, which is not a time the screen may print.
+  const int64_t seconds = meta.created_ms / 1000;
+  struct tm local {};
+  const time_t when = static_cast<time_t>(seconds);
+  if (seconds < notes::kMinTrustedStampUnix || localtime_r(&when, &local) == nullptr) return;
+  newest_valid_ = true;
+  newest_hour_ = local.tm_hour;
+  newest_minute_ = local.tm_min;
+}
+
+NoteStatus NotesModeImpl::status() const {
+  NoteStatus s;
+  s.pending = counts_.pending;
+  s.synced = counts_.synced;
+  s.failed = counts_.failed;
+  s.stored = counts_.stored;
+  s.sd_ready = sd_ready_;
+  s.has_newest = !newest_id_.empty();
+  s.newest_valid = newest_valid_;
+  s.newest_hour = newest_hour_;
+  s.newest_minute = newest_minute_;
+  s.newest_duration_s = newest_duration_s_;
+  s.error = ui_ != nullptr && ui_->phase() == UiPhase::Error ? ui_->detail() : std::string();
+
+  switch (mode_) {
+    case Mode::Recording:
+      s.phase = NoteStatus::Phase::Recording;
+      s.recording_s = (now_ms() - rec_started_ms_) / 1000;
+      break;
+    case Mode::Syncing: {
+      s.phase = NoteStatus::Phase::Uploading;
+      s.uploading_bytes = meta_.bytes;
+      const int64_t seconds = meta_.created_ms / 1000;
+      struct tm local {};
+      const time_t when = static_cast<time_t>(seconds);
+      if (seconds >= notes::kMinTrustedStampUnix && localtime_r(&when, &local) != nullptr) {
+        s.uploading_valid = true;
+        s.uploading_hour = local.tm_hour;
+        s.uploading_minute = local.tm_min;
+      }
+      break;
+    }
+    case Mode::Idle:
+      s.phase = NoteStatus::Phase::Idle;
+      break;
+  }
+  // A failure that still stands is the state, whatever the mode is doing now.
+  if (s.phase == NoteStatus::Phase::Idle && !s.error.empty()) s.phase = NoteStatus::Phase::Error;
+  return s;
 }
 
 std::string NotesModeImpl::status_line() const {

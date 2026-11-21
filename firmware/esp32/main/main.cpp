@@ -31,6 +31,7 @@
 #include "modes/live_mode.hpp"
 #include "modes/mode_router.hpp"
 #include "modes/notes_mode.hpp"
+#include "modes/notes_screen.hpp"
 #include "port_display_epd.hpp"
 #include "ui_state.hpp"
 #endif
@@ -110,6 +111,7 @@ hgp::DeviceConfig g_config;
 hgp::LiveModeImpl g_live;
 hgp::NotesModeImpl g_notes;
 hgp::ModeRouter g_modes;
+hgp::NotesScreen g_status;
 #endif
 
 // touch_cancel: which inputs act as CANCEL on touch boards.
@@ -771,10 +773,24 @@ extern "C" void app_main(void) {
   notes_io.power = hal.power;
   notes_io.sd = board.sd;
   g_notes.begin(app, g_ui, g_config, notes_io);
+  // The status screen owns the panel while the device rests (ready, offline, a
+  // battery face). The core UI keeps every screen that wants a key, a turn or a
+  // prompt, and hands the panel back through the same hook.
+  g_status.begin(app, g_notes, &g_system, g_epd);
+  app.rest_screen = [](const hg::UiModel& model, bool force) { return g_status.render(model, force); };
   app.on_console = [](std::string_view line) -> std::string {
     if (line == "notes") return g_notes.console({});
     if (line.rfind("notes ", 0) == 0) return g_notes.console(line.substr(6));
     if (line == "screen") return g_epd.image_hex();
+    // A console write takes about 4,000 characters, the image is 10,000: the
+    // slice form is how a host walks the whole panel (`screen 2500 2000`).
+    if (line.rfind("screen ", 0) == 0) {
+      unsigned first = 0, count = 0;
+      const std::string args(line.substr(7));
+      if (std::sscanf(args.c_str(), "%u %u", &first, &count) != 2)
+        return std::string("@error usage: screen <first byte> <count> (5000 bytes; count 0 = to the end)");
+      return g_epd.image_slice(first, count);
+    }
     return {};
   };
 #endif

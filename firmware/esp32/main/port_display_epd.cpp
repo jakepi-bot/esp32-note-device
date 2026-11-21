@@ -169,14 +169,16 @@ hg::DisplayInfo EpdDisplay::info() const {
   return i;
 }
 
-std::string EpdDisplay::image_hex() {
+std::string EpdDisplay::image_slice(size_t first, size_t count) {
   if (!image_ || !lock_) return {};
   const size_t bytes = static_cast<size_t>(cfg_.width) * cfg_.height / 8;
+  if (first >= bytes) return {};
+  if (count == 0 || first + count > bytes) count = bytes - first;
   static const char kHex[] = "0123456789abcdef";
   std::string out;
-  out.reserve(bytes * 2);
+  out.reserve(count * 2);
   xSemaphoreTake(lock_, portMAX_DELAY);
-  for (size_t i = 0; i < bytes; ++i) {
+  for (size_t i = first; i < first + count; ++i) {
     out.push_back(kHex[image_[i] >> 4]);
     out.push_back(kHex[image_[i] & 0x0f]);
   }

@@ -369,6 +369,16 @@ class App {
   // --- introspection --------------------------------------------------------
   Screen screen() const { return model_.screen; }
   const UiModel& model() const { return model_; }
+  // A board module may own the whole panel while the device rests: the e-paper
+  // board's notes status screen does. update_model calls it with the model it
+  // would draw and whether the core UI drew the frame before this one (false:
+  // the module's pixels, or a blank panel, are what is on the glass, so it has
+  // to repaint). Returning true means the module painted the panel and the core
+  // UI must not. The module keeps its own change check, so returning true
+  // without drawing is how an e-paper screen avoids re-sending an identical
+  // image. Unset on every other board.
+  std::function<bool(const UiModel&, bool force)> rest_screen;
+
   const std::string& device_id() const { return device_id_; }
   // The hub token this device was provisioned with (the `token` setting);
   // empty when the hub needs none. The notes uploader sends it as
@@ -380,6 +390,21 @@ class App {
   std::string sign(std::string_view canonical) const;
   bool paired() const { return paired_; }
   bool online() const { return phase_ == Phase::Online; }
+  // Wi-Fi is associated (the device has an address), whether or not the Hermes
+  // link answers yet: the e-paper status screen tells the two apart.
+  bool network_up() const { return network_up_; }
+  // The Bluetooth phone link, for boards whose port runs one.
+  int phones_paired() const { return phones_paired_; }
+  bool phone_connected() const { return phone_connected_; }
+  // What the battery indicator shows: the gauge's reading, or the voltage
+  // estimate when the board has no gauge and the estimate setting is on
+  // (App::display_battery_percent). The e-paper status screen prints this,
+  // rather than deriving a second number of its own.
+  std::optional<uint8_t> displayed_battery_percent() const { return display_battery_percent(); }
+  // External (USB) power from the last power read; nullopt when unknown, and
+  // this board has no charge-status line to refine it.
+  std::optional<bool> external_power() const { return power_status_ ? power_status_->external_power : std::nullopt; }
+
   // The resting clock is on (`set clock` above 0). The port runs network time
   // only then.
   bool clock_enabled() const { return clock_after_ms_ > 0; }
@@ -784,6 +809,8 @@ class App {
   // connection
   Phase phase_ = Phase::Boot;
   bool network_up_ = false;
+  bool rest_owned_ = false;  // a board module painted the last frame (App::rest_screen)
+
   bool transport_active_ = false;  // a connect attempt or session is live
   std::string network_detail_;
   uint32_t boot_until_ = 0;

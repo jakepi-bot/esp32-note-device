@@ -199,6 +199,10 @@ uint32_t retry_delay_ms(uint32_t attempts) {
   return delay < kCapMs ? delay : kCapMs;
 }
 
+QueueAction plan_upload(uint64_t audio_bytes) {
+  return audio_bytes >= kMinAudioBytes ? QueueAction::Upload : QueueAction::Quarantine;
+}
+
 std::string Request::content_type() const {
   std::string out = "multipart/form-data; boundary=";
   out += boundary;

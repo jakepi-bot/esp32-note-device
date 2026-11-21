@@ -57,6 +57,9 @@ class Store {
   uint32_t count(NoteState state) const;
   // Bytes of the audio waiting under pending/ (about what the queue weighs).
   uint32_t pending_bytes() const;
+  // Bytes of one note's `recording.wav`, 0 when the file is missing or empty.
+  // `plan_upload()` decides what that means for the queue.
+  uint64_t audio_bytes(NoteState state, std::string_view id) const;
 
   bool move(std::string_view id, NoteState from, NoteState to);
   // Removes a note's files and folder (a commit that failed halfway).

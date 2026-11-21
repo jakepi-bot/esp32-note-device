@@ -66,7 +66,8 @@ bool Uploader::begin(const Meta& meta, std::string_view audio_path, std::string_
   }
   struct stat st{};
   path_.assign(audio_path);
-  if (path_.empty() || ::stat(path_.c_str(), &st) != 0 || st.st_size <= 44) {
+  if (path_.empty() || ::stat(path_.c_str(), &st) != 0 ||
+      static_cast<uint64_t>(st.st_size) < kMinAudioBytes) {
     error = "recording.wav is missing or empty";
     return false;
   }

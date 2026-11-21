@@ -291,6 +291,19 @@ void NotesModeImpl::begin_sync(uint32_t now) {
     if (id == sync_id_ && retry_waiting_) continue;  // this one is in its backoff
     notes::Meta meta;
     if (!store_.read_meta(id, meta)) continue;
+    // A recording that is gone or empty (lost to a full card, or discarded
+    // after note.json was committed because the ring overflowed) will not come
+    // back: the note is terminal, so it moves to failed/ once instead of being
+    // rescanned every pass, which warned 30 times a second and never ended.
+    const uint64_t audio_bytes = store_.audio_bytes(notes::NoteState::Pending, id);
+    if (notes::plan_upload(audio_bytes) != notes::QueueAction::Upload) {
+      ESP_LOGW(TAG, "note %s has no recording (%s): moving it to failed/", id.c_str(),
+               notes::human_bytes(audio_bytes).c_str());
+      if (!store_.move(id, notes::NoteState::Pending, notes::NoteState::Failed))
+        ESP_LOGW(TAG, "could not move %s to failed/", id.c_str());
+      refresh_counts(true);
+      continue;
+    }
     // The card has no RTC and starts at 1970, so a note taken before the first
     // clock sync carries a 1970 recorded_at. It is never uploaded that way: it
     // goes out stamped with the time it is finally sent, and that stamp is
@@ -309,7 +322,17 @@ void NotesModeImpl::begin_sync(uint32_t now) {
     if (!uploader_.begin(wire, store_.audio_path(notes::NoteState::Pending, id), notes_url(), std::time(nullptr),
                          app_->access_token(), [this](std::string_view canonical) { return app_->sign(canonical); },
                          error)) {
-      ESP_LOGW(TAG, "cannot upload %s: %s", id.c_str(), error.c_str());
+      // Anything else that stops the upload from starting (no memory, a file
+      // the card will not open) is waited out on the same backoff a failed
+      // transfer gets: this pass runs every few tens of milliseconds, so an
+      // unbacked retry is a spin, not a retry.
+      sync_id_ = id;
+      retry_waiting_ = true;
+      attempt_ += 1;
+      const uint32_t wait_ms = notes::retry_delay_ms(attempt_);
+      retry_at_ms_ = now + wait_ms;
+      ESP_LOGW(TAG, "cannot upload %s: %s; next try in %u ms", id.c_str(), error.c_str(),
+               static_cast<unsigned>(wait_ms));
       continue;
     }
     meta_ = wire;

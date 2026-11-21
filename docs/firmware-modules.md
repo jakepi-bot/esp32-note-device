@@ -181,6 +181,16 @@ and the retry is byte-identical because `note.json` persists the
 `idempotency_key` (the note id): a retry after a lost acknowledgement is
 answered `200 duplicate`, so a recording is stored once, never twice.
 
+A note whose audio is gone is terminal too, decided before the uploader is
+asked: `notes::plan_upload` (`main/notes/notes_queue.cpp`) takes the
+`recording.wav` size and answers `Upload` or `Quarantine` against the 45-byte
+minimum the uploader itself refuses below (the WAV header and no sample is no
+audio). `begin_sync` moves a quarantined note to `failed/` with one warning, so
+a recording that never landed — an interrupted take, a card that ran out of
+room — cannot be rescanned on every pass, which warned 30 times a second and
+never moved it. A start the uploader refuses for another reason (no memory, an
+unreadable file) waits out the same backoff a failed transfer gets.
+
 The board has no RTC, so until its first clock sync `std::time()` reads 1970 and
 a note taken then carries a `1970-01-01T…` stamp — the absence of a time, not a
 time. Such a note is never uploaded that way: `notes::stamped_for_upload`

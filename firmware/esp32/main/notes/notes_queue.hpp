@@ -92,6 +92,24 @@ SyncResult classify_response(int http_status);  // 0 = no response at all
 // 5 s, 10 s, 20 s … capped at 300 s (spec §7.3).
 uint32_t retry_delay_ms(uint32_t attempts);
 
+// The uploader takes a WAV file of at least the 44-byte header plus a sample;
+// anything smaller (or absent) is not audio and never will be. Shared with the
+// uploader so the queue and the sender cannot disagree about it.
+constexpr uint64_t kMinAudioBytes = 45;
+
+// What the queue does with one pending note before the uploader opens it.
+enum class QueueAction : uint8_t {
+  Upload,      // the recording is on the card: hand it to the uploader
+  Quarantine,  // the recording is missing or empty: terminal, move to failed/
+};
+
+// Decided from the audio file's size alone (0 = no file), so the host tests
+// and the board run the same rule. A note whose audio is gone cannot be
+// uploaded and does not come back: retrying it only re-warns every pass
+// (t_69b49f34 — a note left by an interrupted recording warned 30 times a
+// second, forever, with `0 B queued` in `notes status`).
+QueueAction plan_upload(uint64_t audio_bytes);
+
 // The bytes of one `multipart/form-data` upload (contract §2). `head` ends
 // exactly before the audio bytes, so a streamed send is head → audio → tail
 // and the Content-Length is known before anything is read from the card.

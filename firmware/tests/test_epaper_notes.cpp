@@ -419,20 +419,25 @@ bool path_exists(const std::string& path) {
   return stat(path.c_str(), &st) == 0;
 }
 
-void write_stub(const std::string& path, const char* text) {
+void write_bytes(const std::string& path, const void* data, size_t len) {
   FILE* f = std::fopen(path.c_str(), "wb");
   CHECK(f != nullptr);
   if (!f) return;
-  std::fwrite(text, 1, std::strlen(text), f);
+  std::fwrite(data, 1, len, f);
   std::fclose(f);
 }
 
-// A note as a finished recording leaves it: audio beside the committed
-// note.json.
+void write_stub(const std::string& path, const char* text) { write_bytes(path, text, std::strlen(text)); }
+
+// A note as a finished recording leaves it: a WAV header with one sample of
+// audio beside the committed note.json, so the uploader would take it.
 bool make_note(Store& store, const std::string& id) {
   std::string error;
   if (!store.create_note(id, error)) return false;
-  write_stub(store.audio_path(NoteState::Pending, id), "RIFF....WAVE");
+  uint8_t wav[45] = {};
+  wav_header(wav, 1);
+  wav[44] = 0x80;
+  write_bytes(store.audio_path(NoteState::Pending, id), wav, sizeof(wav));
   Meta m = sample_meta();
   m.note_id = id;
   m.idempotency_key = id;
@@ -440,6 +445,50 @@ bool make_note(Store& store, const std::string& id) {
 }
 
 }  // namespace
+
+TEST("a note whose recording is missing or empty is quarantined, not retried") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  const std::string id = make_note_id("hg-0123456789abcdef", 1795140312, 11);
+
+  // A recording that never left its audio behind: note.json is committed and
+  // there is no recording.wav. The board produced this from an interrupted
+  // test recording (t_29cf3afb), and it used to be rescanned every pass.
+  std::string error;
+  CHECK(store.create_note(id, error));
+  Meta m = sample_meta();
+  m.note_id = id;
+  m.idempotency_key = id;
+  CHECK(store.write_meta(id, m, error));
+  CHECK_EQ(store.pending_ids().size(), size_t(1));  // it *is* pending: that is the trap
+  CHECK_EQ(store.audio_bytes(NoteState::Pending, id), uint64_t(0));
+  CHECK_EQ(store.pending_bytes(), uint32_t(0));     // `notes status` printed "0 B queued"
+  CHECK(plan_upload(store.audio_bytes(NoteState::Pending, id)) == QueueAction::Quarantine);
+
+  // A bare 44-byte WAV header is no audio either: the uploader refuses it, so
+  // the queue must not hand it over and then requeue it (t_69b49f34).
+  uint8_t header[44] = {};
+  wav_header(header, 0);
+  write_bytes(store.audio_path(NoteState::Pending, id), header, sizeof(header));
+  CHECK_EQ(store.audio_bytes(NoteState::Pending, id), uint64_t(44));
+  CHECK(plan_upload(store.audio_bytes(NoteState::Pending, id)) == QueueAction::Quarantine);
+
+  // The queue's answer is one move to failed/, which is terminal: the next
+  // scan of pending/ no longer sees the note at all.
+  CHECK(store.move(id, NoteState::Pending, NoteState::Failed));
+  CHECK(store.pending_ids().empty());
+  CHECK_EQ(store.count(NoteState::Pending), uint32_t(0));
+  CHECK_EQ(store.count(NoteState::Failed), uint32_t(1));
+
+  // One sample past the header is a note the uploader takes, and it stays
+  // pending until the server answers.
+  const std::string good = make_note_id("hg-0123456789abcdef", 1795140313, 12);
+  CHECK(make_note(store, good));
+  CHECK_EQ(store.audio_bytes(NoteState::Pending, good), uint64_t(45));
+  CHECK(plan_upload(store.audio_bytes(NoteState::Pending, good)) == QueueAction::Upload);
+  CHECK_EQ(store.pending_ids().size(), size_t(1));
+}
 
 TEST("delete removes a note's audio, then its note.json, then the folder") {
   TempDir dir;

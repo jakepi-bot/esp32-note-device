@@ -192,6 +192,12 @@ uint32_t Store::pending_bytes() const {
   return total;
 }
 
+uint64_t Store::audio_bytes(NoteState state, std::string_view id) const {
+  struct stat st{};
+  if (stat(audio_path(state, id).c_str(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0) return 0;
+  return static_cast<uint64_t>(st.st_size);
+}
+
 bool Store::move(std::string_view id, NoteState from, NoteState to) {
   if (from == to) return true;
   if (!ensure()) return false;

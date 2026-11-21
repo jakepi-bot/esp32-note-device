@@ -444,6 +444,11 @@ bool PhoneLink::begin(const std::string& name) {
   g_note_chrs[0].val_handle = &g_note_control_handle;
   g_note_chrs[1] = {};
   g_note_chrs[1].uuid = &g_note_data_uuid.u;
+  // NimBLE refuses a characteristic with no access callback (ble_gatts_chr_is_sane),
+  // and ble_gatts_count_cfg() then fails with BLE_HS_EINVAL before any service is
+  // registered. The data characteristic is notify-only, so on_note_access rejects
+  // every operation on it; the callback is here for the table validator.
+  g_note_chrs[1].access_cb = on_note_access;
   g_note_chrs[1].flags = BLE_GATT_CHR_F_NOTIFY;
   g_note_chrs[1].val_handle = &g_note_data_handle;
   g_note_chrs[2] = {};

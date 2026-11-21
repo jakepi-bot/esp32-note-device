@@ -77,6 +77,18 @@ if(HG_BUILD_TESTS)
   target_sources(hg_epaper_ble_tests PRIVATE esp32/main/notes/notes_ble.cpp)
   add_test(NAME hg_epaper_ble_tests COMMAND hg_epaper_ble_tests)
 
+  # The GATT tables themselves (esp32/main/port_ble.cpp): NimBLE refuses a
+  # characteristic with no access_cb, and a whole Bluetooth stack dies with it.
+  # port_ble.cpp needs the ESP-IDF to compile, so this reads the source and
+  # applies NimBLE's own rule; it fails if it stops finding the tables.
+  add_executable(hg_ble_gatt_table_tests tests/main.cpp tests/test_ble_gatt_table.cpp)
+  target_compile_definitions(hg_ble_gatt_table_tests PRIVATE
+    HG_PORT_BLE_CPP="${CMAKE_CURRENT_SOURCE_DIR}/esp32/main/port_ble.cpp")
+  if(MSVC)
+    target_compile_options(hg_ble_gatt_table_tests PRIVATE /utf-8)
+  endif()
+  add_test(NAME hg_ble_gatt_table_tests COMMAND hg_ble_gatt_table_tests)
+
   # The offline notes' portable half: note ids, note.json, the multipart
   # request, the response rules, and the card tree against a temp directory.
   # notes_store and notes_capture do their file work with POSIX open/rename and

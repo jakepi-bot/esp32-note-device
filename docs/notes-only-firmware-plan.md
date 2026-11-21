@@ -253,16 +253,32 @@ through the Hermes pipeline.
 board, partition table and sdkconfig; `-DHG_APP=notes` in `platformio.ini` picks
 the other source list in `firmware/esp32/main/CMakeLists.txt`.
 
-| | Hermes app (`waveshare-epaper-154`) | Notes app (`notes`) | Difference |
+The table below is the **skeleton**, the first build of this target, kept because
+it shows what the source split alone saved. It is not the shipped size. The app
+that is on the board - runtime, screens and all - measures 1,464,175 B and 63,136 B
+of static RAM, 36.0% of the slot against the Hermes app's 50.5%; the measurements
+are in section 11 below and their section-by-section deltas are in the rewrite's
+QA report.
+
+| Skeleton, 2026-11-21 | Hermes app (`waveshare-epaper-154`) | Notes app (`notes`) | Difference |
 |---|---|---|---|
 | Image (`firmware.bin` / idf "Flash") | 2,050,799 B, 50.5% of the slot | 731,603 B, 18.0% | **-1,319,196 B (-1,288 KB, -64.3%)** |
 | Static RAM (idf "RAM") | 87,836 B, 26.8% of 320 KB | 35,440 B, 10.8% | **-52,396 B (-59.7%)** |
 | `ota_0` slot free (`tools/check_size.py`) | 50% | 82% | |
 
 Both numbers are from a clean `pio run` on 2026-11-21 with the same ESP-IDF
-(6.1.0) and toolchain; the arithmetic above is the build's own output, not an
-estimate. The plan's guess was 250-350 KB; the whole core leaves, not just the
-turn machinery, so the notes app comes in four times smaller.
+(6.1.0) and toolchain. The skeleton was small because nothing referenced the notes
+path: with no uploader, station or setup page in the image, `--gc-sections`
+dropped them. Wiring the runtime in is what links the HTTP client, the Wi-Fi
+station/AP stack and the TLS bundle, and that is most of the 731,603 B to
+1,464,175 B.
+
+Against the Hermes app the shipped notes image is **574 KiB smaller in flash**
+(2,052,223 B to 1,464,175 B, 50.5% to 36.0% of the slot) and **24.2 KiB smaller
+in static RAM** (87,948 B to 63,136 B). The plan's guess was 250-350 KB of flash
+and 40-80 KB of RAM; flash came in above the band, RAM below it, because the
+core's bulk is flash rodata (mascots, the i18n table, panel init tables, the
+BMI270 blob) rather than DRAM.
 
 ### Where the two apps live
 
@@ -297,7 +313,7 @@ demangled symbols matching:
 |---|---|---|
 | `hg::App` | 0 | 285 |
 | `hg::UiModel` | 0 | 77 |
-| `hg::Canvas` | 0 | 42 |
+| `hg::Canvas` | 14 | 42 |
 | `i18n` | 0 | 25 |
 | mascot / face data | 0 | 37 |
 | `opus` | 0 | 20 |
@@ -308,16 +324,22 @@ demangled symbols matching:
 | protocol JSON | 0 | 4 |
 | font tables | 0 | 11 |
 
+`hg::Canvas` is the one row that is not zero, and it is deliberate: the notes
+renderer draws its own screens on the SDK's 1-bit canvas rather than on a
+framebuffer of its own, so the 14 symbols are the canvas it draws through, not the
+core UI that used to drive it.
+
 What the notes image does carry from the core: `hg::json`, `hg::RadioWindow`,
-`hg::LogRing`, `hg::SharedReply`, `hg::SpeakerPa`, the display base class and the
-two RTC drivers. NimBLE is there, because the phone path is.
+`hg::LogRing`, `hg::SharedReply`, `hg::SpeakerPa`, `hg::Canvas`, the display base
+class and the two RTC drivers. NimBLE is there, because the phone path is.
 
-### Still to come on top of this skeleton
+### Built on top of this skeleton
 
-The screens (the ~5-screen state machine, list/play/delete, menu), the power and
-radio schedule (on-demand Wi-Fi, SNTP, graceful shutdown), and the docs and
-release pass. The old target stays buildable until the bench checks in section 7
-pass on the new one.
+All three landed: the nine screens ([the spec](notes-ui-spec.md),
+[as built](notes-ui-implementation.md)), the power and radio schedule (section
+11 below), and the documentation pass this page is part of. The Hermes app's target stays
+buildable until the notes app has passed the bench checks in section 7 on the same
+unit, which is why `-e waveshare-epaper-154` is still in `platformio.ini`.
 
 ## 11. The runtime: power, the radio's duty cycle, Wi-Fi/SNTP (2026-11-21)
 

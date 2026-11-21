@@ -1,5 +1,20 @@
 # Set up a board
 
+## The notes device (what this repository ships)
+
+Three steps, no Hermes pairing and no release image yet: build and flash
+`pio run -e notes -t upload` (or write a release image with the browser
+installer), give it Wi-Fi from its own setup access point, and set it up on the
+host with the plugin's note endpoint. The [README](../README.md#build-and-flash)
+has the commands, and [Using the notes device](notes-device.md) the screens.
+
+The rest of this page is the Hermes app's setup: the prebuilt releases' installer,
+the installer's pairing step, and over-the-air updates. That app still builds from
+this tree (`-e waveshare-epaper-154`) but is no longer what the device runs, and
+none of those steps apply to the notes firmware.
+
+## Set up an SDK board
+
 Install prebuilt firmware, connect Wi-Fi, and pair the board with your Hermes. The computer that flashes the board does not need Python or a compiler.
 
 ## 1. Check your board and cable
@@ -47,7 +62,10 @@ Open the [browser installer](https://jakepi-bot.github.io/esp32-note-device/inst
 
 To change Wi-Fi or the Hermes address, use [phone setup](#set-up-wi-fi-with-your-phone) or connect USB and use the installer's **skip to Wi-Fi** option. Its firmware reinstall option can keep the existing settings.
 
-To update firmware over the air, run this on the Hermes computer, replacing the name with your device's name or ID:
+**The notes firmware has no over-the-air path**: update it over USB with
+`pio run -e notes -t upload`. The commands below are the Hermes app's, which
+carries an app image over its live link; run them on the Hermes computer,
+replacing the name with your device's name or ID:
 
 ```bash
 hermes gadget devices

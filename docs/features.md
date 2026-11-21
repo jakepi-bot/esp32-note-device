@@ -1,5 +1,12 @@
 # Features
 
+> **The shipped device does none of this.** The notes-only firmware
+> (`pio run -e notes`) has no agent UI at all. What it does do - record, keep,
+> upload over Wi-Fi, hand a note to a phone - is in
+> [Using the notes device](notes-device.md) and [the README](../README.md). The
+> list below is the Hermes Gadget SDK's, and its core is still in this tree and
+> still builds (`-e waveshare-epaper-154`) as a regression check.
+
 This page lists what a Hermes Gadget does today, grouped by what you do with it. Each line links to the guide that explains it. Some features need a board with a touchscreen, a speaker, a battery or PSRAM; the [hardware table](#supported-hardware) below shows which boards have what.
 
 The screenshots come from the desktop simulator, which runs the same device core as the boards.
@@ -86,7 +93,7 @@ The screenshots come from the desktop simulator, which runs the same device core
 - **Diagnostics report.** Save a report from the browser installer or with `hermes-gadget diag` to attach to a bug report. [Save a board report](troubleshooting.md#save-a-board-report)
 - **Away from home.** Reach Hermes from another network through Tailscale Funnel. [Connect from another network](tailscale-funnel.md)
 - **Tailnet.** Experimental, and not in release images: a source build can join your Tailscale tailnet itself. [Reach Hermes over your tailnet](tailnet.md)
-- **Two keys and no home button.** The e-paper notes device has no touch glass: PWR talks to Hermes, BOOT records a note (a 2 s hold drops it), the same two keys allow or refuse a new phone, and the panel returns to its home screen after 60 seconds with no input. An error face is the exception: it stays until a key press, because an error is the one message that needs someone to see it. [Voice notes with an iPhone](ios-bluetooth-sync.md)
+- **Two keys and no home button.** The e-paper notes device has no touch glass: BOOT records a note (a 2 s hold drops it, or opens the menu on the resting face), PWR is power (and the menu's select), and the same two keys allow or refuse a new phone. In the notes-only firmware the screens are the notes app's own. [Using the notes device](notes-device.md)
 - **Phone app and note sync over Bluetooth.** The ePaper-1.54 image always has it: pair a phone once, then take notes off the card with no Wi-Fi anywhere. Another board enables it with a `BoardConfig` flag. [Bluetooth note sync](ble-note-sync.md), [iPhone walk-through](ios-bluetooth-sync.md)
 
 ## Hermes profiles

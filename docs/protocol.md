@@ -1,5 +1,13 @@
 # Hermes Gadget Protocol, version 1
 
+> **Not the protocol the shipped device speaks.** This is the Hermes live-link
+> contract (WebSocket, turns, audio streaming, OTA), and the notes-only firmware
+> in `firmware/esp32/notes_app/` has none of it in its image. The device's two
+> wire contracts are [voice-note-ingestion](voice-note-ingestion.md) (`POST
+> /notes/v1`) and [ble-note-sync](ble-note-sync.md) (the Bluetooth note service).
+> This page is kept because the Hermes core is still in the tree and still builds
+> as `-e waveshare-epaper-154`, and because the SDK's other board profiles use it.
+
 This is the contract between a device and the gadget plugin running inside the Hermes gateway. The device side lives in `firmware/core` (C++) and the server side in `plugin/hub.py` (Python). Both test suites pin the same vectors, so the two sides cannot drift apart without a test failing.
 
 ## Transport

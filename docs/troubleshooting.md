@@ -1,5 +1,13 @@
 # Troubleshooting
 
+## The notes device
+
+The device's own table - `NO TIME`, `OFFLINE`, `NO SYNC`, `NO CARD`, a `!` on a
+list row, a phone that cannot find the board - is in
+[the README](../README.md#if-it-does-not-work). Its console answers `notes
+status`, `about`, `sd`, `clock` and `screen` without a host, and `diag`/`log` for
+the rest.
+
 ## Simulator build or window
 
 | Symptom | What to check |

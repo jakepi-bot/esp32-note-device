@@ -163,6 +163,61 @@ move partitions — and `nvs` keeps its offset, so settings and paired phones
 survive it. Check the size line after any firmware change;
 `tools/check_size.py` fails the build when a slot drops under 10% free.
 
+## Fifth verification: the notes-only firmware from a fresh clone
+
+Recorded 2026-11-21, on the commit that rewrote the documentation for the
+notes-only device. This is the build the README documents, run exactly as the
+README documents it.
+
+```bash
+git clone https://github.com/jakepi-bot/esp32-note-device.git
+cd esp32-note-device/firmware/esp32
+pio run -e notes
+```
+
+The clone was made into an empty directory (`git clone` from the pushed
+repository), with no `.pio/`, no `sdkconfig.notes`, no `managed_components/` and
+no prior build of this tree. PlatformIO 6.2.0 and the `~/.platformio` package
+cache were warm from earlier work, so the 147 s below is not a cold-cache number.
+
+```
+RAM:   [==        ]  19.3% (used 63136 bytes from 327680 bytes)
+Flash: [====      ]  36.0% (used 1464175 bytes from 4063232 bytes)
+check_size: app 1430 KB in the 3968 KB 'ota_0' slot, 64% free
+======================== [SUCCESS] Took 146.80 seconds ========================
+```
+
+| Fact | Value |
+|---|---|
+| Result | success, no warnings promoted to errors |
+| Wall clock | 147 s (warm package cache) |
+| App image | 1 464 175 B, 36.0% of the 3 968 KB `ota_0` slot, 64% free |
+| Static RAM | 63 136 B (19.3% of 320 KB) |
+| Against the Hermes app | -574 KiB flash (2 052 223 B), -24.2 KiB static RAM (87 948 B) |
+| Framework | ESP-IDF 6.1, PlatformIO 6.2.0 |
+
+The Hermes environment still builds from the same clone
+(`pio run -e waveshare-epaper-154`, 2 052 223 B): it is kept as the regression
+check until the notes app has passed the same bench run.
+
+Host tests from the same clone:
+
+```bash
+cmake -S firmware -B build-host
+cmake --build build-host -j8
+ctest --test-dir build-host --output-on-failure
+```
+
+`100% tests passed, 0 tests failed out of 9`, 79 s of wall clock. `hg_notes_ui_tests`
+(19 cases) covers the screen machine, the copy, list order and marks, the list
+window, refresh classes, delete and playback against a real card in a temp
+directory, and an ink-bounds check of all nine screens; `hg_epaper_notes_tests`
+and `hg_ble_gatt_table_tests` cover the card tree, the queue and the GATT table.
+
+What this does not prove: nothing was flashed by this run. Display, audio, the
+card and the radio are verified on the board, not in this file, and the notes
+image has not been tagged as a release - 0.7.1 is the last Hermes-app release.
+
 ## What CI runs
 
 | Workflow | Trigger | Jobs |

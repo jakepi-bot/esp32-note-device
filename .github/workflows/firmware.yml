@@ -19,11 +19,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.platformio
           key: platformio-${{ runner.os }}-${{ hashFiles('firmware/esp32/platformio.ini', 'firmware/esp32/main/idf_component.yml') }}
@@ -37,7 +37,7 @@ jobs:
         working-directory: firmware/esp32
         run: python tools/package_release.py --board waveshare-epaper-154 --out dist
       - name: Keep the images
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: firmware-waveshare-epaper-154
           path: firmware/esp32/dist/
@@ -48,7 +48,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure
         run: cmake -S firmware -B build/host -DCMAKE_BUILD_TYPE=Release
       - name: Build
@@ -57,7 +57,7 @@ jobs:
         run: ctest --test-dir build/host -C Release --output-on-failure
       # The phone half of the Bluetooth note sync, against a packet stream the
       # firmware itself printed (web/ble-note-relay/test/transfer-fixture.txt).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
       - name: Relay protocol tests

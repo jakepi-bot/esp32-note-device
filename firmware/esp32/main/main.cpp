@@ -304,7 +304,7 @@ void dispatch(hg::App& app, hgp::Event& ev) {
   if (stale) return;
   switch (ev.type) {
     case EventType::NetUp:
-      g_wifi.connected(app);
+      g_wifi.connected();
       app.on_network(true, text ? text : "");
       g_time.set_network(true);
 #if !CONFIG_HG_BOARD_ESP32_CYD
@@ -746,6 +746,19 @@ extern "C" void app_main(void) {
   app.on_wifi_setup_close = [] { g_wifi.stop_setup(); };
   app.on_wifi_setup_ap = [] { return g_wifi.setup_ap(); };
   app.current_wifi = [] { return g_wifi.current(); };
+  // The port's side of the same two: the setup page is this app's screen, and
+  // the settings it posts go through the console (App::console), exactly as
+  // they did when the port called them itself.
+  // `app` is a static here, so the hooks take its address rather than capturing
+  // the reference (which C++ rejects for a non-automatic variable).
+  hg::App* const app_ptr = &app;
+  g_wifi.open_setup = [app_ptr] { app_ptr->start_wifi_setup(); };
+  g_wifi.close_setup = [app_ptr] { app_ptr->close_wifi_setup(); };
+  g_wifi.on_console = [app_ptr](std::string_view line) { return app_ptr->console(line); };
+  g_wifi.in_turn = [app_ptr] { return app_ptr->in_turn(); };
+  g_wifi.dozing = [app_ptr] { return app_ptr->dozing(); };
+  g_wifi.deep_sleep_ok = [app_ptr] { return app_ptr->wifi_deep_sleep(); };
+  g_wifi.traffic_at = [app_ptr] { return app_ptr->traffic_at(); };
   app.on_diag = [](hg::json::Value& report) {
     hgp::diag::report(report);
     report.set("ota", g_updater.describe());
@@ -887,7 +900,7 @@ extern "C" void app_main(void) {
 #if CONFIG_HG_BOARD_CARDPUTER_ADV
     if (hal.display == &g_compose) g_keyboard.poll(app, g_compose);
 #endif
-    g_wifi.tick(app, g_system.now_ms());
+    g_wifi.tick(g_system.now_ms());
 #if !CONFIG_HG_BOARD_ESP32_CYD
     g_tailnet.tick(g_system.now_ms());
 #endif

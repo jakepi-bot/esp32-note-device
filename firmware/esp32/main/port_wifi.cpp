@@ -39,6 +39,7 @@ void Wifi::begin(NvsStorage& storage) {
   if (esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "hg-wifi-join", &attempt_lock_) != ESP_OK) attempt_lock_ = nullptr;
 #endif
   ESP_ERROR_CHECK(esp_wifi_start());
+  started_ = true;
 }
 
 void Wifi::hold_while_attempting() {
@@ -135,6 +136,7 @@ void Wifi::forget_unsaved_ap() {
 
 void Wifi::join(const std::string& ssid, const std::string& password) {
   configured_ = false;
+  loss_applied_ = false;  // a new attempt: its loss, if any, is a fresh one
   if (scanning_) esp_wifi_scan_stop();
   scanning_ = false;
   retry_.connected();  // nothing pending until this join is under way
@@ -179,7 +181,13 @@ void Wifi::networks_changed() {
 
 void Wifi::disconnected() {
   wait_disconnect_ = false;
+  const bool already = loss_applied_;
+  loss_applied_ = true;
   link_up_ = false;
+  // The pass and the event both see the same loss. The backoff, the network
+  // order and the PM lock must be touched once, so the second report stops
+  // here (`loss_applied_` is cleared by the next join).
+  if (already) return;
   if (configured_) {
     if (fast_.failed()) {
       // The fast join didn't work: join normally at once, without counting it against
@@ -194,11 +202,15 @@ void Wifi::disconnected() {
   hold_while_attempting();
 }
 
-void Wifi::connected(hg::App& app) {
+void Wifi::connected() {
+  // The pass may have applied this association already (sta_linked()): the
+  // second report of the same link has nothing to do.
+  if (link_up_) return;
   retry_.connected();
   pick_.connected();
   hold_while_attempting();
   link_up_ = true;
+  loss_applied_ = false;
   remember_ap();
   if (!joining_ && networks_.joined(ssid_)) {
     networks_.save(*storage_);
@@ -213,11 +225,16 @@ void Wifi::connected(hg::App& app) {
   networks_.put_first(candidate_.ssid, candidate_.password, true);
   networks_.save(*storage_);
   pick_.reset(networks_.size());
-  app.console(std::string("set server ") + candidate_.server);
-  if (candidate_.tailnet_given) {
-    // The key first: `tailnet on` starts the node with whatever key is saved.
-    if (candidate_.ts_key[0]) app.console(std::string("set ts_key ") + candidate_.ts_key);
-    app.console(std::string("set tailnet ") + (candidate_.tailnet_on ? "on" : "off"));
+  // The settings the setup page posted. The app's console is what applies
+  // them (the notes app answers only the ones it has): this port never parses
+  // a setting of its own.
+  if (on_console) {
+    on_console(std::string("set server ") + candidate_.server);
+    if (candidate_.tailnet_given) {
+      // The key first: `tailnet on` starts the node with whatever key is saved.
+      if (candidate_.ts_key[0]) on_console(std::string("set ts_key ") + candidate_.ts_key);
+      on_console(std::string("set tailnet ") + (candidate_.tailnet_on ? "on" : "off"));
+    }
   }
   candidate_ = {};
   joining_ = false;
@@ -226,8 +243,12 @@ void Wifi::connected(hg::App& app) {
   esp_netif_ip_info_t station{};
   auto* sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
   if (sta && esp_netif_get_ip_info(sta, &station) == ESP_OK &&
-      (station.ip.addr & station.netmask.addr) == (inet_addr("192.168.4.1") & station.netmask.addr))
-    app.close_wifi_setup();
+      (station.ip.addr & station.netmask.addr) == (inet_addr("192.168.4.1") & station.netmask.addr)) {
+    // A phone that provisioned the device is done with the setup page: the
+    // app's screen, when it has one, is what closes; otherwise the port does.
+    if (close_setup) close_setup();
+    else stop_setup();
+  }
 }
 
 void Wifi::provision(const hg::WifiCredentials& credentials) {
@@ -241,11 +262,12 @@ void Wifi::provision(const hg::WifiCredentials& credentials) {
   join(candidate_.ssid, candidate_.password);
 }
 
-void Wifi::tick(hg::App& app, uint32_t now) {
+void Wifi::tick(uint32_t now) {
   if (auto_setup_) {
     auto_setup_ = false;
     auto_setup_tried_ = true;
-    app.start_wifi_setup();
+    if (open_setup) open_setup();
+    else start_setup();
   }
   if (joining_ && now - trial_at_ >= 30000) {
     reconfigure();
@@ -254,10 +276,64 @@ void Wifi::tick(hg::App& app, uint32_t now) {
     accepting_setup_ = true;
   }
   if (http_ && (static_cast<int32_t>(now - setup_until_) >= 0 ||
-                (close_at_ && static_cast<int32_t>(now - close_at_) >= 0))) app.close_wifi_setup();
+                (close_at_ && static_cast<int32_t>(now - close_at_) >= 0))) {
+    if (close_setup) close_setup();
+    else stop_setup();
+  }
   if (configured_ && retry_.due(now)) attempt(now);
+  // The link, as the driver has it. The notes app keeps no hg::App and so has
+  // no NetUp handler to call connected() from: without this poll its window
+  // would join the access point and still report no station, which leaves SNTP
+  // unstarted and the uploader with nothing to send through. The transition
+  // functions are idempotent, so the app's own event handler is not competing.
+  if (started_) {
+    if (sta_linked()) connected();
+    else if (link_up_) disconnected();
+  }
   hold_while_attempting();
-  apply_power_save(now, app);
+  apply_power_save(now);
+}
+
+bool Wifi::sta_linked() const {
+  wifi_ap_record_t ap = {};
+  if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) return false;  // not associated
+  auto* sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  esp_netif_ip_info_t info = {};
+  return sta && esp_netif_get_ip_info(sta, &info) == ESP_OK && info.ip.addr != 0;
+}
+
+// The duty cycle's off half. The association goes first (the event arrives as
+// a disconnect, which is why `configured_` is cleared before it), then the
+// station itself: a station that is up but unassociated still holds the chip
+// out of light sleep and costs the radio's idle current.
+void Wifi::radio_off() {
+  if (!started_) return;
+  if (http_ || joining_) return;  // the setup page and a provisioning join are windows of their own
+  configured_ = false;
+  link_up_ = false;
+  retry_.connected();  // no backoff carried into the next window
+  esp_wifi_disconnect();
+  if (esp_wifi_stop() != ESP_OK) {
+    ESP_LOGW("hg.wifi", "the station did not stop; it stays up, unassociated");
+    return;
+  }
+  started_ = false;
+  hold_while_attempting();
+  ESP_LOGI("hg.wifi", "radio off: the station is stopped, no association is held");
+}
+
+// The window's other half: start the station and join the first saved network.
+// A join that fails is retried by the port's own clock while the window lasts.
+void Wifi::radio_on() {
+  if (!started_) {
+    if (esp_wifi_start() != ESP_OK) {
+      ESP_LOGW("hg.wifi", "the station did not start: the window has no network");
+      return;
+    }
+    started_ = true;
+  }
+  ESP_LOGI("hg.wifi", "radio on: joining the saved network");
+  reconfigure();
 }
 
 void Wifi::attempt(uint32_t now) {
@@ -304,12 +380,13 @@ void Wifi::scan_done() {
   if (esp_wifi_connect() != ESP_OK) retry_.start_failed(now_ms());
 }
 
-void Wifi::apply_power_save(uint32_t now, const hg::App& app) {
+void Wifi::apply_power_save(uint32_t now) {
   // Modem sleep only on battery and outside a turn, deeper while dozing quietly
   // (wifi_power.hpp) unless `wifi_deep_sleep` is off; a board without a battery
   // reading counts as plugged in.
-  const auto want = power_save_.change(now, [this] { return on_battery && on_battery(); }, app.in_turn(),
-                                       app.dozing() && app.wifi_deep_sleep(), app.traffic_at());
+  const auto want = power_save_.change(now, [this] { return on_battery && on_battery(); },
+                                       in_turn && in_turn(), dozing && dozing() && deep_sleep_ok && deep_sleep_ok(),
+                                       traffic_at ? traffic_at() : 0u);
   if (!want) return;
   static constexpr wifi_ps_type_t kMode[] = {WIFI_PS_NONE, WIFI_PS_MIN_MODEM, WIFI_PS_MAX_MODEM};
   if (esp_wifi_set_ps(kMode[static_cast<int>(*want)]) != ESP_OK) return;

@@ -318,3 +318,77 @@ The screens (the ~5-screen state machine, list/play/delete, menu), the power and
 radio schedule (on-demand Wi-Fi, SNTP, graceful shutdown), and the docs and
 release pass. The old target stays buildable until the bench checks in section 7
 pass on the new one.
+
+## 11. The runtime: power, the radio's duty cycle, Wi-Fi/SNTP (2026-11-21)
+
+`firmware/esp32/notes_app/runtime.cpp` is everything the notes device does that
+is not a screen, written against `hg::App`-free modules rather than
+`modes/notes_mode.cpp` (which needs the core's App, UI state and settings):
+
+| Piece | Where it comes from |
+|---|---|
+| the card tree, the recording, the queue and its HMAC | `notes/notes_store`, `notes_capture`, `capture_writer`, `notes_queue`, `notes_uploader` |
+| the phone's transfer | `notes/notes_ble` over `port_ble.cpp`'s GATT table, pairing ask and `hg::RadioWindow` |
+| the retention rule | `notes/notes_retention`, on the same 5-minute / 1-minute-low clock |
+| the battery | `port_latch_power.cpp` (ADC, `hg::percent_on_curve`, or a 3.30-4.15 V line on this board, which has no measured curve) |
+| the station and the setup page | `port_wifi.cpp`, `port_wifi_setup.cpp` |
+| the clock | `port_time.cpp` (SNTP; this board has no RTC) |
+
+Two seams were needed in the shared ports, both to stop them needing `hg::App`:
+
+- `Wifi::connected()`/`tick(now)` take no app. What they used from it is now a
+  set of hooks the app sets: `on_console` (the setup page's `set server …`),
+  `open_setup`/`close_setup` (the app's screen; empty means the port starts and
+  stops the page itself), `in_turn`, `dozing`, `deep_sleep_ok` and `traffic_at`.
+  The Hermes app wires them to `hg::App` in `main.cpp` and behaves as before.
+- `Wifi::radio_off()`/`radio_on()` are new: the station is **stopped** outside a
+  window (an unassociated station still costs idle current and holds the chip
+  out of light sleep), and started plus rejoined when one opens. `setup_open()`
+  keeps a phone's setup page from being closed by a window's deadline.
+
+`port_wifi_setup.cpp`'s tailnet block is behind `#if !HG_NOTES_APP`: the notes
+app has no tailnet (section 2), and asking `TailnetLink` there would link
+`port_tailnet.cpp` into an image that carries no TailTiny.
+
+### The duty cycle
+
+| Event | What the radio does |
+|---|---|
+| boot with a pending note or an unset clock | Wi-Fi window, 120 s (SNTP runs as soon as the station has an address) |
+| a note finishes recording | BLE window (`RadioWindow`, 180 s) and a Wi-Fi window, 120 s |
+| `Sync now` (menu or console) | a window at once, 120 s |
+| phone setup page | the station stays up for the page's own lifetime |
+| window closed with work left | reopened every 15 min (2 min up, 13 min down) until the queue is empty and the clock is set |
+| at rest | no association, station stopped; the BLE controller is off outside its window |
+
+`notes status` reports the Wi-Fi window's share (`radio <up>/<since-boot> ms`)
+so the duty cycle is measurable without a meter; the target is still the one in
+section 4 (idle average under 1 mA), to be measured on the bench.
+
+### Power
+
+PWR is the graceful path: a 1.5 s hold (half a second before the latch's own
+cut) runs `Runtime::shutdown()`, which finishes a recording as a note (its
+`note.json` is the commit), drains the writer, cancels an upload (the note stays
+`pending/` and is resent by key), releases the card, closes the station and drops
+the latch. On USB the latch is not the supply, so the card is mounted again and
+the device carries on instead of sitting dead with no card.
+
+### Numbers, measured
+
+`pio run -e notes` on this tree, clean build, ESP-IDF 6.1.0, 2026-11-21:
+
+| | Hermes app (`waveshare-epaper-154`) | Notes app with the runtime (and the screens card's files) |
+|---|---|---|
+| Image | 2,050,799 B | 1,460,155 B |
+| Static RAM | 87,836 B | 63,136 B |
+
+The parent's skeleton was 731,603 B only because nothing referenced the notes
+path: `nm` found no `hg::App`, but the uploader, the station and the setup page
+were unreachable, so `--gc-sections` dropped them. Wiring the runtime in is what
+links `esp_http_client` (via `notes_uploader.cpp`), the Wi-Fi station/AP stack
+(`esp_wifi`, net80211, wpa_supplicant, the mesh objects), `esp_http_server` and
+the mbedTLS X.509 bundle; that is most of the difference, and it is the price of
+the upload, the setup page and SNTP. The notes image is still 577 KB (28%)
+smaller than the Hermes app in flash and 28% smaller in static RAM.
+

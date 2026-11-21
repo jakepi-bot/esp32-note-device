@@ -15,6 +15,7 @@
 //   Confirm    keep the note      keep the note         delete the note
 //   Playing    power off          stop                  stop
 //   Pairing    refuse the phone   allow the phone       (nothing)
+//   About      power off          (nothing)             back to menu
 //
 // Nothing here decides what "select" means for a menu row: the caller maps
 // State::menu through MenuItem and runs it, so this stays testable and the
@@ -34,6 +35,7 @@ enum class Screen : uint8_t {
   ConfirmDelete,
   Playing,
   Pairing,
+  About,
   Back,  // internal: "leave this screen", resolved by the caller
 };
 

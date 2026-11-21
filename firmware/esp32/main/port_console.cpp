@@ -89,6 +89,20 @@ void begin() {
   screen.help = "The 200x200 panel image, 1 bit per pixel, hex; `screen <first> <count>` for a slice";
   screen.func = &run;
   esp_console_cmd_register(&screen);
+#if HG_NOTES_APP
+  // The notes-only app has no App::console behind `run()`, but its own
+  // console_line() (notes_app/main.cpp) answers these directly, and without a
+  // registration esp_console answers "Unrecognized command" before the app ever
+  // sees the line: the boot face's battery, clock and link could not be read
+  // back from a host at all.
+  for (const char* name : {"about", "battery", "clock", "radio", "sd", "keys"}) {
+    esp_console_cmd_t cmd = {};
+    cmd.command = name;
+    cmd.help = "Notes app status (see: notes status)";
+    cmd.func = &run;
+    esp_console_cmd_register(&cmd);
+  }
+#endif
 #endif
   for (const char* name : kCommands) {
     esp_console_cmd_t cmd = {};

@@ -131,7 +131,14 @@ set(HG_SHARED_SOURCES
 # own screens.
 set(HG_NOTES_SOURCES
     "../notes_app/main.cpp"
+    "../notes_app/runtime.cpp"
+    "../notes_app/ui_device.cpp"
     "notes_app/ui_keys.cpp"
+    "notes_app/ui_view.cpp"
+    "notes_app/ui_render.cpp"
+    "notes_app/ui_app.cpp"
+    "notes_app/ui_cache.cpp"
+    "notes_app/wav_player.cpp"
     "port_display_epd.cpp"
     "device_config.cpp"
     "notes/notes_queue.cpp"

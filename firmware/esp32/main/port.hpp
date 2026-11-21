@@ -926,13 +926,36 @@ class Wifi {
   // The network the device is on, or empty.
   std::string current() const { return link_up_ ? ssid_ : std::string(); }
   void disconnected();
-  void connected(hg::App& app);
-  void tick(hg::App& app, uint32_t now);
+  void connected();
+  void tick(uint32_t now);
   // Retry at once instead of at the next backoff slot (the user is back).
   void retry_now();
+  // The duty cycle's off half (the notes app, docs/notes-only-firmware-plan.md
+  // §4): drop the association and stop the station, so a resting device holds
+  // no link to any access point and the chip can light-sleep. A setup page
+  // that is open, or a provisioning join in flight, keeps the radio up: those
+  // are windows of their own. radio_on() starts it again and rejoins.
+  void radio_off();
+  void radio_on();
+  bool radio_running() const { return started_; }
+  bool setup_open() const { return http_ != nullptr; }
   // Whether the device runs on its battery: the retry backoff and modem sleep (outside a turn)
   // apply only then.
   std::function<bool()> on_battery;
+  // What the two apps do differently, so this port needs neither of them.
+  // `on_console` runs a settings line the phone's setup page posted (`set
+  // server …`, `set ts_key …`): the Hermes app's console applies it, the notes
+  // app ignores the ones it has no setting for. `open_setup`/`close_setup` are
+  // the app's own screen for the setup page; empty means the port just starts
+  // or stops the page, which is what a device with no menu wants.
+  std::function<std::string(std::string_view)> on_console;
+  std::function<void()> open_setup;
+  std::function<void()> close_setup;
+  // Power and display state, while a mode that is not the core's owns the board.
+  std::function<bool()> in_turn;        // empty: false
+  std::function<bool()> dozing;         // empty: false
+  std::function<bool()> deep_sleep_ok;  // empty: off (the core's setting, on by default)
+  std::function<uint32_t()> traffic_at; // empty: 0 (nothing has used the link)
   std::string start_setup();
   void stop_setup();
   // The temporary network's credentials, for the setup screen's QR code.
@@ -943,6 +966,10 @@ class Wifi {
   static void on_event(void* arg, const char* base, int32_t id, void* data);
   static esp_err_t setup_http(httpd_req_t* request);
   void join(const std::string& ssid, const std::string& password);
+  // Whether the station is associated and holds an address: the pass reads it
+  // from the driver, because an app with no NetUp handler (the notes app) would
+  // otherwise never learn that its window has a link.
+  bool sta_linked() const;
   // With `aim`, the station joins that access point on its channel without scanning.
   bool configure(const std::string& ssid, const std::string& password, const hg::WifiFastAp* aim = nullptr);
   void attempt(uint32_t now);
@@ -957,7 +984,12 @@ class Wifi {
   bool aimed_ = false;      // the station config names one access point (fast_)
   bool static_ip_ = false;  // DHCP stopped for a reused lease (CONFIG_HG_WIFI_REUSE_IP)
   std::string ssid_, password_;  // what the station is configured for
+  bool started_ = false;         // the station is up (radio_off stops it)
   bool link_up_ = false, scanning_ = false;
+  // The association's last transition has been applied (retry backoff, the
+  // saved-network order). Both the event handler and the pass can report the
+  // same change; only the first one counts.
+  bool loss_applied_ = false;
   bool auto_setup_ = false, auto_setup_tried_ = false;
   bool joining_ = false, wait_disconnect_ = false;
   uint32_t trial_at_ = 0, setup_until_ = 0, close_at_ = 0;
@@ -966,7 +998,7 @@ class Wifi {
   bool attempt_held_ = false;
   void hold_while_attempting();
   hg::WifiPowerSave power_save_;
-  void apply_power_save(uint32_t now, const hg::App& app);
+  void apply_power_save(uint32_t now);
   hg::WifiCredentials candidate_{};
   httpd_handle_t http_ = nullptr;
   std::mutex setup_mutex_;

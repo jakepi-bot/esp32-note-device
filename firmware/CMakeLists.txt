@@ -83,6 +83,26 @@ if(HG_BUILD_TESTS)
   target_sources(hg_epaper_ble_tests PRIVATE esp32/main/notes/notes_ble.cpp)
   add_test(NAME hg_epaper_ble_tests COMMAND hg_epaper_ble_tests)
 
+  # The notes UI itself (esp32/main/notes_app/ui_*.* and wav_player.*): the
+  # screen machine, the copy, the list's order and marks, the refresh class of
+  # every transition, and play/delete against a real temp card. The card work
+  # is POSIX, like the notes store's own tests, so MSVC skips this one.
+  if(NOT MSVC)
+    add_executable(hg_notes_ui_tests tests/main.cpp tests/test_notes_screens.cpp)
+    target_include_directories(hg_notes_ui_tests PRIVATE esp32/main)
+    target_link_libraries(hg_notes_ui_tests PRIVATE hg_core)
+    target_sources(hg_notes_ui_tests PRIVATE esp32/main/notes_app/ui_keys.cpp
+                                            esp32/main/notes_app/ui_view.cpp
+                                            esp32/main/notes_app/ui_render.cpp
+                                            esp32/main/notes_app/ui_app.cpp
+                                            esp32/main/notes_app/ui_cache.cpp
+                                            esp32/main/notes_app/wav_player.cpp
+                                            esp32/main/notes/notes_store.cpp
+                                            esp32/main/notes/notes_queue.cpp
+                                            esp32/main/notes/notes_capture.cpp)
+    add_test(NAME hg_notes_ui_tests COMMAND hg_notes_ui_tests)
+  endif()
+
   # The GATT tables themselves (esp32/main/port_ble.cpp): NimBLE refuses a
   # characteristic with no access_cb, and a whole Bluetooth stack dies with it.
   # port_ble.cpp needs the ESP-IDF to compile, so this reads the source and

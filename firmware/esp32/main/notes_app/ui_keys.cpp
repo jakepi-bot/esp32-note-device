@@ -32,6 +32,7 @@ Action press_power(State& state) {
       return Action::PowerOff;  // stopping is BOOT's; PWR is still power
     case Screen::Home:
     case Screen::Recording:
+    case Screen::About:
     case Screen::Back:
       return Action::PowerOff;
   }
@@ -62,6 +63,8 @@ Action press_boot(State& state) {
     case Screen::Playing:
       state.playing = false;
       return Action::StopPlay;
+    case Screen::About:
+      return Action::None;  // the page is whole on one screen
     case Screen::Back:
       return Action::None;
   }
@@ -93,6 +96,9 @@ Action hold_boot(State& state) {
     case Screen::Playing:
       state.playing = false;
       return Action::StopPlay;
+    case Screen::About:
+      state.go(Screen::Menu);
+      return Action::Back;
     case Screen::Back:
       return Action::None;
   }

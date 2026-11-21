@@ -46,3 +46,6 @@ Thumbs.db
 deploy/bluetooth-sync/.env
 deploy/bluetooth-sync/data/
 deploy/bluetooth-sync/docker-compose.host.yml
+
+# ctest writes this when the suite is run from the repo root.
+/Testing/

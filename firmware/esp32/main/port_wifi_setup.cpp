@@ -184,6 +184,10 @@ esp_err_t Wifi::setup_http(httpd_req_t* req) {
     }
     result.set("ssid", self->storage_->get("wifi_ssid").value_or(CONFIG_HG_DEFAULT_WIFI_SSID));
     result.set("server", self->storage_->get("server").value_or(CONFIG_HG_DEFAULT_SERVER_URL));
+    // The notes app has no tailnet (docs/notes-only-firmware-plan.md §2), and
+    // TailnetLink is the Hermes app's: asking it here would link port_tailnet.cpp
+    // into an image that carries no TailTiny at all.
+#if !HG_NOTES_APP
     if (TailnetLink::supported()) {
       // Whether the board can reach Hermes over a tailnet, as the settings stand; never the key.
       auto tailnet = hg::json::Value::object();
@@ -191,6 +195,7 @@ esp_err_t Wifi::setup_http(httpd_req_t* req) {
           .set("key", !self->storage_->get("ts_key").value_or("").empty());
       result.set("tailnet", tailnet);
     }
+#endif
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_sendstr(req, result.dump().c_str());
   }

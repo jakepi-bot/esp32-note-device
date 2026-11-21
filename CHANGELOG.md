@@ -2,6 +2,14 @@
 
 ## unreleased
 
+- **The menu has a way in, and it is the held BOOT.** The documented TALK+CANCEL
+  chord could never fire on the notes device: holding PWR is the latch's own
+  power-off, so the board switched off before the second key mattered. A held
+  BOOT now does the one thing there is to do with what is on the glass: it drops
+  the recording, leaves the menu, closes a live turn, or opens the menu on the
+  home screen. The menu takes a BOOT tap as next and a PWR tap as change. The rule
+  is `hgp::route_key()` in `modes/home_keys.cpp`, host-tested in
+  `tests/test_epaper_keys.cpp`, and the home hint names all three gestures.
 - **The pairing copy is buttons everywhere it is read (round 5).** The deploy guide's step 8, its `authentication`/`insufficient` troubleshooting row, and the **Phone app** row in `docs/using-gadget.md` all told the reader to allow a phone on the gadget's own screen. No board this repository builds has touch code, so they now say **press BOOT** and carry the canonical sentence — **BOOT allows, PWR refuses; no answer within 20 s refuses**. The `hermes-note-sync` image was rebuilt from this tree, because the one built before the round-4 commit still served the old relay page.
 
 - **The device's own copy names its own keys (round 4, D1-D5).** The board now describes itself with the names printed on the case: `talk_label = "PWR"` and `cancel_label = "BOOT"`, so the settings face reads `PWR: change | BOOT: next` instead of naming BOOT for both keys while PWR talks. A pairing ask runs the other way round (BOOT allows, PWR refuses), so the board also carries `pair_allow_label`/`pair_refuse_label` and the core's ask hint names those keys where a board sets them; boards that set none keep `TALK … / CANCEL …` unchanged. The round-2 key map is gone from the docs: `docs/firmware-modules.md` and `docs/waveshare-epaper-154-v2.md` describe `buttons = {-1,-1,-1,-1}` with `buttons.record = 0`, BOOT as record (tap) and cancel (2 s hold), PWR as a live turn (short) and the latch's power-off (hold), auto-home at 60 s, and the pairing acknowledgement. The pairing copy in `docs/ble-note-sync.md`, `docs/protocol.md`, the README and the relay page is the canonical sentence — **BOOT allows, PWR refuses, no answer within 20 s refuses** — with no tap-Allow or swipe instruction left for a board that has no glass; `docs/features.md` says which faces auto-home and which (an error) waits for a key. [Firmware modules](docs/firmware-modules.md)

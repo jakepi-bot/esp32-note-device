@@ -555,8 +555,11 @@ TEST("with no touch glass the resting face names both keys and draws no targets"
   in.synced = 0;
   in.newest_valid = false;
   const StatusView v = compose_status(in);
-  CHECK(v.note.find("Tap BOOT") != std::string::npos);
+  CHECK(v.note.find("BOOT") != std::string::npos);
   CHECK(v.note.find("PWR") != std::string::npos);
+  // The held BOOT that opens the menu is named too: nothing else on the glass
+  // announces it, and it is the only way in.
+  CHECK(v.note.find("menu") != std::string::npos);
   // The whole hint fits the note block: three lines of thirteen columns.
   CHECK(static_cast<int>(hg::wrap_text(v.note, layout::kNoteCols).size()) <= layout::kNoteMaxLines);
   // A recording says how to stop it, and the hold that drops it.

@@ -31,7 +31,7 @@ a basement.
 
 Pairing is a conversation between three things, and the gadget has the last word.
 
-1. **Open the pairing window on the gadget.** Settings → **Phone app** → the
+1. **Open the pairing window on the gadget.** Hold **BOOT** for two seconds to open the settings menu, then **Phone app** → the
    window opens and the screen says *Pair a phone*. (Over the USB console:
    `phone pair`. Or, from another Bluetooth phone, the device settings menu.)
    The window lasts two minutes; if it closes, open it again.

@@ -48,12 +48,12 @@ TEST("a BOOT tap toggles the note, and BOOT never talks however long it is held"
   // the lift that follows is not a tap (or a second note would start on release).
   CHECK(k.key_press(5000) == HomeAction::None);
   CHECK(k.tick(5000 + kCancel - 1) == HomeAction::None);
-  CHECK(k.tick(5000 + kCancel) == HomeAction::Cancel);
+  CHECK(k.tick(5000 + kCancel) == HomeAction::Hold);
   CHECK(k.tick(5000 + kCancel + 500) == HomeAction::None);  // fires once
   CHECK(k.key_release(5000 + kCancel + 600) == HomeAction::None);
   // A second hold is armed again by its own press.
   CHECK(k.key_press(10000) == HomeAction::None);
-  CHECK(k.tick(10000 + kCancel) == HomeAction::Cancel);
+  CHECK(k.tick(10000 + kCancel) == HomeAction::Hold);
   CHECK(k.key_release(10000 + kCancel + 10) == HomeAction::None);
 }
 
@@ -72,7 +72,7 @@ TEST("the pairing ask answers on the keys: BOOT allows, PWR refuses, a hold does
   // in radio range cannot bond itself to a merely advertising device.
   CHECK(pairing_ask_answer(HomeAction::NoteToggle) == AskAnswer::Allow);
   CHECK(pairing_ask_answer(HomeAction::TalkToggle) == AskAnswer::Deny);
-  CHECK(pairing_ask_answer(HomeAction::Cancel) == AskAnswer::None);
+  CHECK(pairing_ask_answer(HomeAction::Hold) == AskAnswer::None);
   CHECK(pairing_ask_answer(HomeAction::None) == AskAnswer::None);
 
   // And the map itself produces those actions from the real presses.
@@ -91,11 +91,79 @@ TEST("a press the poller sees mid-hold cannot act twice inside one press") {
   HomeKeys k;
   k.begin({});
   CHECK(k.key_press(100) == HomeAction::None);
-  CHECK(k.tick(100 + kCancel) == HomeAction::Cancel);
+  CHECK(k.tick(100 + kCancel) == HomeAction::Hold);
   // A second press while the first is still down (a bounce the poller missed, or
   // a finger that never lifted): the cancel is re-armed with its own press.
   CHECK(k.key_press(2000) == HomeAction::None);
   CHECK(k.tick(2010) == HomeAction::None);
-  CHECK(k.tick(2000 + kCancel) == HomeAction::Cancel);
+  CHECK(k.tick(2000 + kCancel) == HomeAction::Hold);
   CHECK(k.key_release(2000 + kCancel + 50) == HomeAction::None);
+}
+
+namespace {
+
+KeyContext home_context() { return KeyContext{}; }
+KeyContext menu_context() {
+  KeyContext c;
+  c.menu_open = true;
+  c.turn_or_overlay = true;  // the menu covers whatever was there
+  return c;
+}
+KeyContext recording_context() {
+  KeyContext c;
+  c.note_recording = true;
+  return c;
+}
+KeyContext turn_context() {
+  KeyContext c;
+  c.turn_or_overlay = true;
+  return c;
+}
+KeyContext ask_context() {
+  KeyContext c;
+  c.phone_ask = true;
+  c.turn_or_overlay = true;
+  return c;
+}
+
+}  // namespace
+
+TEST("held BOOT on the home screen opens the menu, which is the only way in") {
+  // PWR cannot be half of a chord: holding it is the latch's power-off, so the
+  // menu is the held BOOT and nothing else. On a desk this was the bug: the
+  // documented TALK+CANCEL chord could never fire.
+  CHECK(route_key(HomeAction::Hold, home_context()) == KeyRoute::MenuOpen);
+  // A tap at home is still a note, and a PWR tap is still a turn.
+  CHECK(route_key(HomeAction::NoteToggle, home_context()) == KeyRoute::NoteToggle);
+  CHECK(route_key(HomeAction::TalkToggle, home_context()) == KeyRoute::TalkToggle);
+}
+
+TEST("in the menu a BOOT tap is next and a PWR tap is change") {
+  CHECK(route_key(HomeAction::NoteToggle, menu_context()) == KeyRoute::MenuTapNext);
+  CHECK(route_key(HomeAction::TalkToggle, menu_context()) == KeyRoute::MenuTapChange);
+  // A tap in the menu never starts a note or a turn.
+  CHECK(route_key(HomeAction::NoteToggle, menu_context()) != KeyRoute::NoteToggle);
+  CHECK(route_key(HomeAction::TalkToggle, menu_context()) != KeyRoute::TalkToggle);
+  // The same hold that opened it closes it.
+  CHECK(route_key(HomeAction::Hold, menu_context()) == KeyRoute::MenuClose);
+}
+
+TEST("a held BOOT drops a recording before it does anything else") {
+  // The recording is the most valuable thing on the device, so it wins even if
+  // a turn or the menu is also up.
+  KeyContext c = recording_context();
+  c.turn_or_overlay = true;
+  CHECK(route_key(HomeAction::Hold, c) == KeyRoute::CancelNote);
+  CHECK(route_key(HomeAction::NoteToggle, c) == KeyRoute::NoteToggle);  // a tap stops and keeps it
+}
+
+TEST("a held BOOT with a turn or a card up is the old cancel, not the menu") {
+  CHECK(route_key(HomeAction::Hold, turn_context()) == KeyRoute::CancelTurn);
+}
+
+TEST("the pairing ask outranks every other meaning of a key") {
+  CHECK(route_key(HomeAction::NoteToggle, ask_context()) == KeyRoute::AskAllow);
+  CHECK(route_key(HomeAction::TalkToggle, ask_context()) == KeyRoute::AskDeny);
+  CHECK(route_key(HomeAction::Hold, ask_context()) == KeyRoute::None);  // a hold never answers
+  CHECK(route_key(HomeAction::None, home_context()) == KeyRoute::None);
 }

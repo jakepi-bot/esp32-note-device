@@ -16,7 +16,9 @@ phone.
 | **PWR**, short | start or end a live turn with Hermes |
 | **PWR**, hold | power off (hardware latch) |
 | **BOOT**, tap | start or stop a voice note on the card |
-| **BOOT**, hold 2 s | throw away the note you are recording |
+| **BOOT**, hold 2 s | on the home screen, open the menu; while recording, throw the note away; in the menu, leave it |
+| **BOOT**, tap in the menu | next item |
+| **PWR**, tap in the menu | change the item |
 
 The panel returns to its home screen after 60 s with no input, and shows the
 battery, the time, and how many notes are waiting.
@@ -168,8 +170,9 @@ Send `caddy-root.crt` to the iPhone (AirDrop or email), open it, then:
 
 Now pair, with the board in your hand:
 
-1. On the board: **Settings → Phone app**. The screen says *Pair a phone* and the
-   window stays open for two minutes.
+1. On the board: hold **BOOT** for two seconds to open the menu, then tap **BOOT**
+   down to **Phone app** and tap **PWR** on it. The screen says *Pair a phone* and
+   the window stays open for two minutes.
 2. On the iPhone, open `https://hermes.local:8443/` in **Bluefy**. Use the same
    name you put in `RELAY_HOST`.
 3. Type the **device id** (`hg-…`) and the **device key** (base64) into the page.

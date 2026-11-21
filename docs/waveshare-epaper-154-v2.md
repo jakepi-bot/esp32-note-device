@@ -275,11 +275,19 @@ is shorter for it and nothing waits 100 ms for a controller that is not there.
 
 ### 6.1 Button map (port-level: `modes/home_keys.cpp`, `modes/mode_router.cpp`)
 
+Two keys, three jobs. Because holding PWR is the latch's own power-off, a
+settings *chord* is impossible on this board (it was documented, and never
+fired on a desk): the menu is the held BOOT, and what the hold does is decided
+by the screen. `hgp::route_key()` (`modes/home_keys.cpp`) is the whole rule and
+is host-tested in `firmware/tests/test_epaper_keys.cpp`.
+
 | Physical | Logical | Behaviour |
 |---|---|---|
 | PWR (GPIO 18) | **Talk** | A short press toggles a live turn (`App::talk_toggle`): the first starts one, the next ends it, whatever the talk-key setting says. Held, it is the latch's own power-off and acts nothing in the firmware. |
 | BOOT (GPIO 0) | **Note** | A tap starts or stops an offline voice note (`NotesMode::on_note_button`). Never talks. It is also the flash-download and deep-sleep wake pin. |
-| BOOT held ≥ 2 s | **Cancel** | Fires once at the threshold, while the key is still down: a note being recorded is dropped (`NotesMode::on_cancel_button`), otherwise the hold taps CANCEL for a live turn or an overlay. |
+| BOOT held ≥ 2 s | **Hold** | Fires once at the threshold, while the key is still down, and does the one thing there is to do with what is on the glass: drops the note being recorded (`NotesMode::on_cancel_button`), closes the settings menu, cancels a live turn or an overlay, or — on the home screen — **opens the settings menu** (`App::open_settings`). |
+| BOOT tap, menu open | **Next** | Moves to the next settings item (the core's CANCEL). |
+| PWR tap, menu open | **Change** | Changes the selected item (the core's TALK). |
 | Green LED (GPIO3) | feedback | Solid while a note is recording, slow blink while uploading (port-owned GPIO, no SDK concept needed). |
 While a phone asks to pair the two keys answer it: **BOOT allows**, **PWR refuses**, and 20 s of neither refuses (`App::kPhoneAskMs`). The ask face prints the address and both keys. The auto-home timer is suspended while it shows.
 
@@ -294,7 +302,8 @@ recording would cut every utterance at the threshold). Implemented in
 `port_buttons.cpp`, threshold in `ButtonConfig.talk_hold_cancel_ms`; the state
 machine is covered by the host tests in `firmware/tests/test_epaper_live_mode.cpp`,
 the gesture itself is a hardware-validation item. This board's own long press is
-BOOT held 2 s, which cancels through `ModeRouter` and never talks.
+BOOT held 2 s, which is `ModeRouter`'s and never talks: it cancels what is open,
+and on the home screen it opens the menu.
 
 Settings UI, clock, hero/mascot, cards, `display.choices`, auto-paging replies all
 come from the core unchanged.

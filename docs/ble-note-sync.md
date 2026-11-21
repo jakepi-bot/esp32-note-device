@@ -177,7 +177,8 @@ pio run -e waveshare-epaper-154                 # build
 pio run -e waveshare-epaper-154 -t upload       # USB-C, once, for the new table
 ```
 
-Then pair a phone once: **Settings → Phone app** (or `phone pair` over the
+Then pair a phone once: hold **BOOT** for two seconds to open the settings menu,
+then **Phone app** (or `phone pair` over the
 console) opens a two-minute window; the phone connects, the device asks whether
 to allow it, and only after that does it show the passkey to confirm. The whole
 first-time walk-through is [Voice notes off the gadget with an iPhone](ios-bluetooth-sync.md).
@@ -234,7 +235,7 @@ The note service needs the same paired, encrypted link as the console channel, s
 the first phone goes through the device's pairing window — and through an
 acknowledgement that only someone holding the device can give:
 
-1. **Settings → Phone app** on the device (or `phone pair` on the console) opens
+1. Hold **BOOT** two seconds on the home screen for the settings menu, then **Phone app** (or `phone pair` on the console) opens
    the window for two minutes and starts advertising.
 2. The phone connects and asks to pair. The device does **not** answer it: the
    screen shows *Allow this phone?* and the phone's Bluetooth address, and waits

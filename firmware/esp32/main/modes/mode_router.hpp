@@ -5,9 +5,11 @@
 //         progress). A hold is still the latch's own power-off: LatchPower reads
 //         the same pin, so a press on its way to switching the board off acts
 //         nothing here.
-//   BOOT  a tap starts or stops a note; held past 2 s it cancels (the recording
-//         is dropped, or a live turn / overlay that took the screen is closed).
-//         BOOT never talks.
+//   BOOT  a tap starts or stops a note; held past 2 s it does the one thing there
+//         is to do with what is on the glass: drop the recording, leave the menu,
+//         close a live turn or a card, or, on the home screen, open the menu
+//         (the core's settings list). In the menu a BOOT tap moves to the next
+//         item and a PWR tap changes it. BOOT never talks.
 //   either while a phone asks to pair: BOOT allows, PWR refuses; twenty seconds
 //         of neither refuses (the core's kPhoneAskMs).
 //

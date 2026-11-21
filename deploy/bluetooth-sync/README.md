@@ -168,7 +168,7 @@ instead is a four-line change at the bottom of `Caddyfile`.
 ## Step 8 — pair the phone and sync
 
 Follow [docs/ios-bluetooth-sync.md](../../docs/ios-bluetooth-sync.md). The short
-version: on the gadget open **Settings → Phone app**, load
+version: on the gadget hold **BOOT** for two seconds, open **Phone app**, load
 `https://hermes.local:8443/` in Bluefy, tap **Connect**, press **BOOT** on the
 gadget when it names the phone (BOOT allows, PWR refuses; no answer within 20 s
 refuses), confirm the code iOS shows, then **Send**.

@@ -22,6 +22,13 @@ constexpr uint32_t kFastWindowMs = 400;
 
 uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
+// One key press as the core's own button: the menu navigates with CANCEL and
+// TALK, so the two physical keys borrow those names rather than a new grammar.
+void press(hg::App* app, hg::Button button) {
+  app->on_button(button, true);
+  app->on_button(button, false);
+}
+
 }  // namespace
 
 void ModeRouter::begin(int power_gpio, int record_gpio, hg::App* app, LiveMode* live, NotesMode* notes,
@@ -104,45 +111,64 @@ void ModeRouter::arm_sleep_wake(bool dozing) {
 }
 
 void ModeRouter::act(HomeAction action) {
-  if (action == HomeAction::None) return;
-  // A phone waiting for an answer owns both keys: nothing else opens the
-  // microphone or the card while the security question is on the glass.
-  if (app_ != nullptr && app_->phone_ask_pending()) {
-    switch (pairing_ask_answer(action)) {
-      case AskAnswer::Allow:
-        ESP_LOGI(TAG, "pairing ask: BOOT allows");
-        app_->answer_phone_pairing(true);
-        break;
-      case AskAnswer::Deny:
-        ESP_LOGI(TAG, "pairing ask: PWR refuses");
-        app_->answer_phone_pairing(false);
-        break;
-      case AskAnswer::None: break;
-    }
-    return;
-  }
-  switch (action) {
-    case HomeAction::None: break;
-    case HomeAction::TalkToggle:
+  if (action == HomeAction::None || app_ == nullptr) return;
+  // What is on the glass decides what a held key means: the pairing question
+  // owns both keys, the menu takes taps as next/change, and only a quiet home
+  // screen turns a held BOOT into "open the menu" (modes/home_keys.hpp).
+  KeyContext context;
+  context.phone_ask = app_->phone_ask_pending();
+  context.menu_open = app_->settings_open();
+  const hg::Screen screen = app_->model().screen;
+  context.turn_or_overlay = app_->in_turn() || !auto_home_face(screen);
+  if (notes_ != nullptr) context.note_recording = notes_->status().phase == NoteStatus::Phase::Recording;
+
+  switch (route_key(action, context)) {
+    case KeyRoute::None: break;
+    case KeyRoute::AskAllow:
+      ESP_LOGI(TAG, "pairing ask: BOOT allows");
+      app_->answer_phone_pairing(true);
+      break;
+    case KeyRoute::AskDeny:
+      ESP_LOGI(TAG, "pairing ask: PWR refuses");
+      app_->answer_phone_pairing(false);
+      break;
+    case KeyRoute::TalkToggle:
       // The same call the home screen's TALK strip used to make: one press
       // starts a turn, the next ends it.
-      if (app_ != nullptr) app_->talk_toggle();
+      app_->talk_toggle();
       ESP_LOGI(TAG, "PWR: talk");
       break;
-    case HomeAction::NoteToggle:
+    case KeyRoute::NoteToggle:
       if (notes_ != nullptr) notes_->on_note_button();
       break;
-    case HomeAction::Cancel:
-      // A note being recorded is the thing to drop; otherwise the hold taps CANCEL
-      // for a live turn or an overlay, as the other boards' long press does.
-      if (notes_ != nullptr && notes_->on_cancel_button()) break;
-      if (app_ != nullptr) {
-        app_->on_button(hg::Button::Cancel, true);
-        app_->on_button(hg::Button::Cancel, false);
-      }
+    case KeyRoute::MenuTapNext:
+      // The menu's own grammar: CANCEL moves, TALK changes (App::settings_input).
+      press(app_, hg::Button::Cancel);
+      ESP_LOGI(TAG, "BOOT: menu next");
+      break;
+    case KeyRoute::MenuTapChange:
+      press(app_, hg::Button::Talk);
+      ESP_LOGI(TAG, "PWR: menu change");
+      break;
+    case KeyRoute::MenuOpen:
+      if (app_->open_settings()) ESP_LOGI(TAG, "BOOT held: menu open");
+      break;
+    case KeyRoute::MenuClose:
+      app_->close_settings();
+      ESP_LOGI(TAG, "BOOT held: menu closed");
+      break;
+    case KeyRoute::CancelNote:
+      if (notes_ == nullptr || !notes_->on_cancel_button()) ESP_LOGI(TAG, "BOOT held: no note to drop");
+      break;
+    case KeyRoute::CancelTurn:
+      // A live turn, a reply or a card is up: the hold is the old CANCEL press,
+      // which is what closes it on every board.
+      press(app_, hg::Button::Cancel);
+      ESP_LOGI(TAG, "BOOT held: cancel");
       break;
   }
 }
+
 
 AutoHome::Inputs ModeRouter::auto_home_inputs() const {
   AutoHome::Inputs in;

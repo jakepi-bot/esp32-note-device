@@ -320,8 +320,9 @@ StatusView compose_status(const StatusInputs& in) {
   } else if (!in.has_newest) {
     v.hero = "NO NOTES";
     // The one hint the panel cannot show by itself: what each of the two keys is
-    // for. It fits 13 columns in two lines.
-    v.note = "Tap BOOT to record, PWR to talk.";
+    // for, including the held BOOT that opens the menu, which nothing else on the
+    // glass announces. Short enough to wrap at the note block's width.
+    v.note = "BOOT: note. PWR: talk. Hold: menu.";
     set_foot(in.external_power ? "ON POWER" : "", /*expendable=*/true);
   } else {
     char hero[24];

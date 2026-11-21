@@ -169,8 +169,9 @@ instead is a four-line change at the bottom of `Caddyfile`.
 
 Follow [docs/ios-bluetooth-sync.md](../../docs/ios-bluetooth-sync.md). The short
 version: on the gadget open **Settings → Phone app**, load
-`https://hermes.local:8443/` in Bluefy, tap **Connect**, tap **Allow** on the
-gadget when it names the phone, confirm the code iOS shows, then **Send**.
+`https://hermes.local:8443/` in Bluefy, tap **Connect**, press **BOOT** on the
+gadget when it names the phone (BOOT allows, PWR refuses; no answer within 20 s
+refuses), confirm the code iOS shows, then **Send**.
 
 ## Everyday use
 
@@ -201,7 +202,7 @@ markdown appears in the vault a moment later.
 | `https://…:8443` fails with a TLS error | the phone used an IP, or `RELAY_HOST` does not match the name typed; both must be the same name |
 | The phone shows a certificate warning | the root CA was not installed, or not trusted in **Certificate Trust Settings** (step 7) |
 | Page loads, `Connect` finds no device | the gadget's pairing window is not open (two minutes), or Bluetooth is off on the phone |
-| `Connect` answers `authentication`/`insufficient` | the gadget did not allow this phone: allow it on its screen when it asks |
+| `Connect` answers `authentication`/`insufficient` | the gadget did not allow this phone: open the pairing window again and press BOOT when it asks (PWR refuses, and 20 s of neither refuses too) |
 | `401 device … is not enrolled` | `data/gadget/devices.json` has no key for that id — step 4 |
 | `log` says `stage only` | no `STT_URL`; notes are kept in `data/notes/inbox` until a transcriber is configured |
 | Notes land with a timestamp title | no `LLM_URL`; the transcript is the summary, so the title is its first line |

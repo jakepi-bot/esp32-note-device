@@ -193,6 +193,21 @@ read is a `Retry` with the byte counts in the error line. The size, not
 before one such stop with the error flag clear, because the failed read reaches
 `fread` as a short file.
 
+The card no longer depends on the internal heap being in one piece while that
+runs. Every buffer the notes read into is in PSRAM (the 128 KB capture ring, the
+64 KB transfer buffer) and this chip cannot DMA out of PSRAM, so the sdmmc host
+used to take a temporary internal DMA buffer for each read and write and free it
+again: during a Wi-Fi upload it could not get one 512-byte sector (`dma_free`
+4,119 B, largest free block 368 B) and the read failed with `0x101`.
+`sd_mount::ensure` (`main/notes/sd_mount.cpp`) now allocates one 2 KiB internal
+DMA buffer at mount and hands it to the host as `dma_aligned_buffer` with
+`unaligned_multi_block_rw_max_chunk_size` at 4 sectors, so both directions stage
+through memory the card owns and no read or write can lose a transfer to a
+fragmented heap. The cost is a fixed 2 KiB, which is the largest chunk the
+driver's own allocation was getting during a transfer anyway (it halves from
+8 KiB down to one sector); measured on the board, a 2.8 MB note uploads at the
+same rate with it, 350 KB/s in the body and 580 KB/s hashing off the card.
+
 A note whose audio is gone is terminal too, decided before the uploader is
 asked: `notes::plan_upload` (`main/notes/notes_queue.cpp`) takes the
 `recording.wav` size and answers `Upload` or `Quarantine` against the 45-byte

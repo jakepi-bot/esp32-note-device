@@ -4,6 +4,7 @@
 
 #include "board.hpp"
 #include "driver/sdmmc_host.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_vfs_fat.h"
@@ -17,6 +18,28 @@ constexpr const char* kMountPoint = "/sdcard";
 // open files the VFS allows across both users: hermes.log, a recording.wav,
 // its note.json, and a little headroom for a scan.
 constexpr int kMaxFiles = 8;
+// The card's own DMA staging buffer: 4 sectors, 2 KiB.
+//
+// Every file this board reads or writes lands in a PSRAM buffer (the notes'
+// 128 KB capture ring, the 64 KB upload buffer, the e-paper image), and this
+// chip cannot DMA out of PSRAM, so without a buffer here the sdmmc host
+// allocates a temporary internal DMA buffer for every read and write and frees
+// it again. During a Wi-Fi upload that allocation is what runs the internal
+// heap out: measured on this board with a 60 s / 2.8 MB note, `dma_free` 4,119 B
+// but `dma_largest` 368 B when the body started streaming, and
+//
+//   E sdmmc_cmd: allocate_dma_buf: not enough mem, err=0x101
+//   E diskio_sdmmc: sdmmc_read_blocks failed (0x101)
+//
+// which the note read as a short file and retried 10 s later. One buffer,
+// allocated at mount and kept, makes the card path independent of the heap's
+// fragmentation: the 2 KiB is the largest chunk the allocator was actually
+// getting during a transfer anyway (it halves from 8 KiB down to one sector),
+// so the reads stay 4 blocks per transaction, and the card can no longer lose
+// an upload to a heap it does not own.
+constexpr size_t kSectorBytes = 512;
+constexpr size_t kDmaBlocks = 4;
+constexpr size_t kDmaBytes = kSectorBytes * kDmaBlocks;
 
 SemaphoreHandle_t g_lock = nullptr;
 SdConfig g_cfg{};
@@ -25,6 +48,7 @@ sdmmc_card_t* g_card = nullptr;
 bool g_mounted = false;
 std::string g_last_error;
 uint32_t g_last_attempt_ms = 0;
+uint8_t* g_dma_buf = nullptr;
 
 void lock_init() {
   if (!g_lock) g_lock = xSemaphoreCreateMutex();
@@ -72,6 +96,16 @@ bool ensure(bool format_if_needed, std::string* error) {
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
   host.slot = SDMMC_HOST_SLOT_0;
   host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+  // The one internal DMA buffer both directions stage through (kDmaBlocks).
+  // Allocated once, before the mount: a failed allocation leaves the driver's
+  // own per-call buffer in place and says so, rather than stopping the mount.
+  if (!g_dma_buf) {
+    g_dma_buf = static_cast<uint8_t*>(
+        heap_caps_aligned_alloc(64, kDmaBytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+    if (!g_dma_buf) ESP_LOGW(TAG, "no internal DMA buffer for the card: a busy transfer may read short");
+  }
+  host.dma_aligned_buffer = g_dma_buf;
+  host.unaligned_multi_block_rw_max_chunk_size = g_dma_buf ? kDmaBlocks : 0;
   sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
   // 4-bit where the board routes all four data lines (this board's slot has
   // only CLK, CMD and D0 wired: 1-bit).

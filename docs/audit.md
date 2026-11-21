@@ -221,7 +221,7 @@ to the idempotency key.
 
 ### Clean build
 
-See [BUILD-VERIFICATION.md](BUILD-VERIFICATION.md) for the recorded command,
+See [build-verification.md](build-verification.md) for the recorded command,
 toolchain versions, image size and result of building this repository from a
 fresh clone.
 
@@ -230,7 +230,7 @@ fresh clone.
 | Area | State | Risk for the next tasks |
 |---|---|---|
 | Status display (battery, time, Wi-Fi, BT) | Today the screen shows the core's status/face UI and the notes mode's single status line (`n pending, m sent`, `No notes`, `No SD card`). No battery or clock widget is drawn. | Battery needs the GPIO 4 ADC path and a charge-state source that does not exist yet; BT icon has nothing to report until BLE is enabled; e-paper must not be repainted more often than the refresh policy allows, so "live" indicators need a sensible cadence and partial-refresh budgeting. |
-| Bluetooth note sync | Console bridge exists but compiled out. | Enabling NimBLE changes flash size (two OTA slots), RAM, and the pairing UX; there is no phone-side app today, and Conduit for iOS is not a BLE data client — a Shortcuts/Conduit bridge or an in-app BLE path needs deciding. **The app already uses 88.9% of its OTA slot (11% / ~180 KB free, see [BUILD-VERIFICATION.md](BUILD-VERIFICATION.md)); the BLE stack is unlikely to fit without growing `partitions.csv` or trimming features.** |
+| Bluetooth note sync | Console bridge exists but compiled out. | Enabling NimBLE changes flash size (two OTA slots), RAM, and the pairing UX; there is no phone-side app today, and Conduit for iOS is not a BLE data client — a Shortcuts/Conduit bridge or an in-app BLE path needs deciding. **The app already uses 88.9% of its OTA slot (11% / ~180 KB free, see [build-verification.md](build-verification.md)); the BLE stack is unlikely to fit without growing `partitions.csv` or trimming features.** |
 | Note metadata on BLE | Notes are files on FAT; no manifest is exposed over any local channel. | A transfer path needs a manifest (id, duration, size, sha256) and a chunked read, plus resume handling. |
 | Time without Wi-Fi | SNTP only; no RTC bound. | If BLE sync is meant to work away from Wi-Fi, binding the board's PCF85063 (if the SKU has it) would give real stamps offline. |
 | Docs drift | `docs/hardware.md` still says the e-paper port "has not been run on one". | It has now been run and validated; either correct that line or leave a pointer to this audit. |

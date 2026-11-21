@@ -321,10 +321,23 @@ class App {
   // below. Pairing opens for kPhonePairMs from the settings menu or `phone pair`;
   // the phone types the passkey this screen shows. A paired phone sends console
   // lines (App::console) and reads the replies.
+  //
+  // A new phone is only paired after someone at the device allows it: the port
+  // reports the ask, the screen names the phone's address, and a tap (or
+  // `phone allow`) is the acknowledgement. Without it the code never appears and
+  // the link is dropped (docs/protocol.md#phone-app-over-bluetooth).
   static constexpr uint32_t kPhonePairMs = 120000;
+  static constexpr uint32_t kPhoneAskMs = 20000;  // how long the screen holds a phone's ask
   bool start_phone_pairing();
   void close_phone_pairing();
   bool phone_pairing_open() const { return phone_pairing_; }
+  // A phone is waiting for the screen's answer right now.
+  bool phone_ask_pending() const { return !phone_ask_.empty(); }
+  // From the port: a new phone asks to pair (its address, most significant byte first).
+  void on_phone_ask(const uint8_t (&peer)[6]);
+  // The screen's answer: true lets the pairing finish and the code appear, false
+  // drops the phone. Also `phone allow` / `phone deny` on the console.
+  void answer_phone_pairing(bool allow);
   // From the port: the passkey to show, the pairing's result, and the number of
   // paired phones and whether one is connected.
   void on_phone_passkey(uint32_t passkey);
@@ -333,6 +346,7 @@ class App {
   // These run on the app task. on_phone_pair returns false when Bluetooth can't start.
   std::function<bool()> on_phone_pair;
   std::function<void()> on_phone_pair_close;
+  std::function<void(bool)> on_phone_answer;  // the screen's yes or no to a pairing ask
   std::function<void()> on_phone_forget;  // removes every paired phone
   // Factory reset: drops the device's tailnet identity. False when the port couldn't do that.
   std::function<bool()> on_tailnet_forget;
@@ -721,6 +735,9 @@ class App {
   bool phone_pairing_ = false;
   uint32_t phone_pair_until_ = 0;
   std::string phone_passkey_;
+  // The phone waiting to be allowed, as AA:BB:CC:DD:EE:FF; empty when none is.
+  std::string phone_ask_;
+  uint32_t phone_ask_until_ = 0;
   int phones_paired_ = 0;
   bool phone_connected_ = false;
   void phone_tick();

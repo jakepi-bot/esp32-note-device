@@ -380,6 +380,7 @@ void dispatch(hg::App& app, hgp::Event& ev) {
       if (ev.len == sizeof(hgp::PhoneSample)) {
         const auto* phone = reinterpret_cast<const hgp::PhoneSample*>(ev.data);
         switch (phone->kind) {
+          case hgp::PhoneSample::Kind::Ask: app.on_phone_ask(phone->peer); break;
           case hgp::PhoneSample::Kind::Passkey: app.on_phone_passkey(phone->passkey); break;
           case hgp::PhoneSample::Kind::Paired: app.on_phone_paired(true); break;
           case hgp::PhoneSample::Kind::Failed: app.on_phone_paired(false); break;
@@ -717,6 +718,8 @@ extern "C" void app_main(void) {
   if (board.bluetooth && g_phone.begin(device_name())) {
     app.on_phone_pair = [] { return g_phone.open_pairing(); };
     app.on_phone_pair_close = [] { g_phone.close_pairing(); };
+    // The screen's yes or no to a phone asking to pair (the acknowledgement).
+    app.on_phone_answer = [](bool allow) { g_phone.answer_pairing(allow); };
     app.on_phone_forget = [] { g_phone.forget(); };
   }
   if (profile.tailnet) {

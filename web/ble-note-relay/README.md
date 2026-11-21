@@ -13,13 +13,19 @@ the device-side rules are in [docs/ble-note-sync.md](../../docs/ble-note-sync.md
 
 ## Run it
 
+The supported way is the container in
+[deploy/bluetooth-sync](../../deploy/bluetooth-sync/README.md): it serves this
+folder over HTTPS from the same origin as `POST /notes/v1`, which is what Web
+Bluetooth requires, and pre-fills the endpoint. Open
+`https://<server-name>:8443/` in **Bluefy** on the iPhone (Safari has no Web
+Bluetooth); on a computer, Chrome or Edge.
+
+To look at the page without a server (a laptop, `localhost` only):
+
 ```sh
 cd web/ble-note-relay
-python3 -m http.server 8000       # then open http://<machine>:8000/
+python3 -m http.server 8000       # then open http://localhost:8000/
 ```
-
-On the iPhone, open the same URL in **Bluefy** (Safari has no Web Bluetooth). On a
-computer, Chrome or Edge.
 
 Fill in:
 

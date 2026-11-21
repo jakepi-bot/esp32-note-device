@@ -158,7 +158,11 @@ namespace hg::i18n {
   X(ButtonToClose,          "{0} to close") \
   X(PairAPhone,             "Pair a phone") \
   X(BluetoothName,          "Bluetooth: {0}") \
-  X(PhonePairIntro,         "On your phone, open the Hermes app and choose {0}. This device then shows a code to type on the phone.") \
+  X(PhonePairIntro,         "On your phone, open the note relay page and choose {0}. This device then asks whether to allow the phone.") \
+  X(PhoneAsk,               "Allow this phone?") \
+  X(PhoneAskBody,           "{0}\nTap Allow only if this is the phone you are holding.") \
+  X(PhoneAskHint,           "Allow / swipe down to refuse") \
+  X(PhoneAskHintKeys,       "{0} to allow / {1} to refuse") \
   X(PhoneCode,              "Code {0}") \
   X(TypeCodeOnPhone,        "Type this code on your phone") \
   X(OnlyPhoneInFront,       "Only a phone in front of you should ask for it.") \

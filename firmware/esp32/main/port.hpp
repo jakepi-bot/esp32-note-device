@@ -81,11 +81,14 @@ enum class EventType : uint8_t { NetUp, NetDown, WsOpen, WsText, WsBinary, WsClo
 
 // Payload of Phone events (posted by the Bluetooth host task).
 struct PhoneSample {
-  enum class Kind : uint8_t { Passkey, Paired, Failed, Status };
+  // Ask: a new phone wants to pair and the screen must allow it first; the
+  // pairing only goes ahead after App::answer_phone_pairing(true).
+  enum class Kind : uint8_t { Ask, Passkey, Paired, Failed, Status };
   Kind kind;
   uint32_t passkey;  // Passkey: the code to show
   uint8_t paired;    // Status: phones paired
   bool connected;    // Status: one is connected now
+  uint8_t peer[6];   // Ask: the asking phone's address, most significant byte first
 };
 
 // Payloads of Touch, Key and Encoder events (posted by the input task).
@@ -975,6 +978,10 @@ class PhoneLink {
   // phone is paired. False when the build has no Bluetooth or it can't start.
   bool begin(const std::string& name);
   bool open_pairing();
+  // A new phone asked to pair while the window was open: allow it, which is
+  // what makes the passkey appear, or refuse it and drop the link. Called from
+  // the app task; the radio work is queued onto the Bluetooth host task.
+  void answer_pairing(bool allow);
   void close_pairing();
   void forget();  // removes every paired phone and drops a connected one
   void set_name(const std::string& name);

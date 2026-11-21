@@ -19,7 +19,7 @@ spoken reply), and offline voice notes recorded to the card and uploaded to the
 notes endpoint. 0.7.1 fixes the three defects the 0.7.0 hardware QA recorded as
 known limitations (`notes stop` during a panel refresh, the pairing screen's
 inverted polarity, the newest-note line before a first clock sync); 0.7.0 added the redesigned [e-paper status screen](#display-what-the-panel-shows)
-and [Bluetooth note sync](#bluetooth-note-sync-from-an-iphone-conduit).
+and [Bluetooth note sync](#bluetooth-note-sync-from-an-iphone).
 Bluetooth now initialises on the board — the GATT table registers, the `phone` and
 `notes ble` commands answer, and pairing opens advertising — but no phone has
 completed a transfer yet, so that half is unverified: see
@@ -216,69 +216,61 @@ To check the panel without a camera, `python firmware/tools/panel_dump.py --port
 writes `panel.pbm` (1:1) plus `panel.txt` (ASCII). The frame hashes of ten states are
 pinned in `hg_epaper_mode_tests`.
 
-## Bluetooth note sync from an iPhone (Conduit)
+## Bluetooth note sync from an iPhone
 
-With no Wi-Fi anywhere, a paired phone can take a note off the card over Bluetooth LE
-and post it to Hermes itself. The device only moves a note to `sent/` after the phone
-says Hermes answered, so an interrupted transfer resumes at the byte the phone really
-has. Protocol and packet layout: [docs/ble-note-sync.md](docs/ble-note-sync.md).
+Bluetooth is part of this board's firmware, not an optional extra: with no Wi-Fi
+anywhere, a paired iPhone takes a note off the card over Bluetooth LE and posts it to
+your server, which transcribes it and writes it into Obsidian. The device only moves a
+note to `sent/` after the phone reports a 2xx, so an interrupted transfer resumes at
+the byte the phone really has. Protocol and packet layout:
+[docs/ble-note-sync.md](docs/ble-note-sync.md).
 
 1. **Flash once over USB.** The Bluetooth build uses the 8 MB partition table
-   (`partitions-epaper-8mb.csv`, two 3,875 KB slots); an over-the-air update cannot
+   (`partitions-epaper-8mb.csv`, two 3,968 KB slots); an over-the-air update cannot
    move partitions, so install the [release image](#install-a-release) once.
-2. **Pair the phone.** On the console, `phone pair` opens pairing (the device settings
-   screen calls it **Phone app**); the board shows a six-digit passkey, and you type
-   it on the phone. `phone pair close` when done. `phone` and `notes ble` report the
-   link afterwards; `phone` → `"paired":1` is the proof it stuck.
-3. **Serve the relay page.** `web/ble-note-relay/` is a Web Bluetooth client — the
-   piece that reaches the radio, because neither iOS nor Conduit has a BLE central.
-   Web Bluetooth needs a secure context, so host the folder over HTTPS or open its
-   `file://` copy from the phone's Files app; a plain `http://` LAN address does not
-   qualify. On iOS that browser has to be **Bluefy** (free, App Store) — Safari has no
-   Web Bluetooth, on iOS or macOS. (Locally,
-   `cd web/ble-note-relay && python3 -m http.server 8000` on the phone is the
-   `localhost` case.)
-4. **Fill in four values.** The notes endpoint, the **device id**, the board's
-   **device key**, and nothing else:
+2. **Start the server.** `deploy/bluetooth-sync/` is the phone-facing half as two
+   containers — the note endpoint and the relay page on one HTTPS origin, plus TLS so
+   iOS will load it:
 
-   ```bash
-   python3 - <<'PY'
-   import json, pathlib
-   store = pathlib.Path.home() / ".hermes/plugin-data/gadget/devices.json"
-   for device_id, record in json.loads(store.read_text())["devices"].items():
-       print(device_id, record["key"])
-   PY
+   ```sh
+   cd deploy/bluetooth-sync && cp .env.example .env   # set RELAY_HOST, STT_URL, LLM_URL
+   docker compose up -d --build
    ```
 
-   They stay in the phone browser's `localStorage`. The key can post notes as that
-   device, so treat the phone like the device.
-5. **Connect → List notes → Send.** The page pulls the note in resumable,
+   Step by step, including the one-time certificate step for the iPhone:
+   [deploy/bluetooth-sync/README.md](deploy/bluetooth-sync/README.md). Without a
+   model it is still a server: it verifies uploads and keeps them.
+3. **Pair the phone once.** Settings → **Phone app** (or `phone pair`) opens a
+   two-minute window. The phone asks, the board names it on screen — *Allow this
+   phone?* — and **nothing is shared until someone taps Allow**; then it shows a
+   six-digit passkey and iOS asks you to confirm the same code. That acknowledgement
+   is what keeps a phone in radio range from pairing itself with a device nobody is
+   holding. `phone`, `status` and `phone allow`/`deny` cover it from the console.
+4. **Connect → List notes → Send** on the page, in **Bluefy** on iOS (free, App
+   Store; Safari has no Web Bluetooth). The page pulls the note in resumable,
    CRC-checked blocks, verifies the WAV's SHA-256, signs the upload with the board's
    HMAC and posts it. The panel shows `Bluetooth <n>%` while it runs, and `notes ble`
    shows the link, the MTU and why the last transfer stopped. **Fetch every note**
    drains the card in one go.
-6. **Conduit.** Conduit has no BLE central, so it does not do the transfer — it reads
-   the result. The relay posts to the same `POST /notes/v1` endpoint with the same
-   HMAC as a Wi-Fi upload, so a note taken over Bluetooth is transcribed and filed in
-   `~/obsidian/Notes/voice notes` exactly like a Wi-Fi note, and it is the same note
-   Conduit shows. Nothing on the Hermes side or in Conduit is configured for
-   Bluetooth. The note's id doubles as its idempotency key, so a double send is a
-   `200`, never a second note.
+
+The whole first-time walk-through, with what each screen says:
+[docs/ios-bluetooth-sync.md](docs/ios-bluetooth-sync.md).
 
 The radio half is new and only partly exercised: the GATT table registering on real
-NimBLE is verified on the board, while an iPhone pairing, the MTU iOS negotiates,
-throughput, resumption and a real note pulled off the card by a phone are **not**
+NimBLE, the build and the host tests are verified, while an iPhone pairing, the MTU
+iOS negotiates, throughput and a real note pulled off the card by a phone are **not**
 — QA had no iPhone or BLE central. The relay page's own 11 Node cases rebuild the WAV
-from a packet stream captured from the firmware, SHA-256 included, and post a real
-3.4 s note to the live endpoint. Treat the first real transfer as the test, with
-`notes ble` open.
+from a packet stream captured from the firmware, SHA-256 included, and the container
+was exercised end to end with a real note and a real signature. Treat the first real
+transfer as the test, with `notes ble` open.
 
 ## Known limitations
 
 - An iPhone has not paired with this build, and a real note has not travelled over
-  Bluetooth yet. See the list above and [§11](docs/ble-note-sync.md#11-what-has-been-verified-and-what-has-not).
-- The relay page has to be hosted over HTTPS (or opened from the phone's Files app);
-  there is no native iOS app and no Shortcut that can do the transfer.
+  Bluetooth yet. See [§11](docs/ble-note-sync.md#11-what-has-been-verified-and-what-has-not).
+- The page needs a secure origin: the container serves it over HTTPS, and a plain
+  LAN `http://` address is refused. There is no native iOS app and no Shortcut that
+  can do the transfer.
 
 ## Repository layout
 

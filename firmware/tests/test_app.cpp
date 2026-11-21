@@ -4875,11 +4875,14 @@ namespace {
 // The port's side of phone pairing, as the hooks see it.
 struct FakePhone {
   int pair_calls = 0, close_calls = 0, forget_calls = 0;
+  int answer_calls = 0;
+  bool allowed = false;
   bool can_pair = true;
   void attach(hg::App& app) {
     app.on_phone_pair = [this] { ++pair_calls; return can_pair; };
     app.on_phone_pair_close = [this] { ++close_calls; };
     app.on_phone_forget = [this] { ++forget_calls; };
+    app.on_phone_answer = [this](bool allow) { ++answer_calls; allowed = allow; };
   }
 };
 
@@ -4971,6 +4974,52 @@ TEST("phone: the window closes on cancel and after two minutes; a late passkey i
   CHECK(!r.app.phone_pairing_open());
 }
 
+TEST("phone: a phone asking to pair waits for Allow, and only then gets the code") {
+  Rig r(Rig::touch_profile());
+  FakePhone phone;
+  phone.attach(r.app);
+  r.bring_online(true);
+  // Nothing is waiting, so there is nothing to allow or refuse.
+  CHECK_EQ(r.app.console("phone allow"), std::string("@error no phone is asking to pair"));
+  CHECK_EQ(r.app.console("phone deny"), std::string("@error no phone is asking to pair"));
+
+  CHECK_EQ(r.app.console("phone pair"), std::string("@ok phone pairing open"));
+  const uint8_t peer[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+  r.app.on_phone_ask(peer);
+  CHECK(r.app.phone_ask_pending());
+  CHECK_EQ(r.app.model().headline, std::string("Allow this phone?"));
+  CHECK(r.app.model().body.find("AA:BB:CC:DD:EE:FF") != std::string::npos);
+  CHECK_EQ(phone.answer_calls, 0);  // the ask alone shares nothing and shows no code
+  Value waiting;
+  CHECK(hg::json::parse(r.app.console("phone").substr(7), waiting));
+  CHECK_EQ(waiting["confirm"].as_string(), std::string("AA:BB:CC:DD:EE:FF"));
+
+  CHECK_EQ(r.app.console("phone allow"), std::string("@ok phone allowed"));
+  CHECK_EQ(phone.answer_calls, 1);
+  CHECK(phone.allowed);
+  CHECK(!r.app.phone_ask_pending());
+  r.app.on_phone_passkey(123456);
+  CHECK_EQ(r.app.model().headline, std::string("Code 123456"));
+
+  // Refused: the same window stays open, so the phone can ask again.
+  r.app.on_phone_ask(peer);
+  CHECK_EQ(r.app.console("phone deny"), std::string("@ok phone denied"));
+  CHECK_EQ(phone.answer_calls, 2);
+  CHECK(!phone.allowed);
+  CHECK(!r.app.phone_ask_pending());
+  CHECK(r.app.phone_pairing_open());
+
+  // Nobody answers within 20 s: the phone is refused, and again the window stays.
+  r.app.on_phone_ask(peer);
+  r.advance(hg::App::kPhoneAskMs - 100);
+  CHECK(r.app.phone_ask_pending());
+  r.advance(200);
+  CHECK(!r.app.phone_ask_pending());
+  CHECK_EQ(phone.answer_calls, 3);
+  CHECK(!phone.allowed);
+  CHECK(r.app.phone_pairing_open());
+}
+
 TEST("phone: Wi-Fi setup, a question and failed pairing each end the window") {
   Rig r;
   FakePhone phone;
@@ -5011,7 +5060,7 @@ TEST("phone: Bluetooth that won't start leaves no window; forget and factory-res
   CHECK_EQ(r.app.console("phone"), std::string("@phone {\"paired\":0,\"connected\":false,\"pairing\":false}"));
   r.app.console("factory-reset");
   CHECK_EQ(phone.forget_calls, 2);
-  CHECK_EQ(r.app.console("phone bogus"), std::string("@error usage: phone [pair [close] | forget]"));
+  CHECK_EQ(r.app.console("phone bogus"), std::string("@error usage: phone [pair [close] | allow | deny | forget]"));
 }
 
 TEST("phone: the pairing screen stays lit through the screen timeout") {

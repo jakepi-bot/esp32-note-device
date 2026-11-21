@@ -26,7 +26,7 @@ on the physical board.
 | D4 | Note audio is **WAV PCM16 mono @ 24 000 Hz**, max 5 min default (10 min hard cap). | `CodecAudio::kRate` is 24 000 Hz and `CodecAudio::start()` warns and refuses any other rate, so 24 kHz is the only rate the ES8311 path gives us. WAV needs no decoder on the server. |
 | D5 | Obsidian destination: **`~/obsidian/Notes/voice notes/`** (note file), audio copy in `voice notes/_audio/<same stem>.<ext>`. | The vault has `Notes/` with subfolders (`AI Process`, `Attachments`, `Hermes`, `Jobs`); there is no voice-notes folder yet. Lowercase `voice notes` is the contract's canonical spelling — on a case-sensitive filesystem a `Voice Notes` folder would be a second vault. Root `Voice.md` is a writing-style note — do not collide with it. |
 | D6 | The repo for firmware + spec is this checkout: **`hermes-gadget-sdk`** (clone of `Adolanium/hermes-gadget-sdk`, `main`, 1 commit behind nothing). | No repo existed for this project; the SDK is the codebase we extend, and sibling tasks (firmware foundation, ingestion pipeline, flash/validation) all need one shared path. |
-| D7 | Companion/phone side = **Conduit on iPhone** (already installed plugin `conduit_push`), not an Android companion app. | Per Jake: "Similar to [Pika Note] but I use the conduit app on an iPhone". Pika's phone app is Android + BLE; notifications of synced notes and approval prompts go through Conduit instead. |
+| D7 | Companion/phone side = **the Web Bluetooth relay page on an iPhone** (Bluefy), served by the Docker container in `deploy/bluetooth-sync`; no native app. | Per Jake: he works from an iPhone. iOS has no BLE API for web pages outside a Web Bluetooth browser, so the phone side is a page, not an app: it reaches the radio, signs the upload with the board's key and posts it, and nothing has to be installed beyond Bluefy. Pairing a new phone needs an acknowledgement on the device itself. |
 
 ---
 
@@ -711,7 +711,7 @@ new, ≈ = modified, ○ = existing (no change expected).
 
 ### Not in scope here
 
-BLE provisioning, phone companion (Conduit covers notifications), Opus capture
+BLE provisioning, a native phone companion (the relay page covers the phone side), Opus capture
 on this board (the server already accepts Ogg Opus for boards that record it —
 contract §2.3), multi-device note routing rules, and any change to the vendor's
 demo code we copy — its license headers stay intact under `LICENSES/`.
@@ -785,7 +785,6 @@ Installed on this host:
   `voice.speech_server ws://127.0.0.1:8770/v1/realtime`)
 - Live listeners verified on hermes-host: `0.0.0.0:8765` (gadget hub), `127.0.0.1:8770`
   (speech), `127.0.0.1:11436` (local-live model); 8766 free
-- `~/.hermes/plugins/conduit_push/` (Conduit iPhone notifications — Jake's phone)
 
 Community:
 

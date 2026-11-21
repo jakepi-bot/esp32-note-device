@@ -261,7 +261,7 @@ Select **Back to Hermes** to leave.
 | Clock face | Boards with a display: choose Off (the default), 30 seconds, 1, 2, or 5 minutes of rest before a resting clock shows |
 | Power off | Select twice to shut down a board with a power driver |
 | Wi-Fi setup | Start [phone-based setup](setup-board.md#set-up-wi-fi-with-your-phone) on ESP32 boards, with a QR code for the temporary network where the screen has room |
-| Phone app | On boards with Bluetooth: pair a phone app for two minutes; the screen shows the six-digit code to type on the phone. Shows whether a phone is paired and connected |
+| Phone app | On boards with Bluetooth: pair a phone app for two minutes. The screen names an asking phone and waits for a tap on **Allow** before it shows the six-digit code to type on the phone. Shows whether a phone is paired and connected |
 | Language | Step through the languages of the device's own text: English, Spanish |
 | Double press home | Boards with a TALK key: choose whether two quick presses of it go back to Ready with the default profile; on by default (see below) |
 | Talk from dark screen | Boards with a TALK key: choose whether its press on a dark screen lights it and starts recording at once, or only lights it; off by default (see below) |

@@ -1,0 +1,66 @@
+# The Bluetooth note-sync stack, in two containers:
+#
+#   note-sync  the endpoint (POST /notes/v1) and the phone's relay page (GET /)
+#   relay      Caddy in front: plain HTTP on 8080 and HTTPS on 8443, so the
+#              iPhone can load the page from an origin Web Bluetooth accepts
+#
+# Start it from this directory with `docker compose up -d --build`.
+# Step-by-step instructions: deploy/bluetooth-sync/README.md
+name: hermes-note-sync
+
+services:
+  note-sync:
+    build:
+      context: ../..
+      dockerfile: deploy/bluetooth-sync/Dockerfile
+    image: hermes-note-sync:latest
+    restart: unless-stopped
+    environment:
+      NOTES_PORT: "8766"
+      # Where the container writes; both are inside the ./data mount.
+      NOTES_DIR: ${NOTES_DIR:-/data/notes}
+      VAULT_DIR: ${VAULT_DIR:-/data/vault}
+      DEVICES_DIR: ${DEVICES_DIR:-/data/gadget}
+      # Transcription and summaries: any OpenAI-compatible HTTP service.
+      # Leave both empty to stage uploads only (no transcripts).
+      STT_URL: ${STT_URL:-}
+      STT_MODEL: ${STT_MODEL:-whisper-1}
+      STT_API_KEY: ${STT_API_KEY:-}
+      STT_LANGUAGE: ${STT_LANGUAGE:-}
+      STT_TIMEOUT_S: ${STT_TIMEOUT_S:-120}
+      LLM_URL: ${LLM_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_JSON_MODE: ${LLM_JSON_MODE:-1}
+      LLM_TIMEOUT_S: ${LLM_TIMEOUT_S:-120}
+      # Only if the board itself was given an access token.
+      GADGET_ACCESS_TOKEN: ${GADGET_ACCESS_TOKEN:-}
+      # The markdown filename's local time.
+      TZ: ${TZ:-America/Chicago}
+    volumes:
+      - ./data:/data
+    ports:
+      # The endpoint itself, for the board over Wi-Fi and for curl.
+      - "${NOTES_PORT:-8766}:8766"
+
+  relay:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      # What the phone types: the host's LAN IP, a DNS name, or a tailnet name.
+      # Its certificate is issued for exactly this, so it has to match.
+      RELAY_HOST: ${RELAY_HOST:-localhost}
+    depends_on:
+      note-sync:
+        condition: service_healthy
+    ports:
+      - "${RELAY_HTTP_PORT:-8080}:8080"
+      - "${RELAY_HTTPS_PORT:-8443}:8443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

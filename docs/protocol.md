@@ -508,7 +508,7 @@ mac = HMAC-SHA256(key, "hermes-gadget/v1|ota|" + device_id + "|" + nonce + "|" +
 
 ## Phone app over Bluetooth
 
-Boards whose firmware enables Bluetooth (none yet; see [hardware validation](hardware-validation.md#bluetooth)) also accept a phone app over Bluetooth LE. It is a local channel to the device's console, not part of the Hermes protocol: the phone sends the same commands as the [USB console](hardware.md#serial-console) and gets the same `@` replies, so an app can set up Wi-Fi (`set wifi_ssid`, `set wifi_pass`), change settings and read `status`.
+Boards whose firmware enables Bluetooth (the ePaper-1.54 build does; see [hardware validation](hardware-validation.md#bluetooth)) also accept a phone app over Bluetooth LE. It is a local channel to the device's console, not part of the Hermes protocol: the phone sends the same commands as the [USB console](hardware.md#serial-console) and gets the same `@` replies, so an app can set up Wi-Fi (`set wifi_ssid`, `set wifi_pass`), change settings and read `status`.
 
 | | UUID | Properties |
 |---|---|---|
@@ -516,11 +516,12 @@ Boards whose firmware enables Bluetooth (none yet; see [hardware validation](har
 | Command | `dc530002-7a2a-400f-b8f6-e87185576192` | Write with response; needs an encrypted, authenticated link |
 | Reply | `dc530003-7a2a-400f-b8f6-e87185576192` | Notify |
 
-- **Pairing:** the phone must pair before writing. The device accepts pairing only while **Phone app** pairing is open (device settings, or `phone pair`; two minutes). It shows a six-digit passkey, which the phone's user types: LE Secure Connections with passkey entry. The device refuses pairing outside the window, refuses Just Works pairing, and keeps up to three phones, forgetting the oldest. `phone forget` removes them all and drops a connected phone.
+- **Pairing, and the acknowledgement on the device:** the phone must pair before writing, and a phone is never paired by asking alone. The device accepts a pairing *request* only while **Phone app** pairing is open (device settings → **Phone app**, or `phone pair`; two minutes). The request is not answered at once: the screen names the asking phone's Bluetooth address ("Allow this phone?") and waits up to 20 s for someone at the device to allow it — a tap on the screen, the talk control on a board without a touch screen, or `phone allow` on the console. `phone deny`, a downward swipe, the window closing, or 20 s of silence drops that link and the phone's request fails with an authentication error; the window stays open so the same phone can ask again. Only after the device allows it does it show a six-digit passkey, which iOS shows in its own dialog for the user to confirm: LE Secure Connections with passkey entry. The acknowledgement is what makes the address on the screen and the code on the phone worth reading — a phone that is merely in radio range cannot bond itself to a device nobody touched. The device refuses pairing outside the window, refuses Just Works pairing, and keeps up to three phones, forgetting the oldest. `phone forget` removes them all and drops a connected phone.
 - **Advertising:** the device advertises its name and the service while pairing is open, about once a second while a phone is paired, and not at all otherwise. One phone connects at a time.
 - **Commands:** subscribe to Reply, then write one console line (UTF-8, up to 256 bytes) to Command. Wait for its reply before writing the next; a third pending line is refused with "insufficient resources".
 - **Replies:** the reply text arrives in notifications sized to the link's MTU, ending with a single `0x00` byte. `@error device busy` means the device didn't answer within 3 s.
-- **State:** `status` includes `"phone": {"paired": 1, "connected": true, "pairing": false}` on these boards; `phone` alone returns the same object as `@phone {...}`.
+- **State:** `status` includes `"phone": {"paired": 1, "connected": true, "pairing": false}` on these boards, plus `"confirm": "A4:C1:38:…"` while a phone is waiting for the acknowledgement and `"code": "123456"` once one is allowed; `phone` alone returns the same object as `@phone {...}`.
+- **Console:** `phone pair`, `phone pair close`, `phone allow`, `phone deny`, `phone forget`; a command that arrives with no phone waiting answers `@error no phone is asking to pair`.
 
 ### Note sync (voice notes off the card)
 

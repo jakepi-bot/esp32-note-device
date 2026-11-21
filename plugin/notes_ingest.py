@@ -394,6 +394,8 @@ class NotesServer:
                  llm_resolver: Optional[Callable[[], object]] = None,
                  transcribe: Optional[Callable[..., str]] = None,
                  summarize: Optional[Callable[[str], str]] = None,
+                 stage_only: bool = False,
+                 page_dir: Optional[Path | str] = None,
                  clock: Callable[[], float] = time.time):
         self.store = store
         self.notes_dir = Path(notes_dir)
@@ -406,10 +408,15 @@ class NotesServer:
         self.max_bytes = int(max_bytes)
         self.access_token = access_token or None
         vault = obsidian_dir if obsidian_dir is not None else DEFAULT_OBSIDIAN_DIR
+        # ``stage_only`` is the container's mode without a transcriber: uploads are
+        # verified and staged in ``inbox/`` exactly as the contract says, and the
+        # host that mounts the same directory runs the pipeline.
         self.pipeline = (NotesPipeline(self.notes_dir, Path(vault).expanduser(),
                                        transcribe=transcribe, summarize=summarize,
                                        language=language, llm_resolver=llm_resolver, clock=clock)
-                         if NotesPipeline is not None else None)
+                         if NotesPipeline is not None and not stage_only else None)
+        #: Served at ``/`` from the same origin as ``/notes/v1`` (the phone's page).
+        self.page_dir = Path(page_dir) if page_dir is not None else None
         self.paused = False  # maintenance: every upload gets 503 and the device retries
         self.bound_port: Optional[int] = None
         self.last_error: Optional[str] = None
@@ -525,7 +532,7 @@ class NotesServer:
             self._uv_failed.set()
             return
         try:
-            config = uvicorn.Config(create_app(self), host=self.host, port=self.port,
+            config = uvicorn.Config(create_app(self, self.page_dir), host=self.host, port=self.port,
                                     log_config=None, access_log=False)
             server = uvicorn.Server(config)
             self._uv_server = server
@@ -904,19 +911,27 @@ class NotesServer:
 # -- the ASGI app ----------------------------------------------------------------------
 
 
-def create_app(server: NotesServer):
+def create_app(server: NotesServer, page_dir: Optional[Path | str] = None):
     """The FastAPI app: thin enough that the contract lives in ``NotesServer``
-    (tests drive it directly); this layer only bounds the body and maps codes."""
+    (tests drive it directly); this layer only bounds the body and maps codes.
+
+    ``page_dir`` additionally serves the phone's relay page (``web/ble-note-relay``)
+    at ``/`` from this same origin, which is what the container does: the page then
+    defaults its notes endpoint to ``/notes/v1`` on the host it came from, and the
+    phone needs one address, not two.
+    """
     try:  # only consumer of FastAPI; the rest of the contract runs without it (a bare
         # test env has no FastAPI and skips the route tests; Hermes ships it for the server)
         from fastapi import FastAPI, Request
         from fastapi.responses import JSONResponse, Response
+        from fastapi.staticfiles import StaticFiles
         from starlette.exceptions import HTTPException as StarletteHTTPException
     except ImportError as exc:  # pragma: no cover - Hermes ships FastAPI
         raise RuntimeError("FastAPI is required to serve /notes/v1 (it ships with Hermes)") from exc
     # The route annotations below are strings (this module has `from __future__ import
     # annotations`) and FastAPI resolves them in the module's globals, not this frame.
-    globals().update(FastAPI=FastAPI, Request=Request, JSONResponse=JSONResponse, Response=Response)
+    globals().update(FastAPI=FastAPI, Request=Request, JSONResponse=JSONResponse, Response=Response,
+                     StaticFiles=StaticFiles)
 
     app = FastAPI(title="Hermes Gadget voice notes", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -969,5 +984,10 @@ def create_app(server: NotesServer):
     @app.get(HEALTH_PATH)
     async def health():
         return reply(200, server.health())
+
+    if page_dir is not None:
+        # Last, so `/notes/v1` and `/health` keep their routes: the mount takes
+        # everything left, which is the page and its module.
+        app.mount("/", StaticFiles(directory=str(page_dir), html=True), name="relay")
 
     return app

@@ -17,7 +17,7 @@
 | Host compiler | CMake 3.x + system GCC (`ctest --test-dir build/host`) |
 | Node | v22 (`node --test`) |
 | Bluetooth on host | **none** (`/sys/class/bluetooth` absent, no HCI device), so no Linux BLE central was available |
-| iPhone / Bluefy / Conduit | **not available to this run** |
+| iPhone / Bluefy | **not available to this run** |
 
 The working tree was a fresh `git clone` of the public repo. Builds were run from
 `firmware/esp32/` because that is where `platformio.ini` lives; the README's
@@ -243,16 +243,15 @@ defer the note's timestamp display until `recorded_at` is non-zero.
 - **Wi-Fi + BLE during a simultaneous transfer.** Both radios were up together
   (Wi-Fi online, BLE advertising) with no errors; no concurrent transfer was run.
 
-## 6. Notes on the Conduit workflow
+## 6. Notes on the phone-side workflow
 
-The card asks for "end-to-end BLE note transfer to an iPhone using the documented
-Conduit workflow". The repo's own docs (`docs/ble-note-sync.md` §9.2) state that
-Conduit has no BLE central and cannot read the GATT service; the radio half is
-the Bluefy-hosted relay page (`web/ble-note-relay/`), and Conduit/Hermes only
-receives the `POST /notes/v1` afterwards. The implementation matches the docs,
-but the card's premise does not: there is no Conduit-only path. The report and
-the eventual release notes should describe the Bluefy relay page as the phone
-step.
+The card asks for "end-to-end BLE note transfer to an iPhone". Neither iOS itself
+nor any app without a BLE central can read the GATT service, so the phone step is
+the Bluefy-hosted relay page (`web/ble-note-relay/`), which holds the link and
+posts the note to `POST /notes/v1` when it is done. That is the only path this
+run could test the shape of, and the card should describe it as the phone step
+rather than a separate app. The server half is now a container
+(`deploy/bluetooth-sync/`); the iPhone half still needs a real device.
 
 ## 7. Test data and device state left behind
 

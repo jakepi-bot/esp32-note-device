@@ -41,3 +41,7 @@ firmware/esp32/sdkconfig.*-*
 .idea/
 .DS_Store
 Thumbs.db
+
+# The Bluetooth note-sync container: its secrets, its notes and its vault are local.
+deploy/bluetooth-sync/.env
+deploy/bluetooth-sync/data/

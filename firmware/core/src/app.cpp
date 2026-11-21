@@ -1826,7 +1826,12 @@ void App::on_button(Button button, bool pressed, bool touch) {
     return;
   }
   if (phone_pairing_) {
-    if (button == Button::Cancel && !pressed) close_phone_pairing();
+    if (button == Button::Cancel && !pressed) {
+      close_phone_pairing();
+      return;
+    }
+    // The acknowledgement, on a board without a touch screen: the talk control allows.
+    if (button == Button::Talk && !pressed && phone_ask_pending()) answer_phone_pairing(true);
     return;
   }
   const auto bit = static_cast<uint8_t>(1u << static_cast<unsigned>(button));
@@ -2915,16 +2920,25 @@ void App::update_model() {
   if (phone_pairing_) {
     m.screen = Screen::Setup;
     m.scroll = 0;
-    if (phone_passkey_.empty()) {
+    if (!phone_ask_.empty()) {
+      // A phone asked while the window is open: nothing is shared until someone
+      // here allows it, and the address is on screen to compare with the phone.
+      m.headline = tr(Msg::PhoneAsk);
+      m.detail = tr(Msg::BluetoothName, {name_});
+      m.body = tr(Msg::PhoneAskBody, {phone_ask_});
+      m.hint = profile_.touch_screen ? std::string(tr(Msg::PhoneAskHint))
+                                     : tr(Msg::PhoneAskHintKeys, {talk, cancel});
+    } else if (phone_passkey_.empty()) {
       m.headline = tr(Msg::PairAPhone);
       m.detail = tr(Msg::BluetoothName, {name_});
       m.body = tr(Msg::PhonePairIntro, {name_});
+      m.hint = profile_.touch_screen ? std::string(tr(Msg::SwipeDownToCancel)) : tr(Msg::ButtonToCancel, {cancel});
     } else {
       m.headline = tr(Msg::PhoneCode, {phone_passkey_});
       m.detail = tr(Msg::TypeCodeOnPhone);
       m.body = tr(Msg::OnlyPhoneInFront);
+      m.hint = profile_.touch_screen ? std::string(tr(Msg::SwipeDownToCancel)) : tr(Msg::ButtonToCancel, {cancel});
     }
-    m.hint = profile_.touch_screen ? std::string(tr(Msg::SwipeDownToCancel)) : tr(Msg::ButtonToCancel, {cancel});
     render(m);
     return;
   }
@@ -3411,7 +3425,7 @@ std::string App::console(std::string_view raw) {
       for (const char* k : kTailnetKeys) keys += std::string(" ") + k;
     return "@help commands: status | diag [log | crash clear] | log <tag | *> <level> | get <key> | set <key> <value> | say <text> | talk | release | "
            "cancel | new-session | camera [close] | settings [close] | wifi-setup [close] | wifi [list | add <ssid> [password] | join <ssid> | "
-           "forget <ssid>] | phone [pair [close] | forget] | perf [on | off | reset | budget <us> | bench [scroll | mascot | redraw | all]] | face [<expression> [seconds]] | yes | no | choose <n> | choose cancel | reconnect | forget-key | factory-reset   keys:" + keys;
+           "forget <ssid>] | phone [pair [close] | allow | deny | forget] | perf [on | off | reset | budget <us> | bench [scroll | mascot | redraw | all]] | face [<expression> [seconds]] | yes | no | choose <n> | choose cancel | reconnect | forget-key | factory-reset   keys:" + keys;
   }
   if (cmd == "status") return "@status " + status_json();
   if (cmd == "phone") {
@@ -3419,13 +3433,23 @@ std::string App::console(std::string_view raw) {
     if (rest.empty()) return "@phone " + phone_value().dump();
     if (rest == "pair") return start_phone_pairing() ? "@ok phone pairing open" : "@error phone pairing unavailable";
     if (rest == "pair close") { close_phone_pairing(); return "@ok phone pairing closed"; }
+    if (rest == "allow") {
+      if (!phone_ask_pending()) return "@error no phone is asking to pair";
+      answer_phone_pairing(true);
+      return "@ok phone allowed";
+    }
+    if (rest == "deny") {
+      if (!phone_ask_pending()) return "@error no phone is asking to pair";
+      answer_phone_pairing(false);
+      return "@ok phone denied";
+    }
     if (rest == "forget") {
       close_phone_pairing();
       if (on_phone_forget) on_phone_forget();
       on_phone_status(0, false);
       return "@ok phone forget";
     }
-    return "@error usage: phone [pair [close] | forget]";
+    return "@error usage: phone [pair [close] | allow | deny | forget]";
   }
   if (cmd == "wifi-setup") {
     if (rest == "close") { close_wifi_setup(); return "@ok Wi-Fi setup closed"; }

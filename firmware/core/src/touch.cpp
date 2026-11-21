@@ -21,7 +21,7 @@ void TouchGestures::tick(uint32_t now_ms) {
   // With touch_talk off a still finger stays Pending where TALK would record: its lift is a tap
   // that does nothing there, and it can still become a swipe down.
   if (state_ == State::Pending && static_cast<int32_t>(now_ms - t0_) >= static_cast<int32_t>(cfg_.hold_ms) &&
-      app_.touch_presses_talk()) {
+      app_.touch_presses_talk() && !app_.phone_ask_pending()) {
     state_ = State::Talk;
     press(Button::Talk);
   }
@@ -32,6 +32,12 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
     switch (state_) {
       case State::Pending:  // a quick tap
         if (from_clock_) break;  // Ready came back at touch-down; a tap does nothing else
+        // A phone is asking to pair and this is the one acknowledgement: the
+        // tap allows it (a swipe down is still Cancel, which refuses).
+        if (app_.phone_ask_pending()) {
+          app_.answer_phone_pairing(true);
+          break;
+        }
         // A long press that didn't become TALK (touch_talk off) isn't a tap: it opens nothing on lift.
         if (!app_.touch_presses_talk() && static_cast<int32_t>(now_ms - t0_) >= static_cast<int32_t>(kTapMaxMs)) break;
         if (app_.show_reply_text()) break;  // the caption under the talking face gives way to the text
@@ -75,7 +81,9 @@ void TouchGestures::update(bool touching, int x, int y, uint32_t now_ms) {
     if (app_.wake_display()) { state_ = State::Ignored; return; }
     app_.mark_reply_read();  // what was on screen, before a notice over the reply closes
     app_.close_notices_for_input();  // a low battery alert goes, and the touch acts on what is under it
-    state_ = app_.profile_picker_open() ? State::Picker
+    // A phone asking to pair owns the screen: its tap is the acknowledgement.
+    state_ = app_.phone_ask_pending() ? State::Pending
+              : app_.profile_picker_open() ? State::Picker
               : app_.choice_touch_live() ? State::Choice
               : !from_clock_ && app_.settings_title_hit(x, y) ? State::Settings
               : app_.settings_list_live() ? State::List

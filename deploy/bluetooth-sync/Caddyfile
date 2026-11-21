@@ -1,0 +1,36 @@
+# The phone loads one address; this is it. Both listeners proxy the same app.
+#
+# :8080 plain HTTP — for a computer on the LAN, and for curl.
+# :8443 HTTPS — what Web Bluetooth needs on iOS: Bluefy (and every browser with
+#        Web Bluetooth) requires a secure origin, and a bare LAN address is not
+#        one. The certificate comes from Caddy's own CA (`local_certs` below),
+#        made for RELAY_HOST; trusting that CA on the iPhone is the one-time
+#        step in README.md. Without that step the phone shows a certificate
+#        error and the page never loads.
+#
+# RELAY_HOST is the name or address the phone types: the host's LAN IP
+# (192.168.1.20), a DNS name, or a tailnet name. It must match exactly.
+{
+	admin off
+	auto_https disable_redirects
+	skip_install_trust
+	local_certs
+}
+
+:8080 {
+	encode zstd gzip
+	reverse_proxy note-sync:8766
+}
+
+https://{$RELAY_HOST:localhost}:8443 {
+	encode zstd gzip
+	reverse_proxy note-sync:8766
+}
+
+# A real certificate (a public name, not an address): drop `local_certs` above
+# and replace the https block with
+#   notes.example.com {
+#       reverse_proxy note-sync:8766
+#   }
+# publishing 443/80 instead of 8443 in docker-compose.yml. Caddy then gets and
+# renews the certificate itself, and the iPhone needs no trust step.

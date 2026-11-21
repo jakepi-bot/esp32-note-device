@@ -177,8 +177,10 @@ pio run -e waveshare-epaper-154                 # build
 pio run -e waveshare-epaper-154 -t upload       # USB-C, once, for the new table
 ```
 
-Then pair a phone once: **Phone app** in the device settings (or `phone pair` over
-the console) shows a passkey on the screen; type it on the phone.
+Then pair a phone once: **Settings → Phone app** (or `phone pair` over the
+console) opens a two-minute window; the phone connects, the device asks whether
+to allow it, and only after that does it show the passkey to confirm. The whole
+first-time walk-through is [Voice notes off the gadget with an iPhone](ios-bluetooth-sync.md).
 
 ## 9. The phone side
 
@@ -197,11 +199,14 @@ and only then sends `done`.
 
 Setup:
 
-1. Serve the folder — `cd web/ble-note-relay && python3 -m http.server 8000` on
-   any machine on the network, or open the page from a static host. Web Bluetooth
-   needs `https://` or `localhost`; a plain `http://` LAN address works in
-   Bluefy/Chrome only for `localhost`, so use the `file://` copy or a quick
-   `python3 -m http.server` on the phone-side machine.
+1. Serve the page over **HTTPS**. Web Bluetooth only works in a secure origin,
+   and on iOS that means `https://` (Bluefy has no exception): a plain
+   `http://` LAN address is refused. The supported way is the container in
+   [deploy/bluetooth-sync](../deploy/bluetooth-sync/README.md), which serves this
+   page and `POST /notes/v1` from one HTTPS origin and fills the endpoint in for
+   you. For a quick look on a laptop only,
+   `cd web/ble-note-relay && python3 -m http.server 8000` works at
+   `http://localhost:8000/`.
 2. Fill in the notes endpoint, the **device id** and the **device key**. The key
    is the board's, from the host's device store:
 
@@ -223,16 +228,33 @@ Because the relay signs as the board, the note's `idempotency_key` (its own id)
 makes a double delivery harmless: a note already in Hermes answers `200`, and the
 relay still sends `done`.
 
-### 9.2 Conduit for iOS
+### 9.2 Pairing, and the acknowledgement on the device
 
-Conduit reaches Hermes over the network and has no BLE central in this repository,
-so it cannot read the GATT service itself: the relay page is the piece that
-reaches the radio. What Conduit *does* keep is everything after that — the relay
-posts to `POST /notes/v1`, the same endpoint and the same HMAC a Wi-Fi upload uses
-([voice-note ingestion](voice-note-ingestion.md)), so a note taken over Bluetooth
-is transcribed and filed under `~/obsidian/Notes/voice notes` exactly like a note
-that went out over Wi-Fi. Nothing on the Hermes side is configured for Bluetooth,
-and nothing in Conduit has to be reconfigured.
+The note service needs the same paired, encrypted link as the console channel, so
+the first phone goes through the device's pairing window — and through an
+acknowledgement that only someone holding the device can give:
+
+1. **Settings → Phone app** on the device (or `phone pair`) opens the window for
+   two minutes and starts advertising.
+2. The phone connects and asks to pair. The device does **not** answer it: the
+   screen shows *Allow this phone?* and the phone's Bluetooth address, and waits
+   up to 20 s.
+3. A tap on the screen allows it (the talk control on a board without touch, or
+   `phone allow` on the console). A swipe down, `phone deny`, the window closing,
+   or the 20 s running out refuses it: that link is dropped and the phone's
+   pairing fails with an authentication error. A second phone asking while one
+   waits is refused outright.
+4. Allowed, the device shows a six-digit passkey; iOS shows the same code to
+   confirm. That is LE Secure Connections with passkey entry — the passkey proves
+   the link is not being relayed, and the acknowledgement proves that somebody at
+   the device wanted *this* phone paired.
+
+The order is the point: without the tap there is no code and no bond, so a phone
+in radio range cannot pair itself with a device nobody is holding, and the address
+on the screen is something to compare rather than decoration. Bonds persist (up
+to three phones, oldest forgotten); `phone forget` removes them all. The state is
+visible: `phone` (console or `status`) reports `false`/`true` plus the address
+waiting (`confirm`) or the code (`code`).
 
 **Why not a Shortcut alone.** An iOS Shortcut cannot open a Bluetooth LE
 connection to a GATT service, and it has no HMAC-SHA256 action with which to sign
@@ -242,10 +264,9 @@ must not be pasted into one that posts unsigned. The bridge is the Bluefy page i
 pulls the note over BLE, and signs the upload. A Shortcut can still be chained
 after it, but it would only be doing what the page already did.
 
-If a BLE receiver is added to Conduit later, the device needs no change: the
-contract is this document — connect to `dc5300a0-…`, subscribe to `dc5300a2-…`,
-write the commands from §2 to `dc5300a1-…`, and hand the resulting WAV to the
-notes endpoint (§9.3).
+Any other BLE central follows the same contract: connect to `dc5300a0-…`,
+subscribe to `dc5300a2-…`, write the commands from §2 to `dc5300a1-…`, and hand
+the resulting WAV to the notes endpoint (§9.3).
 
 ### 9.3 What the phone posts
 

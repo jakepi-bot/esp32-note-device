@@ -616,6 +616,35 @@ def test_unknown_path_is_404_and_a_wrong_method_is_405(server):
     assert "POST" in wrong.headers.get("allow", "")
 
 
+def test_the_page_is_served_beside_the_endpoint(server, tmp_path):
+    """The container's one origin (deploy/bluetooth-sync): ``/`` is the phone's
+    relay page and ``/notes/v1`` is still the contract, from the same app."""
+    page = tmp_path / "relay"
+    page.mkdir()
+    (page / "index.html").write_text("<!doctype html><title>relay</title>", encoding="utf-8")
+    (page / "relay.mjs").write_text("export const SERVICE_UUID = 1;\n", encoding="utf-8")
+    client = TestClient(create_app(server, page))
+    assert client.get("/").text == "<!doctype html><title>relay</title>"
+    assert "SERVICE_UUID" in client.get("/relay.mjs").text
+    assert client.get("/health").json()["status"] == "ok"
+    body_fields = fields(idempotency_key="page-key")
+    wire = signed(body_fields)
+    wire["content-type"] = f"multipart/form-data; boundary={BOUNDARY}"
+    assert client.post("/notes/v1", content=multipart(body_fields), headers=wire).status_code == 202
+
+
+def test_stage_only_serves_the_endpoint_without_a_pipeline(tmp_path):
+    """Without a transcriber the container still accepts notes: they are verified
+    and staged in ``inbox/`` and nothing claims to have processed them."""
+    staged = NotesServer(FakeStore(), tmp_path / "notes", host="127.0.0.1", port=0,
+                         obsidian_dir=tmp_path / "vault", stage_only=True)
+    assert staged.pipeline is None
+    status, body = upload(staged, fields(idempotency_key="stage-key"))
+    assert status == 202
+    assert list((tmp_path / "notes" / "inbox").iterdir())
+    assert not (tmp_path / "vault").exists() or not list((tmp_path / "vault").glob("*.md"))
+
+
 def test_the_route_answers_400_for_a_non_multipart_request(server):
     client = TestClient(create_app(server))
     response = client.post("/notes/v1", content=b"hello",

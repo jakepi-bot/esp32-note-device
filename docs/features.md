@@ -86,7 +86,7 @@ The screenshots come from the desktop simulator, which runs the same device core
 - **Diagnostics report.** Save a report from the browser installer or with `hermes-gadget diag` to attach to a bug report. [Save a board report](troubleshooting.md#save-a-board-report)
 - **Away from home.** Reach Hermes from another network through Tailscale Funnel. [Connect from another network](tailscale-funnel.md)
 - **Tailnet.** Experimental, and not in release images: a source build can join your Tailscale tailnet itself. [Reach Hermes over your tailnet](tailnet.md)
-- **Phone app over Bluetooth.** Experimental and off on every board; a source build can turn it on. [Bluetooth](hardware-validation.md#bluetooth)
+- **Phone app and note sync over Bluetooth.** The ePaper-1.54 image always has it: pair a phone once, then take notes off the card with no Wi-Fi anywhere. Another board enables it with a `BoardConfig` flag. [Bluetooth note sync](ble-note-sync.md), [iPhone walk-through](ios-bluetooth-sync.md)
 
 ## Hermes profiles
 

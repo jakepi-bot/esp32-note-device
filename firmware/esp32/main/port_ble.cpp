@@ -42,6 +42,7 @@ bool PhoneLink::begin(const std::string&) {
   return false;
 }
 bool PhoneLink::open_pairing() { return false; }
+void PhoneLink::answer_pairing(bool) {}
 void PhoneLink::close_pairing() {}
 void PhoneLink::forget() {}
 void PhoneLink::set_name(const std::string&) {}
@@ -104,8 +105,21 @@ uint8_t g_own_addr_type = 0;
 std::mutex g_name_mutex;
 std::string g_name;
 
-ble_npl_event g_update_ev, g_forget_ev;
+ble_npl_event g_update_ev, g_forget_ev, g_answer_ev;
 ble_npl_callout g_drop;
+
+// A phone waiting for the screen's answer (the port's pairing acknowledgement,
+// docs/protocol.md#phone-app-over-bluetooth). Written on the host task, read by
+// the app task, answered back on the host task through g_answer_ev.
+struct Ask {
+  uint16_t conn = kNone;
+  uint32_t passkey = 0;
+  uint8_t peer[6] = {};
+  bool open = false;
+};
+std::mutex g_ask_mutex;
+Ask g_ask;
+std::atomic<bool> g_allow{false};
 
 void make_uuid(ble_uuid128_t& uuid, uint8_t n) {
   uuid.u.type = BLE_UUID_TYPE_128;
@@ -119,12 +133,13 @@ int bonds() {
   return count;
 }
 
-void post(PhoneSample::Kind kind, uint32_t passkey = 0) {
-  PhoneSample s{kind, passkey, 0, false};
+void post(PhoneSample::Kind kind, uint32_t passkey = 0, const uint8_t* peer = nullptr) {
+  PhoneSample s{kind, passkey, 0, false, {}};
   if (kind == PhoneSample::Kind::Status) {
     s.paired = static_cast<uint8_t>(bonds());
     s.connected = g_conn.load() != kNone;
   }
+  if (peer != nullptr) std::memcpy(s.peer, peer, sizeof(s.peer));
   events::post(EventType::Phone, &s, sizeof(s));
 }
 
@@ -180,6 +195,36 @@ void on_drop(ble_npl_event*) {
   if (conn != kNone) ble_gap_terminate(conn, BLE_ERR_REM_USER_CONN_TERM);
 }
 
+// Host task: the screen's answer to a pairing ask. Allowed, the passkey goes in
+// and the phone shows the same six digits; refused (or timed out, which the app
+// task sends the same way), the link is dropped and the phone learns nothing.
+void on_answer(ble_npl_event*) {
+  Ask ask;
+  {
+    std::lock_guard<std::mutex> lock(g_ask_mutex);
+    if (!g_ask.open) return;
+    ask = g_ask;
+    g_ask = Ask{};
+  }
+  const bool allow = g_allow.load();
+  if (!allow) {
+    ESP_LOGW(TAG, "pairing refused on the screen");
+    ble_gap_terminate(ask.conn, BLE_ERR_AUTH_FAIL);
+    return;
+  }
+  ble_sm_io io = {};
+  io.action = BLE_SM_IOACT_DISP;
+  io.passkey = ask.passkey;
+  const int rc = ble_sm_inject_io(ask.conn, &io);
+  if (rc != 0) {
+    ESP_LOGW(TAG, "pairing response not accepted (%d)", rc);
+    ble_gap_terminate(ask.conn, BLE_ERR_AUTH_FAIL);
+    return;
+  }
+  ESP_LOGI(TAG, "pairing allowed on the screen");
+  post(PhoneSample::Kind::Passkey, ask.passkey);
+}
+
 void on_forget(ble_npl_event*) {
   ble_store_clear();
   ESP_LOGI(TAG, "paired phones removed");
@@ -208,6 +253,10 @@ int on_gap(ble_gap_event* event, void*) {
       g_conn = kNone;
       g_note_subscribed = false;
       g_note_mtu = 23;
+      {
+        std::lock_guard<std::mutex> lock(g_ask_mutex);
+        if (g_ask.open && g_ask.conn == event->disconnect.conn.conn_handle) g_ask = Ask{};
+      }
       if (g_pairing_conn == event->disconnect.conn.conn_handle) {
         g_pairing_conn = kNone;
         post(PhoneSample::Kind::Failed);
@@ -242,12 +291,36 @@ int on_gap(ble_gap_event* event, void*) {
         ble_gap_terminate(conn, BLE_ERR_AUTH_FAIL);
         return 0;
       }
-      ble_sm_io io = {};
-      io.action = BLE_SM_IOACT_DISP;
-      io.passkey = esp_random() % 1000000;
+      // The phone does not get the code yet: the screen names it first, and the
+      // passkey only goes in when the person holding the device allows it. A
+      // second phone asking while one waits is turned away.
+      ble_gap_conn_desc d;
+      if (ble_gap_conn_find(conn, &d) != 0) {
+        ble_gap_terminate(conn, BLE_ERR_AUTH_FAIL);
+        return 0;
+      }
+      uint8_t peer[6];
+      const uint8_t* addr = d.peer_id_addr.val;
+      for (int i = 0; i < 6; ++i) peer[i] = addr[5 - i];  // NimBLE keeps the address little-endian
+      bool busy = false;
+      {
+        std::lock_guard<std::mutex> lock(g_ask_mutex);
+        busy = g_ask.open;
+        if (!busy) {
+          g_ask.conn = conn;
+          g_ask.passkey = esp_random() % 1000000;
+          std::memcpy(g_ask.peer, peer, sizeof(peer));
+          g_ask.open = true;
+        }
+      }
+      if (busy) {
+        ESP_LOGW(TAG, "pairing refused: another phone is waiting for the screen");
+        ble_gap_terminate(conn, BLE_ERR_AUTH_FAIL);
+        return 0;
+      }
       g_pairing_conn = conn;
-      ble_sm_inject_io(conn, &io);
-      post(PhoneSample::Kind::Passkey, io.passkey);
+      ESP_LOGI(TAG, "a phone asks to pair; waiting for the screen");
+      post(PhoneSample::Kind::Ask, 0, peer);
       return 0;
     }
 
@@ -470,6 +543,7 @@ bool PhoneLink::begin(const std::string& name) {
   ble_store_config_init();
   ble_npl_event_init(&g_update_ev, on_update, nullptr);
   ble_npl_event_init(&g_forget_ev, on_forget, nullptr);
+  ble_npl_event_init(&g_answer_ev, on_answer, nullptr);
   ble_npl_callout_init(&g_drop, nimble_port_get_dflt_eventq(), on_drop, nullptr);
   nimble_port_freertos_init(host_task);
   g_started = true;
@@ -485,8 +559,26 @@ bool PhoneLink::open_pairing() {
   return true;
 }
 
+void PhoneLink::answer_pairing(bool allow) {
+  if (!g_started) return;
+  {
+    std::lock_guard<std::mutex> lock(g_ask_mutex);
+    if (!g_ask.open) return;
+  }
+  g_allow = allow;
+  schedule(&g_answer_ev);
+}
+
 void PhoneLink::close_pairing() {
   if (!g_started || !g_pairing.exchange(false)) return;
+  {
+    // A phone still waiting for the screen is refused with the window.
+    std::lock_guard<std::mutex> lock(g_ask_mutex);
+    if (g_ask.open) {
+      g_allow = false;
+      schedule(&g_answer_ev);
+    }
+  }
   ESP_LOGI(TAG, "pairing closed");
   schedule(&g_update_ev);
 }

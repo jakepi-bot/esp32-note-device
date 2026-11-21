@@ -157,6 +157,17 @@ bool ensure(bool format_if_needed, std::string* error) {
   return true;
 }
 
+bool space(uint64_t* total_bytes, uint64_t* free_bytes) {
+  lock_init();
+  if (!g_mounted) return false;
+  uint64_t total = 0, free_now = 0;
+  // A full FAT scan on the card's 1-bit link: not something to do per loop pass.
+  if (esp_vfs_fat_info(kMountPoint, &total, &free_now) != ESP_OK) return false;
+  if (total_bytes) *total_bytes = total;
+  if (free_bytes) *free_bytes = free_now;
+  return true;
+}
+
 void release() {
   lock_init();
   if (!g_mounted) return;

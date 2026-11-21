@@ -401,6 +401,36 @@ TEST("the footer keeps the card's free space and drops the level to do it") {
   CHECK(cols(sm.foot) <= layout::kFootCols);
 }
 
+TEST("a full-ish card keeps its SD label even beside ON POWER (D9)") {
+  // The desk unit's card: 62.9 GB free. "ON POWER · 62.9G" fits fourteen columns
+  // (16 with spaces, 14 tight) but a reader cannot tell the number from the
+  // cell's charge, so the fact is what goes: "87%·SD 62.9G".
+  StatusInputs in = online_inputs();
+  in.sd_free_bytes = 62900000000ull;
+  in.sd_free_known = true;
+  in.external_power = true;
+  in.stored = 52;
+  in.has_newest = true;
+  in.newest_valid = true;
+  in.newest_duration_s = 12;
+  in.pending = 0;
+  in.synced = 52;
+  const StatusView v = compose_status(in);
+  CHECK(v.foot.find("SD 62.9G") != std::string::npos);
+  CHECK(v.foot.find("ON POWER") == std::string::npos);
+  CHECK(cols(v.foot) <= layout::kFootCols);
+  // The number is never a printed zero: a card with nothing left still prints
+  // kilobytes, and an unmeasured card prints no number at all.
+  StatusInputs empty = in;
+  empty.sd_free_bytes = 0;
+  const StatusView z = compose_status(empty);
+  CHECK(z.foot.find("SD 0") == std::string::npos);
+  StatusInputs unknown = in;
+  unknown.sd_free_known = false;
+  const StatusView u = compose_status(unknown);
+  CHECK(u.foot.find("SD") == std::string::npos);
+}
+
 TEST("a long note is marked as cut, not silently cut") {
   StatusView v;
   v.time_valid = true;

@@ -295,12 +295,22 @@ class App {
   bool touch_talk_toggle();
   // Dozing (System::set_dozing): the port's loop may wait this long for events.
   static constexpr uint32_t kDozeWaitMs = 100;
+  // A module owns a bistable (e-paper) panel and nothing visible changes
+  // between events: rebuild the UI model this often instead of every
+  // kFrameMs. State changes still call update_model() directly.
+  static constexpr uint32_t kRestFrameMs = 1000;
+  // While resting on a bistable panel the port blocks this long for an event
+  // before the next poll; a key's edge interrupt ends the wait at once.
+  static constexpr uint32_t kRestWaitMs = 250;
   // The longest recording; the recording buffer holds this much (RecordingBuffer::bytes_for).
   static constexpr uint32_t kMaxUtteranceMs = 60000;
   // A recording that ended with the connection lost waits this long for it to come back
   // (about three connection attempts), then is dropped.
   static constexpr uint32_t kRecordingWaitMs = 45000;
   bool dozing() const { return dozing_; }
+  // A board module (App::rest_screen) painted the last frame; the core UI does
+  // not own the glass. The port uses it to rest a bistable panel.
+  bool rest_panel_owned() const { return rest_owned_; }
   bool start_wifi_setup();
   void close_wifi_setup();
   bool wifi_setup_open() const { return !wifi_setup_text_.empty(); }
@@ -361,6 +371,9 @@ class App {
   std::function<void()> on_phone_pair_close;
   std::function<void(bool)> on_phone_answer;  // the screen's yes or no to a pairing ask
   std::function<void()> on_phone_forget;  // removes every paired phone
+  // `phone wake`: open a short radio window (the controller is off at rest so
+  // the board can light-sleep; see hg/radio_window.hpp).
+  std::function<void()> on_phone_wake;
   // Factory reset: drops the device's tailnet identity. False when the port couldn't do that.
   std::function<bool()> on_tailnet_forget;
 

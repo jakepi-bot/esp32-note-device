@@ -49,6 +49,7 @@ if(CONFIG_HG_BOARD_WS_EPAPER_154)
         "notes/notes_queue.cpp"
         "notes/notes_ble.cpp"
         "notes/notes_store.cpp"
+        "notes/notes_retention.cpp"
         "notes/notes_capture.cpp"
         "notes/capture_writer.cpp"
         "notes/notes_uploader.cpp"

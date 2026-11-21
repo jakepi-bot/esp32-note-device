@@ -168,6 +168,9 @@ hg::DisplayInfo EpdDisplay::info() const {
   // plain; nothing is sent to the panel in RGB565.
   i.swap_bytes = false;
   i.has_backlight = false;
+  // The image stays with the panel unpowered and there is no light to turn off:
+  // the core may rest on this frame and let the chip doze (App::power_tick).
+  i.bistable = true;
   i.round = false;
   // Paper, not a lit panel: the UI keeps its dark background (emissive stays
   // off), and nothing dims or blanks it (set_backlight is the no-op default).

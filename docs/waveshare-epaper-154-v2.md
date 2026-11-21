@@ -255,6 +255,27 @@ Details:
 
 ## 6. Buttons and UI behaviour
 
+### 6.1a Touch probe on the desk unit (D3)
+
+Waveshare's schematic and its `13_FT6336_Test` example put the Touch SKU's
+FT6336 at **0x38** on the shared I2C bus (GPIO 47/48), with **EPD_TP_RST on
+GPIO 7** and EPD_TP_INT on GPIO 21. The controller does not answer on the bus
+until that reset net is released, which the port now does before probing.
+
+Measured on the desk unit (fw 0.7.1, `hg-0123456789abcdef`):
+
+```
+I (1156) hg.main: EPD_TP_RST (GPIO 7) pulsed: probing the touch glass
+I (1156) hg.main: no touch controller at 0x38: the home strip is not drawn
+```
+
+A full scan of the board's only I2C bus returns `0x18` (ES8311), `0x51`
+(PCF85063 RTC) and `0x70`; none of the three touch addresses answers afterwards
+(FT6336 0x38, GT911 0x5D / 0x14). So the desk unit behaves as the **plain**
+`ESP32-S3-ePaper-1.54` SKU: the glass is either not fitted or not connected.
+The firmware keeps the probe and the reset pulse, so a Touch SKU works with no
+code change; a plain SKU draws no strip and every action is a key.
+
 ### 6.1 Button map (port-level; this board has no touch — see the Touch-SKU caveat in §2.1)
 
 | Physical | Logical | Behaviour |

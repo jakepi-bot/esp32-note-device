@@ -2869,7 +2869,7 @@ void App::tick() {
   timer_tick();
   perf_tick();
 
-  if (t - frame_at_ >= kFrameMs) {
+  if (t - frame_at_ >= (rest_owned_ ? kRestFrameMs : kFrameMs)) {
     frame_at_ = t;
     // The port's time of day feeds the clock face; read once per frame.
     wall_valid_ = hal_.system && hal_.system->wall_time(wall_);
@@ -3487,13 +3487,18 @@ std::string App::console(std::string_view raw) {
       answer_phone_pairing(false);
       return "@ok phone denied";
     }
+    if (rest == "wake") {
+      // Bring the radio up for a minute: an explicit "look for me now".
+      if (on_phone_wake) on_phone_wake();
+      return "@ok phone radio awake";
+    }
     if (rest == "forget") {
       close_phone_pairing();
       if (on_phone_forget) on_phone_forget();
       on_phone_status(0, false);
       return "@ok phone forget";
     }
-    return "@error usage: phone [pair [close] | allow | deny | forget]";
+    return "@error usage: phone [pair [close] | allow | deny | forget | wake]";
   }
   if (cmd == "wifi-setup") {
     if (rest == "close") { close_wifi_setup(); return "@ok Wi-Fi setup closed"; }

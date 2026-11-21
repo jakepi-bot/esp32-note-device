@@ -67,10 +67,22 @@ constexpr int64_t kMinTrustedStampUnix = 1704067200;  // 2024-01-01T00:00:00Z
 // form, a date that does not exist: all false.
 bool stamp_plausible(std::string_view iso8601);
 
+// The second `iso` names, when it has the one shape this firmware writes:
+// "YYYY-MM-DDTHH:MM:SSZ", in UTC. Unlike stamp_plausible this accepts a stamp
+// from before 2024 (the retention rule has to age a note whose clock was never
+// set without mistaking 1970 for a very old note). False for any other shape,
+// including an offset form and a date that does not exist.
+bool parse_iso8601(std::string_view iso8601, int64_t& out_unix_s);
+
 // True when the note id's own stamp (`<device>-YYYYMMDDTHHMMSS-<seq>`) is not
 // plausible: the note was recorded before the board had a clock. Reads the
 // directory name, so the console can count them without opening note.json.
 bool note_id_undated(std::string_view note_id);
+
+// The second the note id's own stamp names (`<device>-YYYYMMDDTHHMMSS-<seq>`),
+// without opening the note: the retention rule ages a synced note from this,
+// which saves one card read per note. False when the id carries no such stamp.
+bool note_id_stamp(std::string_view note_id, int64_t& out_unix_s);
 
 // The meta as it is uploaded. A note with a plausible stamp is returned
 // unchanged — its stored bytes and idempotency key must stay put. A note whose

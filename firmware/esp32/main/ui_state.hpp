@@ -48,6 +48,12 @@ class UiState {
   // phase lasts.
   void tick(uint32_t now_ms);
 
+  // Keeps the current phase's line from expiring, for a state that outlasts the
+  // notice ttl (the notes mode's low-space error stays while the card stays
+  // full). Republishing the same text does not change the model, so the panel
+  // does not repaint; only the expiry would have. A no-op while Idle.
+  void keep_alive(uint32_t now_ms);
+
   // Observers for the mode modules (optional).
   std::function<void(UiPhase from, UiPhase to, const std::string& detail)> on_change;
 

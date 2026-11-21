@@ -13,6 +13,7 @@
 // (docs/firmware-modules.md, docs/waveshare-epaper-154-v2.md §6.1)
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 
 #include "modes/home_keys.hpp"
@@ -34,13 +35,26 @@ class ModeRouter {
              const HomeKeys::Config& keys);
   // Poll both keys and tick every mode; call from the app loop.
   void tick(uint32_t now_ms);
+  // A press is being made or a debounce is running: the loop must not rest.
+  // True also when no edge interrupt could be installed, which keeps the
+  // original 10 ms polling as the fallback.
+  bool fast_poll() const;
+  // Re-aim the keys at light sleep. Dozing: the edge interrupt is off and a low
+  // level on either key wakes the chip. Awake: the edge interrupt is back.
+  void arm_sleep_wake(bool dozing);
 
  private:
   void act(HomeAction action);
+  static void on_key_edge(void* arg);
 
   int power_gpio_ = -1;
   int record_gpio_ = -1;
   HomeKeys keys_{};
+
+  // The edge interrupt: the loop's resting wait ends at once on a press, and
+  // fast_poll() keeps the debounce at its original 10 ms cadence.
+  bool edges_armed_ = false;
+  std::atomic<uint32_t> edge_ms_{0};
 
   // Debounce per key: a sampled level has to hold for a few passes.
   bool power_raw_ = false;

@@ -161,7 +161,14 @@ std::string space_text(uint64_t free_bytes) {
 // left needs the columns; then a tight separator with no spaces around it. The
 // level is what goes first -- its masthead icon still shows it -- and a number
 // with no room for even "3.1G" is dropped rather than truncated into a lie.
-std::string footer_line(const StatusView& v, std::string_view fact, bool space_known, uint64_t free_bytes) {
+//
+// `fact_expendable` is for a fact that is decoration rather than state ("ON
+// POWER"): it is given up before the "SD" label, because "SD 62.9G" says what
+// the number is and "ON POWER · 62.9G" leaves a reader unable to tell the card
+// from the cell (the QA's D9). A queue count ("2 QUEUED") is state and keeps the
+// old order: the level goes first, then the number is shortened.
+std::string footer_line(const StatusView& v, std::string_view fact, bool space_known, uint64_t free_bytes,
+                        bool fact_expendable = false) {
   const std::string pct = v.battery_pct >= 0 ? std::to_string(v.battery_pct) + "%" : std::string("NO BATTERY");
   auto join = [](std::string_view a, std::string_view b, const char* sep) {
     if (a.empty()) return std::string(b);
@@ -169,9 +176,17 @@ std::string footer_line(const StatusView& v, std::string_view fact, bool space_k
     return std::string(a) + sep + std::string(b);
   };
   auto fits = [](const std::string& s) { return s.size() && cols(s) <= kFootCols; };
+  auto attempt = [&](std::string_view a, std::string_view b) {
+    for (const char* sep : {" \xC2\xB7 ", "\xC2\xB7"}) {
+      std::string line = join(a, b, sep);
+      if (fits(line)) return line;
+    }
+    return std::string();
+  };
 
-  if (!space_known) {
-    // Mounted but not yet measured, or no card at all: no number is claimed.
+  if (!space_known || free_bytes == 0) {
+    // Mounted but not yet measured, no card at all, or a card with nothing left
+    // (the footer never prints a zero): no number is claimed.
     std::string both = join(pct, fact, " \xC2\xB7 ");
     if (fits(both)) return both;
     if (fits(std::string(fact))) return std::string(fact);
@@ -180,6 +195,19 @@ std::string footer_line(const StatusView& v, std::string_view fact, bool space_k
 
   const std::string full = space_text(free_bytes);                         // "SD 3.1G"
   const std::string short_form = full.size() > 3 ? full.substr(3) : full;  // "3.1G"
+  if (fact_expendable) {
+    const std::string pct_and_fact = join(pct, fact, " \xC2\xB7 ");
+    const std::string_view with_full[] = {pct_and_fact, pct, fact, std::string_view()};
+    for (std::string_view left : with_full) {
+      if (std::string line = attempt(left, full); !line.empty()) return line;
+    }
+    const std::string_view with_short[] = {pct, fact, std::string_view()};
+    for (std::string_view left : with_short) {
+      if (std::string line = attempt(left, short_form); !line.empty()) return line;
+    }
+    return status_fit(full, kFootCols);
+  }
+
   const std::string lefts[] = {join(pct, fact, " \xC2\xB7 "), std::string(fact), pct};
   const std::string spans[] = {full, short_form};
   for (const std::string& left : lefts) {
@@ -277,7 +305,9 @@ StatusView compose_status(const StatusInputs& in) {
   // The card's free space is on every face, and on none of them is it a guess: a
   // card that has not answered contributes nothing rather than a zero.
   const bool space_known = in.sd_ready && in.sd_free_known;
-  auto set_foot = [&](std::string fact) { v.foot = footer_line(v, fact, space_known, in.sd_free_bytes); };
+  auto set_foot = [&](std::string fact, bool expendable = false) {
+    v.foot = footer_line(v, fact, space_known, in.sd_free_bytes, expendable);
+  };
 
   // The touch strip belongs to the resting face. Only a unit whose glass has a
   // controller draws it: a box nobody can press would be a lie about the hardware.
@@ -302,7 +332,7 @@ StatusView compose_status(const StatusInputs& in) {
                   static_cast<unsigned>(s % 60), stop);
     v.hero = "RECORDING";
     v.note = note;
-    set_foot(in.external_power ? "ON POWER" : "");
+    set_foot(in.external_power ? "ON POWER" : "", /*expendable=*/true);
   } else if (in.notes == NotesPhase::Uploading) {
     if (in.uploading_valid)
       std::snprintf(note, sizeof note, "note %02d:%02d  \xC2\xB7  %s", in.uploading_hour, in.uploading_minute,
@@ -342,7 +372,7 @@ StatusView compose_status(const StatusInputs& in) {
     // glass, holding this same key is how the live mode is reached.
     v.note = in.touch ? std::string("Tap BOOT to record, TALK to talk.")
                       : std::string("Tap BOOT to record. Hold it to talk.");
-    set_foot(in.external_power ? "ON POWER" : "");
+    set_foot(in.external_power ? "ON POWER" : "", /*expendable=*/true);
   } else {
     char hero[24];
     std::snprintf(hero, sizeof hero, "%u NOTE%s", static_cast<unsigned>(in.stored), in.stored == 1 ? "" : "S");
@@ -357,10 +387,14 @@ StatusView compose_status(const StatusInputs& in) {
       // masthead (the hardware QA's D5).
       std::snprintf(note, sizeof note, "Newest note, %s. %s", duration(in.newest_duration_s).c_str(), add);
     v.note = note;
+    // A queued count and SYNCED are state; ON POWER is decoration, so it is the
+    // one the footer may drop to keep the "SD" label beside the number (D9).
+    const bool power_fact = in.pending == 0 && in.external_power;
     set_foot(in.pending           ? std::to_string(in.pending) + " QUEUED"
-             : in.external_power  ? "ON POWER"
+             : power_fact         ? "ON POWER"
              : in.synced          ? "SYNCED"
-                                  : "");
+                                  : "",
+             power_fact);
   }
   v.hero = status_fit(v.hero, kHeroCols);
   v.foot = status_fit(v.foot, kFootCols);

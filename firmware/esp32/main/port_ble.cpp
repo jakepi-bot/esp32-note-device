@@ -8,6 +8,7 @@
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "sdkconfig.h"
 
 #if CONFIG_BT_NIMBLE_ENABLED
@@ -19,6 +20,7 @@
 #include "esp_random.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "hg/radio_window.hpp"
 #include "host/ble_hs.h"
 #include "host/util/util.h"
 #include "nimble/nimble_port.h"
@@ -42,6 +44,12 @@ bool PhoneLink::begin(const std::string&) {
   return false;
 }
 bool PhoneLink::open_pairing() { return false; }
+void PhoneLink::tick(uint32_t) {}
+void PhoneLink::note_saved() {}
+void PhoneLink::wake() {}
+void PhoneLink::set_pending(uint32_t) {}
+bool PhoneLink::radio_up() const { return false; }
+const char* PhoneLink::radio_reason() const { return "none"; }
 void PhoneLink::answer_pairing(bool) {}
 void PhoneLink::close_pairing() {}
 void PhoneLink::forget() {}
@@ -54,6 +62,8 @@ bool NoteLink::connected() const { return false; }
 uint16_t NoteLink::mtu() const { return 23; }
 bool NoteLink::poll_command(std::string&) { return false; }
 bool NoteLink::send_frame(const uint8_t*, size_t) { return false; }
+void NoteLink::note_saved() {}
+void NoteLink::pending(uint32_t) {}
 
 #else
 
@@ -99,6 +109,23 @@ std::atomic<bool> g_note_ready{false};
 
 bool g_started = false;  // app task: begin() succeeded
 std::atomic<bool> g_synced{false}, g_pairing{false};
+// The radio's clock (hg/radio_window.hpp): off at rest, on inside a window.
+// `g_up` is true only while the controller and host are running.
+hg::RadioWindow g_window;
+std::atomic<bool> g_up{false};
+bool g_prepared = false;  // app task: the queues and the worker exist
+
+uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
+
+// Shared by PhoneLink and NoteLink: both are this one radio (port.hpp).
+void radio_note_saved() {
+  if (!g_prepared) return;
+  g_window.note_saved(now_ms());
+}
+void radio_set_pending(uint32_t count) {
+  if (!g_prepared) return;
+  g_window.set_pending(count, now_ms());
+}
 std::atomic<uint16_t> g_conn{kNone};
 uint16_t g_pairing_conn = kNone;  // host task only: the connection shown a passkey
 uint8_t g_own_addr_type = 0;
@@ -243,6 +270,7 @@ int on_gap(ble_gap_event* event, void*) {
         return 0;
       }
       g_conn = event->connect.conn_handle;
+      g_window.connected(true, now_ms());  // a link keeps the radio up
       g_note_subscribed = false;
       g_note_mtu = ble_att_mtu(event->connect.conn_handle);
       ESP_LOGI(TAG, "phone connected");
@@ -251,6 +279,7 @@ int on_gap(ble_gap_event* event, void*) {
 
     case BLE_GAP_EVENT_DISCONNECT:
       g_conn = kNone;
+      g_window.connected(false, now_ms());  // a short grace, then the radio may rest
       g_note_subscribed = false;
       g_note_mtu = 23;
       {
@@ -457,17 +486,11 @@ void host_task(void*) {
 
 }  // namespace
 
-bool PhoneLink::begin(const std::string& name) {
-  {
-    std::lock_guard<std::mutex> lock(g_name_mutex);
-    g_name = name;
-  }
-  g_lines = xQueueCreate(2, sizeof(Line));
-  g_note_lines = xQueueCreate(4, sizeof(NoteLine));
-  if (!g_lines || !g_note_lines || xTaskCreate(worker, "hg_phone", 4096, nullptr, 4, nullptr) != pdPASS) {
-    ESP_LOGE(TAG, "out of memory for the phone link");
-    return false;
-  }
+// App task. Brings the controller and the NimBLE host up. Every call is after a
+// previous stop_radio() or at boot; the bond store (NVS) survives, so a paired
+// phone is still paired when the radio comes back.
+bool start_radio() {
+  if (g_up.load()) return true;
   const esp_err_t err = nimble_port_init();
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "Bluetooth didn't start: %s", esp_err_to_name(err));
@@ -484,6 +507,70 @@ bool PhoneLink::begin(const std::string& name) {
   ble_hs_cfg.sm_sc = 1;
   ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
   ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+
+  ble_svc_gap_init();
+  ble_svc_gatt_init();
+  int rc = ble_gatts_count_cfg(g_svcs);
+  if (rc == 0) rc = ble_gatts_add_svcs(g_svcs);
+  if (rc != 0) {
+    ESP_LOGE(TAG, "can't register the phone service (%d)", rc);
+    nimble_port_deinit();
+    return false;
+  }
+  g_note_ready = true;
+  ble_store_config_init();
+  ble_npl_event_init(&g_update_ev, on_update, nullptr);
+  ble_npl_event_init(&g_forget_ev, on_forget, nullptr);
+  ble_npl_event_init(&g_answer_ev, on_answer, nullptr);
+  ble_npl_callout_init(&g_drop, nimble_port_get_dflt_eventq(), on_drop, nullptr);
+  nimble_port_freertos_init(host_task);
+  g_up = true;
+  g_started = true;
+  ESP_LOGI(TAG, "Bluetooth ready (%s)", hg::RadioWindow::name(g_window.why(now_ms())));
+  return true;
+}
+
+// App task. The reverse: the host stops, then the controller is disabled and
+// deinitialised, which is what lets the chip light-sleep again. A phone that is
+// connected keeps the radio up (the window policy says so), so this refuses
+// while a link exists rather than dropping someone mid-transfer.
+bool stop_radio() {
+  if (!g_up.load()) return true;
+  if (g_conn.load() != kNone) return false;
+  g_synced = false;
+  g_pairing = false;
+  g_note_subscribed = false;
+  g_note_ready = false;
+  g_started = false;
+  const esp_err_t stopped = nimble_port_stop();
+  if (stopped != ESP_OK) {
+    // The host refused to stop: the controller stays as it is and the next tick
+    // tries again rather than leaving a half-stopped stack behind.
+    ESP_LOGW(TAG, "Bluetooth host did not stop (%s)", esp_err_to_name(stopped));
+    g_up = false;
+    return false;
+  }
+  const esp_err_t err = nimble_port_deinit();
+  g_up = false;
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "Bluetooth controller did not deinit (%s)", esp_err_to_name(err));
+    return false;
+  }
+  ESP_LOGI(TAG, "Bluetooth radio off: %s", "the chip can light-sleep again");
+  return true;
+}
+
+bool PhoneLink::begin(const std::string& name) {
+  {
+    std::lock_guard<std::mutex> lock(g_name_mutex);
+    g_name = name;
+  }
+  g_lines = xQueueCreate(2, sizeof(Line));
+  g_note_lines = xQueueCreate(4, sizeof(NoteLine));
+  if (!g_lines || !g_note_lines || xTaskCreate(worker, "hg_phone", 4096, nullptr, 4, nullptr) != pdPASS) {
+    ESP_LOGE(TAG, "out of memory for the phone link");
+    return false;
+  }
 
   make_uuid(g_service_uuid, 0x01);
   make_uuid(g_command_uuid, 0x02);
@@ -531,31 +618,23 @@ bool PhoneLink::begin(const std::string& name) {
   g_svcs[1].characteristics = g_note_chrs;
   g_svcs[2] = {};
 
-  ble_svc_gap_init();
-  ble_svc_gatt_init();
-  int rc = ble_gatts_count_cfg(g_svcs);
-  if (rc == 0) rc = ble_gatts_add_svcs(g_svcs);
-  if (rc != 0) {
-    ESP_LOGE(TAG, "can't register the phone service (%d)", rc);
-    return false;
-  }
-  g_note_ready = true;
-  ble_store_config_init();
-  ble_npl_event_init(&g_update_ev, on_update, nullptr);
-  ble_npl_event_init(&g_forget_ev, on_forget, nullptr);
-  ble_npl_event_init(&g_answer_ev, on_answer, nullptr);
-  ble_npl_callout_init(&g_drop, nimble_port_get_dflt_eventq(), on_drop, nullptr);
-  nimble_port_freertos_init(host_task);
-  g_started = true;
-  ESP_LOGI(TAG, "Bluetooth ready");
-  return true;
+  g_prepared = true;
+  // Boot opens the first window so a phone that is looking finds a new device;
+  // every later window has its own trigger (`phone pair`, a recorded note, a
+  // waiting note, an explicit wake).
+  g_window.boot(now_ms());
+  return start_radio();
 }
 
 bool PhoneLink::open_pairing() {
-  if (!g_started || !g_synced) return false;
+  if (!g_prepared) return false;
+  // The exchange itself needs the host: open the radio window first, and the
+  // tick that follows brings the controller up (or leaves it up).
+  g_window.pair(now_ms());
   g_pairing = true;
   ESP_LOGI(TAG, "pairing open");
-  schedule(&g_update_ev);
+  if (!g_up.load()) start_radio();
+  if (g_started) schedule(&g_update_ev);
   return true;
 }
 
@@ -595,6 +674,35 @@ void PhoneLink::set_name(const std::string& name) {
   if (g_started) schedule(&g_update_ev);
 }
 
+// -- the radio's clock (hg/radio_window.hpp) -----------------------------------
+
+void PhoneLink::tick(uint32_t now_ms_arg) {
+  if (!g_prepared) return;
+  // A link that is up keeps the window warm; the policy reads that from the
+  // connect/disconnect events, so all this has to do is bring the controller
+  // up inside a window and stop it once the window (and its grace) is over.
+  const bool want = g_window.tick(now_ms_arg);
+  if (want && !g_up.load()) {
+    start_radio();
+  } else if (!want && g_up.load()) {
+    stop_radio();
+  }
+}
+
+void PhoneLink::note_saved() { radio_note_saved(); }
+
+void PhoneLink::wake() {
+  if (!g_prepared) return;
+  g_window.trigger(now_ms());
+  if (!g_up.load()) start_radio();
+}
+
+void PhoneLink::set_pending(uint32_t count) { radio_set_pending(count); }
+
+bool PhoneLink::radio_up() const { return g_up.load(); }
+
+const char* PhoneLink::radio_reason() const { return hg::RadioWindow::name(g_window.why(now_ms())); }
+
 // -- the note sync's radio side ------------------------------------------------
 
 bool NoteLink::available() const { return g_started && g_note_ready.load(); }
@@ -612,6 +720,9 @@ bool NoteLink::poll_command(std::string& out) {
   while (!out.empty() && (out.back() == '\r' || out.back() == '\n')) out.pop_back();
   return true;
 }
+
+void NoteLink::note_saved() { radio_note_saved(); }
+void NoteLink::pending(uint32_t count) { radio_set_pending(count); }
 
 bool NoteLink::send_frame(const uint8_t* data, size_t len) {
   const uint16_t conn = g_conn.load();

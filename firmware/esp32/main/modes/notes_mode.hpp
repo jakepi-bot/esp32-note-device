@@ -20,6 +20,7 @@
 #include "notes/notes_ble.hpp"
 #include "notes/notes_capture.hpp"
 #include "notes/notes_queue.hpp"
+#include "notes/notes_retention.hpp"
 #include "notes/notes_store.hpp"
 #include "notes/notes_uploader.hpp"
 
@@ -95,6 +96,9 @@ class NotesMode {
   // The same facts, plus the phase and the newest note: what the status screen
   // draws. Cached; safe to call every frame.
   virtual NoteStatus status() const = 0;
+  // Nothing is recording, uploading or retrying: the resting screen may be
+  // left alone and the app loop may wait longer between passes.
+  virtual bool resting() const = 0;
   // The `notes` console command's arguments (empty = status). Returns the same
   // "@ok …" / "@error …" shape the core's commands use, and an empty string
   // for a line it does not know.
@@ -108,6 +112,9 @@ class NotesModeImpl final : public NotesMode {
   void tick(uint32_t now_ms) override;
   NoteCounts counts() const override { return counts_; }
   NoteStatus status() const override;
+  bool resting() const override {
+    return mode_ == Mode::Idle && !retry_waiting_ && !ble_sync_.progress().active;
+  }
   std::string console(std::string_view args) override;
 
  private:
@@ -119,6 +126,10 @@ class NotesModeImpl final : public NotesMode {
   void begin_sync(uint32_t now_ms);
   void step_sync(uint32_t now_ms);
   void step_ble(uint32_t now_ms);
+  // The card's retention rule (notes_retention.hpp): runs by itself on its own
+  // clock, before a recording starts, and from the console. `force` is the
+  // console ("do it now") and only skips the schedule, not the guards.
+  void run_retention(uint32_t now_ms, bool force);
   void refresh_counts(bool publish);
   void refresh_space();
   void refresh_newest();
@@ -179,6 +190,15 @@ class NotesModeImpl final : public NotesMode {
   bool sd_free_known_ = false;
   uint32_t sd_probe_ms_ = 0;
   std::string sd_error_;
+
+  // Retention (14 days, or 10% free): the rule, when it next runs, and what the
+  // last pass did. `low_space_` is the card's truth right now; while it stands
+  // the mode refuses to start a recording and keeps the error on the panel.
+  notes::RetentionPolicy retention_{};
+  notes::RetentionResult retention_last_{};
+  uint32_t next_retention_ms_ = 0;
+  bool low_space_ = false;
+  bool low_space_error_ = false;  // the Error on screen is the retention message
   // Why the last `notes stop` stored nothing (empty: it did). finish_note runs
   // for a button tap and a cap as well, so the console reads this afterwards.
   std::string stop_error_;

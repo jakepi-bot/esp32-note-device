@@ -397,6 +397,10 @@ void dispatch(hg::App& app, hgp::Event& ev) {
     case EventType::TimeSynced:
       g_time.on_synced();  // writes the RTC from the now-set clock
       break;
+    case EventType::KeyEdge:
+      // The key ISR already woke this pass; the level poll below decides what
+      // the press did. Nothing to dispatch.
+      break;
   }
 }
 
@@ -510,6 +514,37 @@ extern "C" void app_main(void) {
   // answers there. make() runs before the bus exists, so the probe is here and
   // the touch block is switched on only by an answer: on the plain SKU the strip
   // is never drawn and every action is a key.
+  //
+  // EPD_TP_RST is GPIO 7 and the FT6336 does not answer until it is released
+  // (Waveshare's schematic and its 13_FT6336_Test example pulse it). The old
+  // probe read the bus with the chip still in reset, which is why the desk unit
+  // reported no touch controller while its glass was fitted.
+  if (i2c_bus != nullptr) {
+    if (board.touch.rst >= 0) {
+      gpio_config_t rst = {};
+      rst.pin_bit_mask = 1ull << board.touch.rst;
+      rst.mode = GPIO_MODE_OUTPUT;
+      rst.pull_up_en = GPIO_PULLUP_DISABLE;
+      rst.pull_down_en = GPIO_PULLDOWN_DISABLE;
+      rst.intr_type = GPIO_INTR_DISABLE;
+      if (gpio_config(&rst) == ESP_OK) {
+        gpio_set_level(static_cast<gpio_num_t>(board.touch.rst), 0);
+        vTaskDelay(pdMS_TO_TICKS(10));  // a real reset pulse, as the vendor demo does
+        gpio_set_level(static_cast<gpio_num_t>(board.touch.rst), 1);
+        vTaskDelay(pdMS_TO_TICKS(100));  // the chip's boot time
+        ESP_LOGI(TAG, "EPD_TP_RST (GPIO %d) pulsed: probing the touch glass", board.touch.rst);
+      } else {
+        ESP_LOGW(TAG, "EPD_TP_RST (GPIO %d) did not configure", board.touch.rst);
+      }
+    }
+    // The definitive scan: both controllers a 1.54" e-paper glass is built
+    // with (FT6336 at 0x38, GT911 at 0x5D and its alternate 0x14), so the log
+    // says which one answered instead of only that 0x38 did not.
+    const uint8_t candidates[] = {0x38, 0x5D, 0x14};
+    for (const uint8_t addr : candidates) {
+      if (hgp::i2c_device_present(i2c_bus, addr)) ESP_LOGI(TAG, "I2C: touch candidate 0x%02X answers", addr);
+    }
+  }
   if (i2c_bus != nullptr && hgp::i2c_device_present(i2c_bus, board.touch.addr)) {
     board.touch.enabled = true;
     ESP_LOGI(TAG, "touch glass found at 0x%02X: the home strip is live", board.touch.addr);
@@ -746,6 +781,7 @@ extern "C" void app_main(void) {
     // The screen's yes or no to a phone asking to pair (the acknowledgement).
     app.on_phone_answer = [](bool allow) { g_phone.answer_pairing(allow); };
     app.on_phone_forget = [] { g_phone.forget(); };
+    app.on_phone_wake = [] { g_phone.wake(); };
   }
   if (profile.tailnet) {
     g_tailnet.begin(app, device_name());
@@ -779,9 +815,19 @@ extern "C" void app_main(void) {
   };
   if (board.light_sleep) keep_pins_through_sleep(board);
 #if !CONFIG_HG_BOARD_ESP32_CYD
-  g_system.on_doze_start = [] { g_codec_speaker.power_down(); };
+  g_system.on_doze_start = [] {
+    g_codec_speaker.power_down();
+#if CONFIG_HG_BOARD_WS_EPAPER_154
+    // Light sleep stops the key ISR: the keys become level wake sources and
+    // their interrupts come back when the chip does.
+    g_modes.arm_sleep_wake(true);
+#endif
+  };
   hgp::EspSystem::on_sleep_held_change = [] { g_touch.nudge(); };
   g_system.on_doze_end = [] {
+#if CONFIG_HG_BOARD_WS_EPAPER_154
+    g_modes.arm_sleep_wake(false);
+#endif
     g_touch.nudge();
     g_codec_speaker.power_up();
     g_wifi.retry_now();
@@ -844,7 +890,17 @@ extern "C" void app_main(void) {
     // Block briefly for events, then run the core's timers and animations.
     // Dozing on a light-sleep board, the chip may sleep between events; input and
     // the network still wake it. Other boards keep the short wait.
-    if (hgp::events::receive(ev, pdMS_TO_TICKS(board.light_sleep && app.dozing() ? hg::App::kDozeWaitMs : 10))) {
+    // The notes device rests on a bistable panel: while its status screen owns
+    // the glass and nothing is recording or uploading, no pixel changes between
+    // events, so the wait is a quarter second instead of 10 ms. A key's edge
+    // interrupt ends the wait at once, and fast_poll() then runs the debounce at
+    // the original 10 ms cadence.
+    uint32_t wait_ms = 10;
+#if CONFIG_HG_BOARD_WS_EPAPER_154
+    if (app.rest_panel_owned() && g_notes.resting()) wait_ms = g_modes.fast_poll() ? 5 : hg::App::kRestWaitMs;
+#endif
+    if (board.light_sleep && app.dozing()) wait_ms = hg::App::kDozeWaitMs;
+    if (hgp::events::receive(ev, pdMS_TO_TICKS(wait_ms))) {
       do {
         dispatch(app, ev);
         hgp::events::release(ev);
@@ -865,6 +921,9 @@ extern "C" void app_main(void) {
       esp_restart();
     }
     g_buttons.poll(app);
+    // The radio's clock: the controller is up only inside a window, so a
+    // resting board can light-sleep (port_ble.cpp, hg/radio_window.hpp).
+    if (hgp::board_config().bluetooth) g_phone.tick(g_system.now_ms());
 #if CONFIG_HG_BOARD_WS_EPAPER_154
     g_modes.tick(g_system.now_ms());
     g_ui.tick(g_system.now_ms());

@@ -25,6 +25,10 @@ struct DisplayInfo {
   // The canvas writes pre-swapped colours so flushing is a plain copy.
   bool swap_bytes = false;
   bool has_backlight = false;
+  // A bistable panel (e-paper) keeps its image with no power and has no
+  // backlight. A resting screen is then the panel's own state, not a lit frame
+  // that costs power, so a board module can own it and the app can doze.
+  bool bistable = false;
   // A circular panel (width == height). The UI keeps to the square inscribed
   // in the circle and leaves the rest dark.
   bool round = false;

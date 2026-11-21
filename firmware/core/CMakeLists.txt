@@ -21,6 +21,7 @@ set(HG_CORE_SOURCES
     src/mascot_data.cpp
     src/protocol.cpp
     src/qr.cpp
+    src/radio_window.cpp
     src/setup.cpp
     src/tones.cpp
     src/touch.cpp

@@ -104,6 +104,18 @@ bool post(EventType type, const void* data, size_t len, uint32_t generation, Con
   return true;
 }
 
+bool post_from_isr(EventType type) {
+  if (!queue) return false;
+  Event ev{type, 0, nullptr, 0, nullptr};
+  BaseType_t woken = pdFALSE;
+  if (xQueueSendFromISR(queue, &ev, &woken) != pdTRUE) {
+    dropped.fetch_add(1, std::memory_order_relaxed);
+    return false;
+  }
+  if (woken == pdTRUE) portYIELD_FROM_ISR();
+  return true;
+}
+
 hg::json::Value stats() {
   hg::json::Value s = hg::json::Value::object();
   s.set("waiting", queue ? static_cast<unsigned>(uxQueueMessagesWaiting(queue)) : 0u)

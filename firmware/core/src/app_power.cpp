@@ -326,20 +326,27 @@ void App::power_tick() {
                          phone_pairing_ || ota_busy() || ota_ == Ota::Restarting))
     dismiss_battery_alert();
   constexpr uint32_t kPowerKeyPollMs = 100;
+  // A bistable panel shows its frame with no power, so a resting one is as
+  // "dark" as a backlit screen the timeout switched off: the app may doze.
+  const hg::DisplayInfo display = hal_.display ? hal_.display->info() : hg::DisplayInfo{};
+  const bool panel_rests = display.bistable && rest_owned_;
   if (hal_.power && now() - power_key_polled_at_ >= kPowerKeyPollMs) {
     power_key_polled_at_ = now();
     if (hal_.power->take_key_press()) on_power_key();
     // Dozing needs the battery to be the only supply; check as often as the key
     // while the screen is dark, so plugging in ends a doze within ~100 ms.
-    if (display_sleeping_) {
+    if (display_sleeping_ || panel_rests) {
       const auto external = hal_.power->external_power();
       on_battery_ = external.has_value() && !*external;
-      if (external.has_value()) note_supply(external);  // a dark screen lights at once on USB
+      if (external.has_value() && display_sleeping_) note_supply(external);  // a dark screen lights at once on USB
     }
   }
   bool doze = false;
   // Without a timeout, only a screen the power key turned off needs watching.
-  if (hal_.display && hal_.display->info().has_backlight && (screen_timeout_ms_ || display_sleeping_)) {
+  // A bistable panel needs neither a timeout nor a backlight: resting on it is
+  // its own dark state, and the chip can sleep while the image stays.
+  const bool sleeps_by_timeout = display.has_backlight && (screen_timeout_ms_ || display_sleeping_);
+  if (hal_.display && (sleeps_by_timeout || panel_rests)) {
     // The settings menu can sleep too; the wake input leaves it on the same item.
     const bool busy = screen_busy();
     const bool settled = phase_ == Phase::NoNetwork || (phase_ == Phase::Online && paired_);
@@ -371,7 +378,9 @@ void App::power_tick() {
     }
     // Online, or waiting for Wi-Fi between join attempts (the port holds the chip
     // awake while an attempt runs). Reconnecting to Hermes isn't idle: awake.
-    doze = idle && display_sleeping_ && on_battery_;
+    // On a bistable panel the resting module's frame is the dark state.
+    const bool resting = display_sleeping_ || panel_rests;
+    doze = idle && resting && on_battery_;
   }
   set_dozing(doze);
 }

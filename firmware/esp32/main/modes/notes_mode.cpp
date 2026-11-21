@@ -22,7 +22,20 @@ const char* TAG = "hg.notes";
 // How often the card is scanned for the counts, and how often a mount is
 // retried while no card answers (a tap asks straight away).
 constexpr uint32_t kScanMs = 5000;
+// With nothing queued there is nothing to notice on the card: only this device
+// writes notes, and every write recounts at once (finish_note, the phone's
+// transfer, the console). A scan is a directory walk plus the FAT free-cluster
+// walk, so a resting card is read every 30 s instead of every 5.
+constexpr uint32_t kIdleScanMs = 30000;
 constexpr uint32_t kSdRetryMs = 30000;
+// The retention rule's own clocks: a pass every five minutes, and every minute
+// while the card is under its free-space threshold (a sync can turn a pending
+// note into a deletable one, and the error has to clear as soon as it can).
+constexpr uint32_t kRetentionMs = 300000;
+constexpr uint32_t kRetentionLowMs = 60000;
+// What the e-paper shows when the card is under the threshold and `sent/` has
+// nothing left: the state, and why the device will not record into it.
+constexpr const char* kLowSpaceError = "SD almost full, no synced notes to delete";
 // The mount point every user of the card shares (notes/sd_mount.hpp).
 constexpr const char* kSdRoot = "/sdcard";
 constexpr uint32_t kMinPlausibleUnix = 1577836800;  // 2020-01-01: earlier means no clock yet
@@ -170,6 +183,14 @@ void NotesModeImpl::start_note(uint32_t now) {
     ui_->set(UiPhase::Error, sd_error_.empty() ? "No SD card" : sd_error_);
     return;
   }
+  // Retention first: with the card this full and nothing synced left to
+  // delete, a recording would only write until the card refused and then fail
+  // halfway, so the honest answer is the error instead of a broken note.
+  run_retention(now, true);
+  if (low_space_) {
+    ui_->set(UiPhase::Error, kLowSpaceError);
+    return;
+  }
 
   // Resolve the id against the card: a reboot inside the same second must not
   // reuse a folder.
@@ -241,6 +262,9 @@ void NotesModeImpl::finish_note(uint32_t now, const char* why) {
   }
   ESP_LOGI(TAG, "note %s stored: %s, %u s%s", meta_.note_id.c_str(), notes::human_bytes(meta_.bytes).c_str(),
            static_cast<unsigned>(meta_.duration_s), capped ? " (cap reached)" : "");
+  // The phone's half: a short advertising window so a phone in range can take
+  // the note off the card without the radio running all day.
+  if (ble_) ble_->note_saved();
   if (const uint32_t lost = writer_.dropped_bytes()) {
     // The ring overflowed: the card could not keep up with the microphone. The
     // audio is continuous up to the first hole and the note still plays.
@@ -277,8 +301,22 @@ void NotesModeImpl::tick(uint32_t now) {
     return;
   }
   if (static_cast<int32_t>(now - next_scan_ms_) >= 0) {
-    next_scan_ms_ = now + kScanMs;
+    // Only a queued note can change between scans (the phone's transfer and
+    // this device both recount at once), so a card with nothing waiting is
+    // read on the slow clock.
+    const uint32_t interval = (counts_.pending == 0 && counts_.failed == 0) ? kIdleScanMs : kScanMs;
+    next_scan_ms_ = now + interval;
     refresh_counts(true);
+  }
+  if (static_cast<int32_t>(now - next_retention_ms_) >= 0) run_retention(now, false);
+  // The card-full error outlives the notice ttl: keep it on the panel while it
+  // stands (an unchanged line is not repainted, so this costs no refresh). A
+  // phase that cleared it on the way through (an upload's Idle) gets it back.
+  if (low_space_error_) {
+    if (ui_->phase() == UiPhase::Idle)
+      ui_->set(UiPhase::Error, kLowSpaceError);
+    else
+      ui_->keep_alive(now);
   }
   begin_sync(now);
 }
@@ -289,6 +327,10 @@ void NotesModeImpl::begin_sync(uint32_t now) {
   if (!clock_ok()) return;              // a 1970 timestamp is legal but useless
   if (!ensure_sd()) return;
   if (retry_waiting_ && static_cast<int32_t>(now - retry_at_ms_) < 0) return;
+  // Nothing waiting: do not walk pending/ on every pass (a directory read of
+  // the card, up to a hundred times a second while the link is up). Every
+  // writer recounts at once, and the scan above reopens this path.
+  if (counts_.pending == 0) return;
 
   for (const auto& id : store_.pending_ids()) {
     if (id == sync_id_ && retry_waiting_) continue;  // this one is in its backoff
@@ -462,6 +504,77 @@ void NotesModeImpl::step_ble(uint32_t now) {
   }
 }
 
+void NotesModeImpl::run_retention(uint32_t now, bool force) {
+  next_retention_ms_ = now + kRetentionMs;
+  // Never during a format, and never while this mode holds a note open: a
+  // recording and an upload both live in pending/, which the rule never
+  // touches, but a scan is card I/O the device does not need at that moment.
+  if (formatting_ || mode_ != Mode::Idle) return;
+  if (!ensure_sd()) {
+    low_space_ = false;
+    if (low_space_error_) {
+      // The card left: "almost full" is no longer the truth about this device.
+      low_space_error_ = false;
+      ui_->clear_error();
+      publish_status();
+    }
+    // The card's own retry clock, not the five-minute one: a card put back in
+    // should get its pass as soon as the mount answers again.
+    next_retention_ms_ = now + kSdRetryMs;
+    return;
+  }
+
+  notes::CardSpace card;
+  uint64_t total = 0, free_bytes = 0;
+  if (sd_mount::space(&total, &free_bytes)) {
+    card.total = total;
+    card.free = free_bytes;
+  }
+  // Idle is guaranteed above, so nothing is recording or uploading and the
+  // unsynced folders are what stays: only sent/ is a candidate.
+  notes::RetentionResult result =
+      notes::enforce(store_, card, static_cast<int64_t>(std::time(nullptr)), retention_);
+  if (result.deleted) {
+    ESP_LOGI(TAG, "retention%s: deleted %u synced notes (%u older than %u days, %u for space), %s freed",
+             force ? " (asked)" : "", static_cast<unsigned>(result.deleted),
+             static_cast<unsigned>(result.deleted_for_age),
+             static_cast<unsigned>(retention_.max_age_s / 86400),
+             static_cast<unsigned>(result.deleted_for_space),
+             notes::human_bytes(result.deleted_bytes).c_str());
+    refresh_counts(true);
+  } else if (result.evaluated) {
+    ESP_LOGD(TAG, "retention: nothing to delete (%d%% free, %u unsynced kept)", result.free_pct_before,
+             static_cast<unsigned>(result.unsynced_left));
+  }
+
+  // The rule works on the sizes it removed; the card is the authority on what
+  // is actually left (clusters round up, a directory entry costs a cluster of
+  // its own). One more query, then the screen says the truth either way.
+  int pct = result.free_pct_after;
+  bool low = result.low_space;
+  uint64_t total_now = 0, free_now = 0;
+  if (sd_mount::space(&total_now, &free_now) && total_now) {
+    pct = static_cast<int>(free_now * 100ull / total_now);
+    low = pct < retention_.min_free_pct;
+  }
+  result.low_space = low;
+  result.free_pct_after = pct;
+  retention_last_ = result;
+  low_space_ = low;
+  if (low) {
+    if (!low_space_error_)
+      ESP_LOGW(TAG, "card %d%% free and no synced notes left to delete: showing the error", pct);
+    low_space_error_ = true;
+    ui_->set(UiPhase::Error, kLowSpaceError);
+    next_retention_ms_ = now + kRetentionLowMs;
+  } else if (low_space_error_) {
+    low_space_error_ = false;
+    ui_->clear_error();
+    publish_status();
+    ESP_LOGI(TAG, "card %d%% free again: the retention error is cleared", pct);
+  }
+}
+
 void NotesModeImpl::refresh_counts(bool publish) {
   if (!ensure_sd()) {
     if (publish) publish_status();
@@ -474,6 +587,9 @@ void NotesModeImpl::refresh_counts(bool publish) {
   counts_.synced = sent;
   counts_.failed = failed;
   counts_.stored = pending + sent + failed;
+  // A waiting note is the reason to advertise: the port opens a window for it
+  // (and keeps trying on its own clock while the count stays above zero).
+  if (ble_) ble_->pending(pending);
   queued_bytes_ = store_.pending_bytes();
   refresh_space();
   refresh_newest();
@@ -691,7 +807,10 @@ std::string NotesModeImpl::console(std::string_view args) {
   if (cmd == "record" || cmd == "start") {
     if (mode_ == Mode::Recording) return "@ok already recording";
     start_note(now_ms());
-    return mode_ == Mode::Recording ? "@ok recording " + meta_.note_id : "@error cannot record (see log)";
+    if (mode_ == Mode::Recording) return "@ok recording " + meta_.note_id;
+    if (low_space_) return std::string("@error ") + kLowSpaceError;
+    if (!stop_error_.empty()) return "@error " + stop_error_;
+    return "@error cannot record (see log)";
   }
   if (cmd == "stop") {
     if (mode_ != Mode::Recording) return "@error not recording";
@@ -741,6 +860,21 @@ std::string NotesModeImpl::console(std::string_view args) {
     if (!store_.erase(rest, &from)) return notes::unknown_note_answer(rest);
     refresh_counts(true);  // repaints the counts line
     return notes::deleted_answer(rest);
+  }
+  if (cmd == "retention") {
+    // The console asks for a pass now. It is the same rule the device runs by
+    // itself, read back from what it did rather than from what it found.
+    if (!ensure_sd()) return "@error " + (sd_error_.empty() ? std::string("no card") : sd_error_);
+    if (mode_ != Mode::Idle) return "@error busy: a note is recording or uploading";
+    run_retention(now_ms(), true);
+    const auto& r = retention_last_;
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), "@ok retention deleted %u (%u age, %u space), %s freed | free %d%% | sent %u/pending %u/failed %u",
+                  static_cast<unsigned>(r.deleted), static_cast<unsigned>(r.deleted_for_age),
+                  static_cast<unsigned>(r.deleted_for_space), notes::human_bytes(r.deleted_bytes).c_str(),
+                  r.free_pct_after, static_cast<unsigned>(counts_.synced),
+                  static_cast<unsigned>(counts_.pending), static_cast<unsigned>(counts_.failed));
+    return buf;
   }
   if (cmd == "mount") {
     sd_ready_ = false;
@@ -797,7 +931,7 @@ std::string NotesModeImpl::console(std::string_view args) {
     refresh_counts(true);
     return "@ok pruned " + std::to_string(removed);
   }
-  return "@error usage: notes [status | record | stop | sync | ble | list | mount | format | prune | delete]";
+  return "@error usage: notes [status | record | stop | sync | ble | list | mount | format | prune | retention | delete]";
 }
 
 }  // namespace hgp

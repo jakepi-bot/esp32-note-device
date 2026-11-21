@@ -378,3 +378,23 @@ iPhone and no BLE central was available to any pass so far):
   `CONFIG_ESP_COEX_SW_COEXIST_ENABLE`): both radios were up at once with no
   errors, and a note uploaded over Wi-Fi after the fix, but no note was sent over
   Bluetooth while Wi-Fi was transferring.
+
+## The radio rests, and how to wake it
+
+This board has no 32.768 kHz crystal, so with the Bluetooth controller enabled
+the chip cannot light-sleep (`BLE_INIT: light sleep mode will not be able to
+apply when bluetooth is enabled`). Bluetooth stays compiled into every build, but
+the controller only runs inside a short window:
+
+| Window | How long | Why |
+|---|---|---|
+| Boot | 2 minutes | a phone that is looking finds a new device |
+| Pairing (`phone pair`, Settings → Phone app) | 2 minutes | the pairing exchange and its passkey |
+| After a note is recorded | 3 minutes | a phone can take the note over BLE |
+| Notes still waiting, no phone | 30 s every 5 minutes | keeps trying without holding the radio up |
+| `phone wake` over the console | 1 minute | look for me now |
+
+A connected phone keeps the radio up for as long as the link lasts. At rest the
+controller is stopped and the board light-sleeps, which is why a phone must be
+paired inside a window: if the app finds nothing, open the pairing window on the
+device first (or run `phone wake` and retry).

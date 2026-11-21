@@ -9,6 +9,7 @@
 // `notes format` — the firmware never formats a card by itself.
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 #include "sdmmc_cmd.h"
@@ -24,6 +25,10 @@ void configure(const SdConfig& sd);
 // Mounts if needed. False with `error` set when no usable card answers; the
 // next call tries again.
 bool ensure(bool format_if_needed = false, std::string* error = nullptr);
+// Size and free bytes of the mounted volume. False when nothing is mounted or
+// the volume will not answer. The query walks the FAT on a big card, so callers
+// ask on their own clock rather than every loop pass.
+bool space(uint64_t* total_bytes, uint64_t* free_bytes);
 // Drops the mount (a write failed: the card was pulled or the volume broke).
 // The VFS refuses to unmount while a file is open, in which case the mount
 // stays and the caller keeps its failure.

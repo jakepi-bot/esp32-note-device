@@ -21,6 +21,9 @@ constexpr uint32_t kErrorTtlMs = 10000;
 constexpr uint32_t kStatusTtlMs = 60000;
 constexpr uint32_t kStatusRefreshMs = 45000;
 constexpr uint32_t kRecordTickMs = 1000;
+// How often keep_alive() may republish a line that outlives its ttl; shorter
+// than every ttl above, long enough that an e-paper panel is not repainted.
+constexpr uint32_t kKeepAliveMs = 4000;
 
 const char* phase_name(UiPhase phase) {
   switch (phase) {
@@ -75,6 +78,14 @@ void UiState::tick(uint32_t now_ms) {
     return;
   }
   if (phase_ != UiPhase::Recording || now_ms - last_publish_ms_ < kRecordTickMs) return;
+  publish(now_ms);
+}
+
+void UiState::keep_alive(uint32_t now_ms) {
+  if (phase_ == UiPhase::Idle) return;
+  // A republish every few seconds is enough to stay ahead of every ttl above
+  // (the shortest is the recording line's 2 s, which tick() already keeps up).
+  if (last_publish_ms_ != 0 && now_ms - last_publish_ms_ < kKeepAliveMs) return;
   publish(now_ms);
 }
 

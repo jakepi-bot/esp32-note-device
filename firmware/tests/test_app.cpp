@@ -92,6 +92,7 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
   uint8_t font_scale = 1;
   bool emissive = false;
   bool backlight = false;
+  bool bistable = false;  // e-paper: keeps its image, no light to turn off
   int brightness = 0, volume = 0;
   std::vector<uint16_t> fb = std::vector<uint16_t>(320 * 240, 0);
   int flushes = 0;
@@ -104,6 +105,7 @@ struct FakeHal : hg::Display, hg::AudioIn, hg::AudioOut, hg::Transport, hg::Stor
     d.font_scale = font_scale;
     d.emissive = emissive;
     d.has_backlight = backlight;
+    d.bistable = bistable;
     return d;
   }
   void make_round(int diameter) { make_panel(diameter, diameter, true); }
@@ -2633,6 +2635,24 @@ TEST("doze: a dark, idle screen on battery dozes; any input ends it before drawi
   r.app.on_button(hg::Button::Talk, false);
 }
 
+TEST("doze: a resting bistable panel lets the chip sleep with no backlight and no timeout") {
+  KeyPower key;
+  Rig r;
+  r.fake.bistable = true;  // e-paper: no backlight, the image stays unpowered
+  r.hal.power = &key;
+  // The board's status screen owns the glass; it repaints only on change.
+  r.app.rest_screen = [](const hg::UiModel&, bool) { return true; };
+  r.bring_online(true);
+  r.advance(1500);
+  CHECK(r.app.rest_panel_owned());
+  CHECK(r.fake.dozing);  // resting, on battery: light sleep is allowed
+  CHECK(r.app.dozing());
+  key.usb = true;
+  r.advance(200);
+  CHECK(!r.fake.dozing);  // USB keeps the console working
+  CHECK(!r.app.dozing());
+}
+
 TEST("doze: external power never dozes, and plugging in ends a doze within 100 ms") {
   KeyPower key;
   key.usb = true;
@@ -5060,7 +5080,7 @@ TEST("phone: Bluetooth that won't start leaves no window; forget and factory-res
   CHECK_EQ(r.app.console("phone"), std::string("@phone {\"paired\":0,\"connected\":false,\"pairing\":false}"));
   r.app.console("factory-reset");
   CHECK_EQ(phone.forget_calls, 2);
-  CHECK_EQ(r.app.console("phone bogus"), std::string("@error usage: phone [pair [close] | allow | deny | forget]"));
+  CHECK_EQ(r.app.console("phone bogus"), std::string("@error usage: phone [pair [close] | allow | deny | forget | wake]"));
 }
 
 TEST("phone: the pairing screen stays lit through the screen timeout") {

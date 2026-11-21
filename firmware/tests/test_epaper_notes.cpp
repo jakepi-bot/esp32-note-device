@@ -18,6 +18,7 @@
 
 #include "notes/notes_capture.hpp"
 #include "notes/notes_queue.hpp"
+#include "notes/notes_retention.hpp"
 #include "notes/notes_store.hpp"
 #include "notes/notes_uploader.hpp"
 
@@ -606,3 +607,271 @@ TEST("a read that stops short of the card's size is a read failure, not the end 
   CHECK(audio_read_short(393216, 2861484));    // a prefix, exactly 6 chunks in
   CHECK(!audio_read_short(45, 45));            // the smallest note the uploader takes
 }
+
+// --- retention (notes_retention.hpp): the card's own rule -------------------
+
+namespace {
+
+// A note in `state` on the card, recorded at `unix_s`, with `audio_bytes` of
+// audio. Returns its id, or "" when the tree would not take it.
+std::string put_note(Store& store, NoteState state, int64_t unix_s, unsigned seq, size_t audio_bytes) {
+  Meta m = sample_meta();
+  m.note_id = make_note_id(m.device_id, unix_s, seq);
+  m.idempotency_key = m.note_id;
+  m.created_ms = unix_s * 1000;
+  m.recorded_at = iso8601_utc(unix_s);
+  std::string error;
+  if (!store.create_note(m.note_id, error)) return {};
+  if (audio_bytes) {
+    FILE* f = std::fopen(store.audio_path(NoteState::Pending, m.note_id).c_str(), "wb");
+    if (!f) return {};
+    std::vector<char> zeros(audio_bytes, 0);
+    std::fwrite(zeros.data(), 1, zeros.size(), f);
+    std::fclose(f);
+  }
+  if (!store.write_meta(m.note_id, m, error)) return {};
+  if (state != NoteState::Pending && !store.move(m.note_id, NoteState::Pending, state)) return {};
+  return m.note_id;
+}
+
+// 2027-01-15T08:00:00Z: the device's clock for these cases.
+constexpr int64_t kNow = 1800000000;
+constexpr int64_t kDays = 24 * 60 * 60;
+
+}  // namespace
+
+TEST("an ISO-8601 stamp is a second, and only the shape this firmware writes is") {
+  int64_t t = 0;
+  CHECK(parse_iso8601("1970-01-01T00:00:00Z", t));
+  CHECK_EQ(t, int64_t(0));
+  CHECK(parse_iso8601("2024-02-29T12:00:00Z", t));  // a leap day is a day
+  CHECK_EQ(t, int64_t(1709208000));
+  CHECK(parse_iso8601("2026-11-20T02:05:12Z", t));
+  CHECK_EQ(t, int64_t(1795140312));
+  CHECK_EQ(iso8601_utc(t), std::string("2026-11-20T02:05:12Z"));
+  // Not a time this firmware wrote, or not a time at all.
+  CHECK(!parse_iso8601("2026-02-30T00:00:00Z", t));
+  CHECK(!parse_iso8601("2026-13-01T00:00:00Z", t));
+  CHECK(!parse_iso8601("2026-11-20T24:00:00Z", t));
+  CHECK(!parse_iso8601("2026-11-20T02:05:12+00:00", t));
+  CHECK(!parse_iso8601("2026-11-20 02:05:12Z", t));
+  CHECK(!parse_iso8601("", t));
+
+  // The id's own stamp reads the same time without opening the note.
+  CHECK(note_id_stamp("hg-0123456789abcdef-20261120T020512-0001", t));
+  CHECK_EQ(t, int64_t(1795140312));
+  CHECK(note_id_stamp(make_note_id("hg-0123456789abcdef", 1795140312, 7), t));
+  CHECK_EQ(t, int64_t(1795140312));
+  CHECK(!note_id_stamp("nonsense", t));
+  CHECK(!note_id_stamp("hg-0123456789abcdef-20261320T020512-0001", t));  // no such month
+}
+
+TEST("retention deletes the synced notes older than 14 days, and only those") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  const std::string old_sent = put_note(store, NoteState::Sent, kNow - 15 * kDays, 1, 8000);
+  const std::string new_sent = put_note(store, NoteState::Sent, kNow - 13 * kDays, 2, 8000);
+  const std::string old_pending = put_note(store, NoteState::Pending, kNow - 30 * kDays, 3, 8000);
+  const std::string old_failed = put_note(store, NoteState::Failed, kNow - 40 * kDays, 4, 8000);
+  CHECK(!old_sent.empty() && !new_sent.empty() && !old_pending.empty() && !old_failed.empty());
+
+  // Half the card free: the age rule alone is what deletes.
+  const RetentionResult r = enforce(store, CardSpace{1000000, 500000}, kNow, RetentionPolicy{});
+  CHECK(r.evaluated);
+  CHECK_EQ(r.deleted, uint32_t(1));
+  CHECK_EQ(r.deleted_for_age, uint32_t(1));
+  CHECK_EQ(r.deleted_for_space, uint32_t(0));
+  CHECK_EQ(r.deleted_bytes, uint64_t(8000));
+  CHECK(!r.low_space);
+  CHECK_EQ(r.free_pct_before, 50);
+  // The two unsynced notes are still there, whatever their age.
+  CHECK_EQ(r.unsynced_left, uint32_t(2));
+  CHECK_EQ(store.count(NoteState::Pending), uint32_t(1));
+  CHECK_EQ(store.count(NoteState::Failed), uint32_t(1));
+  CHECK_EQ(store.count(NoteState::Sent), uint32_t(1));
+  CHECK_EQ(store.list(NoteState::Sent)[0], new_sent);
+  // The delete left nothing behind: no folder, no half-written files.
+  CHECK(!path_exists(store.note_dir(NoteState::Sent, old_sent)));
+}
+
+TEST("retention frees space oldest first, and stops once the card is above 10%") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  const std::string oldest = put_note(store, NoteState::Sent, kNow - 3 * 3600, 1, 30000);
+  const std::string middle = put_note(store, NoteState::Sent, kNow - 2 * 3600, 2, 30000);
+  const std::string newest = put_note(store, NoteState::Sent, kNow - 3600, 3, 30000);
+  CHECK(!oldest.empty() && !middle.empty() && !newest.empty());
+  // 5% free: one delete gets to 8%, the second to 11%, and then it stops.
+  const RetentionResult r = enforce(store, CardSpace{1000000, 50000}, kNow, RetentionPolicy{});
+  CHECK_EQ(r.free_pct_before, 5);
+  CHECK_EQ(r.deleted, uint32_t(2));
+  CHECK_EQ(r.deleted_for_space, uint32_t(2));
+  CHECK_EQ(r.deleted_for_age, uint32_t(0));
+  CHECK_EQ(r.deleted_bytes, uint64_t(60000));
+  CHECK_EQ(r.free_pct_after, 11);
+  CHECK(!r.low_space);
+  // Oldest first: the newest note is the one still on the card.
+  CHECK_EQ(store.count(NoteState::Sent), uint32_t(1));
+  CHECK_EQ(store.list(NoteState::Sent)[0], newest);
+}
+
+TEST("retention never deletes an unsynced note, and says so when it cannot free space") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  const std::string pending = put_note(store, NoteState::Pending, kNow - 100 * kDays, 1, 40000);
+  const std::string failed = put_note(store, NoteState::Failed, kNow - 100 * kDays, 2, 40000);
+  CHECK(!pending.empty() && !failed.empty());
+
+  // 2% free, nothing synced: the rule must not touch the queue, and the caller
+  // has to show the error.
+  const RetentionResult r = enforce(store, CardSpace{1000000, 20000}, kNow, RetentionPolicy{});
+  CHECK_EQ(r.deleted, uint32_t(0));
+  CHECK_EQ(r.deleted_bytes, uint64_t(0));
+  CHECK(r.low_space);
+  CHECK_EQ(r.free_pct_after, 2);
+  CHECK_EQ(r.unsynced_left, uint32_t(2));
+  CHECK_EQ(store.count(NoteState::Pending), uint32_t(1));
+  CHECK_EQ(store.count(NoteState::Failed), uint32_t(1));
+  CHECK(path_exists(store.note_dir(NoteState::Pending, pending)));
+  CHECK(path_exists(store.note_dir(NoteState::Failed, failed)));
+}
+
+TEST("retention deletes every synced note and still reports the card as low") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  const std::string only = put_note(store, NoteState::Sent, kNow - 3600, 1, 1000);
+  CHECK(!only.empty());
+  const RetentionResult r = enforce(store, CardSpace{1000000, 1000}, kNow, RetentionPolicy{});
+  CHECK_EQ(r.deleted, uint32_t(1));
+  CHECK_EQ(r.deleted_for_space, uint32_t(1));
+  CHECK(r.low_space);  // 0% free and nothing left to delete
+  CHECK_EQ(store.count(NoteState::Sent), uint32_t(0));
+}
+
+TEST("retention leaves the note in use alone") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  const std::string old = put_note(store, NoteState::Sent, kNow - 20 * kDays, 1, 5000);
+  const std::string older = put_note(store, NoteState::Sent, kNow - 30 * kDays, 2, 5000);
+  CHECK(!old.empty() && !older.empty());
+
+  const RetentionResult guarded =
+      enforce(store, CardSpace{1000000, 500000}, kNow, RetentionPolicy{}, older);
+  CHECK_EQ(guarded.deleted, uint32_t(1));  // the other one still ages out
+  CHECK_EQ(store.count(NoteState::Sent), uint32_t(1));
+  CHECK_EQ(store.list(NoteState::Sent)[0], older);  // the guarded one survived
+  // The guard is only the note in use: a pass without it takes that one too.
+  const RetentionResult again = enforce(store, CardSpace{1000000, 500000}, kNow, RetentionPolicy{});
+  CHECK_EQ(again.deleted, uint32_t(1));
+  CHECK_EQ(store.count(NoteState::Sent), uint32_t(0));
+}
+
+TEST("a synced note with no real id stamp is aged from note.json, and an unknown age is not old") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  // Recorded before the board had a clock (the id says 1970), re-stamped on the
+  // wire at upload: note.json is the only thing that says how old it is.
+  const std::string restamped = put_note(store, NoteState::Sent, kNow - 21 * kDays, 1, 5000);
+  CHECK(!restamped.empty());
+  {
+    // Put the id back to its 1970 shape, and keep the record time in the meta.
+    const std::string from = store.note_dir(NoteState::Sent, restamped);
+    const std::string to = store.note_dir(NoteState::Sent, "hg-0123456789abcdef-19700101T002437-0001");
+    CHECK(std::rename(from.c_str(), to.c_str()) == 0);
+    CHECK_EQ(store.list(NoteState::Sent).size(), size_t(1));
+    CHECK(note_id_undated(store.list(NoteState::Sent)[0]));
+  }
+  const RetentionResult r = enforce(store, CardSpace{1000000, 500000}, kNow, RetentionPolicy{});
+  CHECK_EQ(r.deleted, uint32_t(1));  // note.json says three weeks old
+  CHECK_EQ(r.deleted_for_age, uint32_t(1));
+  CHECK_EQ(store.count(NoteState::Sent), uint32_t(0));
+}
+
+TEST("without a clock the age rule stands down, and the space rule still runs") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  const std::string sent = put_note(store, NoteState::Sent, kNow - 40 * kDays, 1, 60000);
+  CHECK(!sent.empty());
+  // now_s = 1970: nothing can be aged, so a roomy card deletes nothing.
+  const RetentionResult quiet = enforce(store, CardSpace{1000000, 900000}, 0, RetentionPolicy{});
+  CHECK(!quiet.clock_set);
+  CHECK_EQ(quiet.deleted, uint32_t(0));
+  CHECK_EQ(store.count(NoteState::Sent), uint32_t(1));
+  // A tight card is a tight card whether or not the clock is set.
+  const RetentionResult tight = enforce(store, CardSpace{1000000, 50000}, 0, RetentionPolicy{});
+  CHECK_EQ(tight.deleted, uint32_t(1));
+  CHECK_EQ(tight.deleted_for_space, uint32_t(1));
+  CHECK_EQ(tight.free_pct_after, 11);  // 5% plus the 6% its audio took
+  CHECK(!tight.low_space);
+}
+
+TEST("retention deletes a note whose audio is already gone, and one with no note.json") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  const std::string no_audio = put_note(store, NoteState::Sent, kNow - 20 * kDays, 1, 0);
+  const std::string half = put_note(store, NoteState::Sent, kNow - 21 * kDays, 2, 4000);
+  CHECK(!no_audio.empty() && !half.empty());
+  // A folder with no metadata is what a power cut mid-delete leaves: it must not
+  // block the rule forever.
+  CHECK(std::remove(store.meta_path(NoteState::Sent, half).c_str()) == 0);
+
+  const RetentionResult r = enforce(store, CardSpace{1000000, 500000}, kNow, RetentionPolicy{});
+  CHECK_EQ(r.deleted, uint32_t(2));
+  // The no-audio note frees nothing; the half-deleted one still had its WAV.
+  CHECK_EQ(r.deleted_bytes, uint64_t(4000));
+  CHECK_EQ(store.count(NoteState::Sent), uint32_t(0));
+  CHECK(!path_exists(store.state_dir(NoteState::Sent) + "/" + no_audio));
+}
+
+TEST("retention on a card that will not report its size runs only the age rule") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  const std::string old = put_note(store, NoteState::Sent, kNow - 20 * kDays, 1, 5000);
+  const std::string fresh = put_note(store, NoteState::Sent, kNow - 3600, 2, 5000);
+  CHECK(!old.empty() && !fresh.empty());
+  // total == 0: no percentage can be computed, so space deletes nothing.
+  const RetentionResult r = enforce(store, CardSpace{}, kNow, RetentionPolicy{});
+  CHECK_EQ(r.free_pct_before, -1);
+  CHECK_EQ(r.free_pct_after, -1);
+  CHECK(!r.low_space);
+  CHECK_EQ(r.deleted, uint32_t(1));
+  CHECK_EQ(r.deleted_for_age, uint32_t(1));
+  CHECK_EQ(store.list(NoteState::Sent)[0], fresh);
+}
+
+TEST("retention's thresholds are exact: exactly 14 days and exactly 10% are still inside") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  // Fourteen days to the second is not "older than 14 days"; a second more is.
+  const std::string exactly = put_note(store, NoteState::Sent, kNow - 14 * kDays, 1, 5000);
+  const std::string past = put_note(store, NoteState::Sent, kNow - 14 * kDays - 1, 2, 5000);
+  CHECK(!exactly.empty() && !past.empty());
+  const RetentionResult age = enforce(store, CardSpace{1000000, 900000}, kNow, RetentionPolicy{});
+  CHECK_EQ(age.deleted, uint32_t(1));
+  CHECK_EQ(store.list(NoteState::Sent).size(), size_t(1));
+  CHECK_EQ(store.list(NoteState::Sent)[0], exactly);
+
+  // Exactly 10% free is not "under 10%": nothing is deleted for space.
+  const RetentionResult at_ten = enforce(store, CardSpace{1000000, 100000}, kNow, RetentionPolicy{});
+  CHECK_EQ(at_ten.free_pct_before, 10);
+  CHECK_EQ(at_ten.deleted, uint32_t(0));
+  CHECK(!at_ten.low_space);
+  CHECK_EQ(store.count(NoteState::Sent), uint32_t(1));
+
+  // A byte under, and the same note goes.
+  const RetentionResult under = enforce(store, CardSpace{1000000, 99999}, kNow, RetentionPolicy{});
+  CHECK_EQ(under.free_pct_before, 9);
+  CHECK_EQ(under.deleted, uint32_t(1));
+  CHECK_EQ(under.deleted_for_space, uint32_t(1));
+}
+

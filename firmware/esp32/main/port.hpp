@@ -77,7 +77,11 @@ namespace hgp {
 // Events
 
 enum class EventType : uint8_t { NetUp, NetDown, WsOpen, WsText, WsBinary, WsClosed, Mic, Console, Touch, Key,
-                                 WifiStarted, WifiDisconnected, WifiProvision, WifiScanDone, Encoder, Phone, TimeSynced };
+                                 WifiStarted, WifiDisconnected, WifiProvision, WifiScanDone, Encoder, Phone, TimeSynced,
+                                 // A key's level changed (no payload). The notes device polls its two
+                                 // keys; this wakes the app loop out of its resting wait so the
+                                 // press is debounced at once instead of up to the wait later.
+                                 KeyEdge };
 
 // Payload of Phone events (posted by the Bluetooth host task).
 struct PhoneSample {
@@ -131,6 +135,9 @@ void init();
 // Copies `data`. Returns false (and drops the event) when the queue is full.
 bool post(EventType type, const void* data = nullptr, size_t len = 0, uint32_t generation = 0,
           ConsoleRequest* console = nullptr);
+// From a GPIO ISR: no allocation, no wait. Drops the wake-up when the queue is
+// full, which is harmless because the keys are still polled on the next pass.
+bool post_from_isr(EventType type);
 bool receive(Event& out, TickType_t wait);
 void release(Event& ev);
 // {waiting, peak, depth, dropped} for `diag`: a full queue drops touches, keys and audio.
@@ -980,9 +987,22 @@ void begin();
 // Phone events.
 class PhoneLink {
  public:
-  // Starts the Bluetooth stack. It advertises only while pairing is open or a
-  // phone is paired. False when the build has no Bluetooth or it can't start.
+  // Starts the Bluetooth stack (the controller stays off until a window opens;
+  // see hg::RadioWindow). False when the build has no Bluetooth or it can't start.
   bool begin(const std::string& name);
+  // The radio's own clock: called once per app-loop pass. Brings the controller
+  // up inside a window and stops it at rest, which is the only way this board
+  // (no 32 kHz crystal) can light-sleep. Safe at any rate.
+  void tick(uint32_t now_ms);
+  // A note just landed in pending/: open the window a phone can take it in.
+  void note_saved();
+  // The console's `phone wake`: an explicit, short window.
+  void wake();
+  // How many notes are waiting for a phone (drives the retry window).
+  void set_pending(uint32_t count);
+  // Whether the controller is up right now, and why it is (for `diag`/log).
+  bool radio_up() const;
+  const char* radio_reason() const;
   bool open_pairing();
   // A new phone asked to pair while the window was open: allow it, which is
   // what makes the passkey appear, or refuse it and drop the link. Called from
@@ -1012,6 +1032,11 @@ class NoteLink {
   // this pass (NimBLE is out of buffers), the phone has not subscribed, or
   // there is no connection: the caller keeps the packet for the next tick.
   bool send_frame(const uint8_t* data, size_t len);
+  // A note just became available, and how many are waiting for a phone. The
+  // port turns them into short advertising windows (hg/radio_window.hpp): the
+  // radio is otherwise off so the board can light-sleep.
+  void note_saved();
+  void pending(uint32_t count);
 };
 
 // The device's own Tailscale node (TailTiny, components/tailtiny), for a Hermes host

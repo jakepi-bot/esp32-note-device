@@ -127,11 +127,32 @@ bool all_digits(std::string_view text, size_t at, size_t count) {
   return true;
 }
 
+int four_digits(std::string_view text, size_t at) {
+  return (text[at] - '0') * 1000 + (text[at + 1] - '0') * 100 + (text[at + 2] - '0') * 10 + (text[at + 3] - '0');
+}
+
+int days_in_month(int year, int month) {
+  static constexpr int kDays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if (month != 2) return kDays[month - 1];
+  const bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+  return leap ? 29 : 28;
+}
+
+// Days since 1970-01-01 for a proleptic Gregorian date (Hinnant's algorithm),
+// so a stamp can be aged without the C library's timezone rules.
+int64_t days_from_civil(int64_t y, unsigned m, unsigned d) {
+  y -= m <= 2;
+  const int64_t era = (y >= 0 ? y : y - 399) / 400;
+  const unsigned yoe = static_cast<unsigned>(y - era * 400);
+  const unsigned doy = (153u * (m + (m > 2 ? -3u : 9u)) + 2u) / 5u + d - 1u;
+  const unsigned doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;
+  return era * 146097 + static_cast<int64_t>(doe) - 719468;
+}
+
 }  // namespace
 
-bool stamp_plausible(std::string_view iso) {
-  // The wire form is fixed width, so "earlier than 2024" is a string compare —
-  // once the shape and the field ranges are known to be real.
+bool parse_iso8601(std::string_view iso, int64_t& out_unix_s) {
+  // One shape, fixed width: anything else is not a time this firmware wrote.
   if (iso.size() != 20) return false;
   const bool shape = iso[4] == '-' && iso[7] == '-' && iso[10] == 'T' && iso[13] == ':' && iso[16] == ':' &&
                      iso[19] == 'Z';
@@ -140,27 +161,55 @@ bool stamp_plausible(std::string_view iso) {
       !all_digits(iso, 14, 2) || !all_digits(iso, 17, 2)) {
     return false;
   }
+  const int year = four_digits(iso, 0);
   const int month = digits(iso, 5), day = digits(iso, 8), hour = digits(iso, 11), minute = digits(iso, 14),
             second = digits(iso, 17);
-  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 60) return false;
-  return iso >= std::string_view("2024-01-01T00:00:00Z");
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return false;
+  if (day < 1 || day > days_in_month(year, month)) return false;
+  out_unix_s = days_from_civil(year, static_cast<unsigned>(month), static_cast<unsigned>(day)) * 86400 +
+               static_cast<int64_t>(hour) * 3600 + static_cast<int64_t>(minute) * 60 + second;
+  return true;
 }
 
-bool note_id_undated(std::string_view note_id) {
-  // <device_id>-<YYYYMMDDTHHMMSS>-<seq:04u>: the stamp is the 15 characters
-  // between the last two dashes, and the device id may hold dashes of its own.
+bool stamp_plausible(std::string_view iso) {
+  // The wire form is fixed width, so "earlier than 2024" is a second compare —
+  // once the shape and the field ranges are known to be real.
+  int64_t stamp = 0;
+  return parse_iso8601(iso, stamp) && stamp >= kMinTrustedStampUnix;
+}
+
+namespace {
+
+// The 15-character stamp inside a note id (`YYYYMMDDTHHMMSS`), when it has one.
+bool id_stamp_text(std::string_view note_id, std::string_view& out) {
   const size_t seq = note_id.rfind('-');
   if (seq == std::string_view::npos || seq < 16) return false;
   const size_t stamp_at = seq - 15;
   if (note_id[stamp_at - 1] != '-') return false;
-  const std::string_view stamp = note_id.substr(stamp_at, 15);
+  out = note_id.substr(stamp_at, 15);
+  return true;
+}
+
+}  // namespace
+
+bool note_id_stamp(std::string_view note_id, int64_t& out_unix_s) {
+  std::string_view stamp;
+  if (!id_stamp_text(note_id, stamp)) return false;
   if (!all_digits(stamp, 0, 8) || stamp[8] != 'T' || !all_digits(stamp, 9, 6)) return false;
   std::string iso;
   iso.reserve(20);
   iso.append(stamp.substr(0, 4)).append("-").append(stamp.substr(4, 2)).append("-");
   iso.append(stamp.substr(6, 2)).append("T").append(stamp.substr(9, 2)).append(":");
   iso.append(stamp.substr(11, 2)).append(":").append(stamp.substr(13, 2)).append("Z");
-  return !stamp_plausible(iso);
+  return parse_iso8601(iso, out_unix_s);
+}
+
+bool note_id_undated(std::string_view note_id) {
+  // <device_id>-<YYYYMMDDTHHMMSS>-<seq:04u>: the stamp is the 15 characters
+  // between the last two dashes, and the device id may hold dashes of its own.
+  int64_t stamp = 0;
+  if (!note_id_stamp(note_id, stamp)) return false;  // not an id: it claims nothing
+  return stamp < kMinTrustedStampUnix;
 }
 
 Meta stamped_for_upload(const Meta& stored, int64_t now_s, bool* restamped) {

@@ -780,10 +780,12 @@ BoardConfig make() {
   // The Touch SKU of this product carries an FT6336 on the shared I2C bus at
   // 0x38; the plain SKU carries nothing there. make() runs before the bus
   // exists, so this is the shape the port enables only when the controller
-  // answers the probe (main.cpp). Reset is wired to the board's EPD_TP_RST net,
-  // which this port does not drive: the controller powers up out of reset.
+  // answers the probe (main.cpp). Reset is EPD_TP_RST on GPIO 7 (Waveshare's
+  // schematic and its 13_FT6336_Test example): the chip does not answer until
+  // that net is released, which is why the probe pulses it first.
   b.touch.controller = TouchController::Ft5x06;
   b.touch.addr = 0x38;
+  b.touch.rst = 7;
   b.touch.width = b.epd.width;
   b.touch.height = b.epd.height;
   b.touch.ppi = 183;  // 1.54" over 200 px, the same glass as the panel
@@ -1013,6 +1015,10 @@ BoardConfig make() {
   b.touch.enabled = true;
   b.touch.controller = TouchController::Ft5x06;
   b.touch.addr = 0x38;
+  // EPD_TP_RST is GPIO 7 on both V2 SKUs (Waveshare's schematic and its
+  // 13_FT6336_Test example). The controller answers on the bus only once that
+  // net is released, so the port pulses it before the probe (main.cpp).
+  b.touch.rst = 7;
   b.touch.rst = 18;
   b.touch.int_gpio = 17;
   b.touch.width = 240;
@@ -1053,6 +1059,10 @@ BoardConfig make() {
   b.touch.ppi = 200;  // estimate (see TouchConfig::ppi)
   b.touch.controller = TouchController::Ft5x06;
   b.touch.addr = 0x38;
+  // EPD_TP_RST is GPIO 7 on both V2 SKUs (Waveshare's schematic and its
+  // 13_FT6336_Test example). The controller answers on the bus only once that
+  // net is released, so the port pulses it before the probe (main.cpp).
+  b.touch.rst = 7;
   b.touch.width = 320;
   b.touch.height = 240;
   b.talk_label = "Hold screen";

@@ -2,6 +2,8 @@
 
 ## unreleased
 
+- **A notes-only build target, and the Hermes app leaves its image (plan option B, first step).** `pio run -e notes` builds a second app from this tree: the e-paper board's hardware and the notes stack, without `hg::App`, the core UI, i18n, faces, Opus, the WebSocket client, the tailnet, the camera or touch. `firmware/esp32/notes_app/main.cpp` is its entry point (rails, battery latch, panel, codec, card, radio, console, then rest), the source split is `HG_APP` in `firmware/esp32/main/CMakeLists.txt`, and `main/notes_app/ui_keys.*` with its eight host cases is untouched. Measured from clean builds on the same tree and toolchain: the notes image is 731,603 B of the 3.87 MB slot (18.0%, 82% free) with 35,440 B of static RAM, against the Hermes app's 2,050,799 B and 87,836 B, so 1,288 KB of flash and 59.7% of the static RAM are gone. `nm` on the two ELFs finds no `hg::App`, `hg::UiModel`, canvas, i18n, mascot, Opus, WebSocket, tailnet, camera, touch or protocol symbol in the notes image, and the notes image still carries NimBLE, `hg::json`, `hg::RadioWindow` and the RTC drivers. Host suites 8/8 (`hg_epaper_mode_tests` 42 cases); a new CI job builds `-e notes` without packaging it. [Plan](docs/notes-only-firmware-plan.md)
+
 - **The gadget advertises the note service, so a phone can find it.** The
   advertising packet carried the hub service (`…0001`) while the relay page
   filtered on the note service (`…00a0`), so neither Bluefy nor Chrome listed the

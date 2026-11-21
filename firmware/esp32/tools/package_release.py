@@ -107,6 +107,12 @@ def environments(project: Path) -> dict[str, str]:
         if section.startswith("env:"):
             env = section.split(":", 1)[1]
             extra_args = ini.get(section, "board_build.cmake_extra_args", fallback="")
+            # An environment that builds another app (the notes-only firmware,
+            # -DHG_APP=notes) is a variant of a board's firmware, not a board: the
+            # release and the CI board list are about the Hermes app a board ships.
+            app = re.search(r"-DHG_APP=([A-Za-z0-9_-]+)", extra_args)
+            if app and app.group(1) != "hermes":
+                continue
             m = re.search(r"boards/([^/;\"]+)/sdkconfig\.defaults", extra_args)
             boards[env] = m.group(1) if m else env
     return boards

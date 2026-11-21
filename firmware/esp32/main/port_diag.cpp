@@ -266,7 +266,11 @@ void report_common(hg::json::Value& r) {
       .set("memory", memory())
       .set("events", events::stats())
       .set("crash", coredump());
+#if !HG_NOTES_APP
+  // The notes app keeps no touch module (main/CMakeLists.txt), so there is no
+  // TouchInput to ask and nothing ever sets touch_input there.
   if (g_parts.touch_input) r.set("touch", g_parts.touch_input->stats());
+#endif
 }
 
 }  // namespace

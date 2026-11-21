@@ -228,6 +228,32 @@ jobs:
           name: firmware-${{ matrix.board }}
           path: firmware/esp32/dist/
           if-no-files-found: error
+  notes:
+    name: Notes-only firmware (notes)
+    # The notes app (docs/notes-only-firmware-plan.md, section 3, option B) builds
+    # beside the Hermes app from the same tree: this keeps its smaller module set
+    # linking, so a change that only breaks the notes build shows on the pull
+    # request. No release artifact: the device ships the Hermes app until the notes
+    # build passes the bench checks in section 7.
+    needs: changes
+    if: needs.changes.outputs.firmware == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
+        with:
+          path: ~/.platformio
+          key: platformio-${{ runner.os }}-${{ hashFiles('firmware/esp32/platformio.ini', 'firmware/esp32/main/idf_component.yml') }}
+      - name: Install PlatformIO
+        run: pip install platformio==6.2.0
+      - name: Build
+        working-directory: firmware/esp32
+        run: pio run -e notes
+
   esp32p4:
     name: ESP32-P4 firmware (${{ matrix.board }})
     # PlatformIO has no ESP32-P4 platform, so these boards build with idf.py in the
@@ -257,7 +283,7 @@ jobs:
     name: CI passed
     # The one required check: it passes when every job above passed or was skipped as unaffected.
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
-    needs: [changes, core, python, site, esp32, esp32p4]
+    needs: [changes, core, python, site, esp32, notes, esp32p4]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

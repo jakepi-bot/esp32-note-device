@@ -246,3 +246,75 @@ through the Hermes pipeline.
   audio hash are in the canonical string).
 - `getDevices()` granted but the device is asleep or out of range: fall back to
   the chooser, do not dead-end.
+
+## 10. The notes build, as it stands (2026-11-21)
+
+`pio run -e notes` builds the notes-only app. It is the `waveshare-epaper-154`
+board, partition table and sdkconfig; `-DHG_APP=notes` in `platformio.ini` picks
+the other source list in `firmware/esp32/main/CMakeLists.txt`.
+
+| | Hermes app (`waveshare-epaper-154`) | Notes app (`notes`) | Difference |
+|---|---|---|---|
+| Image (`firmware.bin` / idf "Flash") | 2,050,799 B, 50.5% of the slot | 731,603 B, 18.0% | **-1,319,196 B (-1,288 KB, -64.3%)** |
+| Static RAM (idf "RAM") | 87,836 B, 26.8% of 320 KB | 35,440 B, 10.8% | **-52,396 B (-59.7%)** |
+| `ota_0` slot free (`tools/check_size.py`) | 50% | 82% | |
+
+Both numbers are from a clean `pio run` on 2026-11-21 with the same ESP-IDF
+(6.1.0) and toolchain; the arithmetic above is the build's own output, not an
+estimate. The plan's guess was 250-350 KB; the whole core leaves, not just the
+turn machinery, so the notes app comes in four times smaller.
+
+### Where the two apps live
+
+- `firmware/esp32/notes_app/main.cpp`: the notes app's entry point. It brings up
+  the board (rails, battery latch, panel, codec), mounts the card, starts the
+  radio, starts the console and then rests. The panel shows a frameless boot
+  image it fills itself, so no font or canvas is needed to prove it; the console
+  answers `screen`, `sd`, `keys`, `menu` and `about`; the keys are answered by
+  `ui_keys.*` and logged.
+- `firmware/esp32/main/notes_app/ui_keys.*`: unchanged, still the screen and key
+  rules, still with its eight host cases in `firmware/tests/test_notes_ui.cpp`
+  (part of `hg_epaper_mode_tests`, 42 cases).
+- `firmware/esp32/main/CMakeLists.txt`: `HG_APP` (`hermes` default, `notes`)
+  selects one of two source lists over a shared base. The shared base is the
+  board table, the notes stack and the ports the product keeps; the Hermes list
+  adds `main.cpp`, the mode modules and every board's panel driver.
+
+Two seams were needed, and both are named where they sit:
+
+- `port_diag.cpp`'s touch statistics are behind `#if !HG_NOTES_APP`, because the
+  notes app keeps no `port_touch.cpp` and nothing sets `touch_input` there.
+- `port_audio.cpp` is in the shared base: `port_codec.cpp` calls
+  `hgp::speaker_now_ms()`, which lives beside the I2S speaker that shares its
+  clock. The I2S classes it also defines are unreferenced and dropped.
+
+### Nothing from the dropped modules is in the notes image
+
+`xtensa-esp32s3-elf-nm -C --defined-only` on both `.elf` files, count of
+demangled symbols matching:
+
+| Pattern | Notes app | Hermes app |
+|---|---|---|
+| `hg::App` | 0 | 285 |
+| `hg::UiModel` | 0 | 77 |
+| `hg::Canvas` | 0 | 42 |
+| `i18n` | 0 | 25 |
+| mascot / face data | 0 | 37 |
+| `opus` | 0 | 20 |
+| `WebSocket` / client | 0 | 17 |
+| tailnet / tailtiny | 0 | 14 |
+| camera | 0 | 8 |
+| `TouchInput` | 0 | 24 |
+| protocol JSON | 0 | 4 |
+| font tables | 0 | 11 |
+
+What the notes image does carry from the core: `hg::json`, `hg::RadioWindow`,
+`hg::LogRing`, `hg::SharedReply`, `hg::SpeakerPa`, the display base class and the
+two RTC drivers. NimBLE is there, because the phone path is.
+
+### Still to come on top of this skeleton
+
+The screens (the ~5-screen state machine, list/play/delete, menu), the power and
+radio schedule (on-demand Wi-Fi, SNTP, graceful shutdown), and the docs and
+release pass. The old target stays buildable until the bench checks in section 7
+pass on the new one.

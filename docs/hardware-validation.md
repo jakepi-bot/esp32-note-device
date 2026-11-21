@@ -463,9 +463,18 @@ The board that has it on today is the exception on purpose: it is the note
 taker, and Bluetooth is the only way its notes leave the card with no network. The
 steps to record for it are [Bluetooth note sync §10](ble-note-sync.md#10-test-steps)
 (pairing, MTU, a whole note, an interrupted one that resumes, an empty note, an
-unpaired phone, Wi-Fi beside Bluetooth). They have not been run on hardware yet;
-until that report is attached, treat this board's Bluetooth as enabled and built,
-not verified.
+unpaired phone, Wi-Fi beside Bluetooth). The first part of those is now on the
+record from a hardware pass on 2026-11-20: the GATT table registers on real
+NimBLE (`I hg.phone: Bluetooth ready` at 1282 ms and no `E (` line in the boot
+log), `phone`, `notes ble` and `notes status` answer as §10.1 describes
+(`| ble away`), `phone pair` answers `@ok phone pairing open` and NimBLE starts
+advertising, and a note still uploads over Wi-Fi afterwards. Nothing past the
+radio handshake has been checked: no iPhone and no BLE central was available to
+that pass, so pairing from a phone, the passkey, the MTU, a whole note, an
+interrupted one that resumes, an empty note and Wi-Fi beside a transfer are all
+still unverified. See [§11](ble-note-sync.md#11-what-has-been-verified-and-what-has-not)
+and the [QA report](qa-report-0588422.md) (D1 is the null `access_cb` that kept
+the service from registering at all, fixed in the commit that added this note).
 
 Attach the report to a pull request that makes the two changes for that board and adds Bluetooth to its row in the table above. The board's next release then ships with the link. A report for one board doesn't turn it on for another.
 

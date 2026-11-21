@@ -273,7 +273,7 @@ std::string console_line(std::string_view line) {
   }
   if (line == "keys" || line.rfind("ui", 0) == 0) {
     // `ui` is the screens' own report: the screen, the counts, the card and the
-    // link. `ui redraw` forces the full-refresh hand-over `screen` can measure.
+    // link. `ui home` forces the full-refresh hand-over `screen` can measure.
     const std::string answer = g_ui.console(line == "keys" ? "ui" : line);
     if (!answer.empty()) return answer;
   }

@@ -89,8 +89,8 @@ mark (`* TO SEND`, `! FAILED`) or shows the count. An empty card reads
 `NO NOTES YET`.
 
 PWR opens the note under the selection; BOOT moves down; BOOT-hold returns to the
-menu. The on-screen window is capped at 128 notes; every note is still on the
-card, and the list starts at the newest.
+menu. The on-screen window stops at 128 notes and the title line then reads
+`128+`; every note is still on the card, and the list starts at the newest.
 
 ## A note
 
@@ -155,7 +155,8 @@ notes/
 
 Over USB at 115200: `notes status|list|record|stop|sync|poweroff|mount|format|prune`,
 `screen` for the panel image as hex, `about`, `battery`, `clock`, `radio`, `sd`,
-`keys`, `menu`, `phone pair|wake|allow|refuse`, `wifi-setup [stop]`, and the usual
+`keys`, `ui` (`ui home` forces a full-refresh hand-over), `phone
+pair|wake|allow|refuse`, `wifi-setup [stop]`, and the usual
 `set`/`get`/`diag`/`log`/`help`. The `screen` verb is how a transition's ghosting
 is measured without a camera.
 

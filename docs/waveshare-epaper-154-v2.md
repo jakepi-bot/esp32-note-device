@@ -653,8 +653,8 @@ idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;boards/waveshare-epaper-154/sdk
 
 Both environments share the board, the partition table and the sdkconfig; the
 `notes` one passes `-DHG_APP=notes`, which picks the notes source list in
-`main/CMakeLists.txt`. Measured on 2026-11-21: notes 1,464,175 B (36.0% of the
-3.87 MB slot) and 63,136 B static RAM, the Hermes app 2,052,223 B and 87,948 B.
+`main/CMakeLists.txt`. Measured on 2026-11-21: notes 1,464,915 B (36.1% of the
+3.87 MB slot) and 63,040 B static RAM, the Hermes app 2,052,223 B and 87,948 B.
 
 ### 10.3 Flash (USB-C)
 

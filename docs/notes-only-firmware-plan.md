@@ -255,8 +255,8 @@ the other source list in `firmware/esp32/main/CMakeLists.txt`.
 
 The table below is the **skeleton**, the first build of this target, kept because
 it shows what the source split alone saved. It is not the shipped size. The app
-that is on the board - runtime, screens and all - measures 1,464,175 B and 63,136 B
-of static RAM, 36.0% of the slot against the Hermes app's 50.5%; the measurements
+that is on the board - runtime, screens and all - measures 1,464,915 B and 63,040 B
+of static RAM, 36.1% of the slot against the Hermes app's 50.5%; the measurements
 are in section 11 below and their section-by-section deltas are in the rewrite's
 QA report.
 
@@ -271,11 +271,11 @@ Both numbers are from a clean `pio run` on 2026-11-21 with the same ESP-IDF
 path: with no uploader, station or setup page in the image, `--gc-sections`
 dropped them. Wiring the runtime in is what links the HTTP client, the Wi-Fi
 station/AP stack and the TLS bundle, and that is most of the 731,603 B to
-1,464,175 B.
+1,464,915 B.
 
 Against the Hermes app the shipped notes image is **574 KiB smaller in flash**
-(2,052,223 B to 1,464,175 B, 50.5% to 36.0% of the slot) and **24.2 KiB smaller
-in static RAM** (87,948 B to 63,136 B). The plan's guess was 250-350 KB of flash
+(2,052,223 B to 1,464,915 B, 50.5% to 36.1% of the slot) and **24.2 KiB smaller
+in static RAM** (87,948 B to 63,040 B). The plan's guess was 250-350 KB of flash
 and 40-80 KB of RAM; flash came in above the band, RAM below it, because the
 core's bulk is flash rodata (mascots, the i18n table, panel init tables, the
 BMI270 blob) rather than DRAM.

@@ -13,8 +13,8 @@ if neither is reachable: the card keeps the recording until an upload succeeds.
 
 The firmware this repository ships for the device is the **notes-only** app: the
 Hermes Gadget core, its turn machinery and its generic UI are not in the image at
-all. It is built by the PlatformIO environment `notes` and measures 1,464,175 B
-(36.0% of the 3.87 MB slot) with 63,136 B of static RAM.
+all. It is built by the PlatformIO environment `notes` and measures 1,464,915 B
+(36.1% of the 3.87 MB slot) with 63,040 B of static RAM.
 
 ## What it does
 
@@ -181,7 +181,7 @@ The USB serial console at 115200 answers these on the notes firmware:
 | `notes poweroff` | the graceful shutdown a PWR tap performs |
 | `notes mount`, `notes format`, `notes prune` | card housekeeping |
 | `screen` | the panel image as hex, 1 bit per pixel (no camera needed) |
-| `about`, `battery`, `clock`, `radio`, `sd`, `keys`, `menu` | the pieces of the status face |
+| `about`, `battery`, `clock`, `radio`, `sd`, `keys`, `ui` | the pieces of the status face; `ui` reports the screen and its counts, `ui home` redraws it |
 | `phone pair`, `phone wake` | open the pairing window, or a short window to look for a phone |
 | `phone allow`, `phone refuse` | answer the pairing ask from a host instead of the keys |
 | `wifi-setup`, `wifi-setup stop` | the phone's setup page |
@@ -247,7 +247,7 @@ docker compose up -d --build
 | `NO CARD` | the microSD card is missing or did not mount |
 | `LOW POWER` | the battery is nearly flat |
 | `!` on a list row | the server rejected that note (it is in `failed/`); the reason is in its `note.json` |
-| the list stops at 128 notes | the on-screen window is capped at 128 entries; every note is still on the card |
+| the list says `128+` | the on-screen window stops at 128 entries; every note is still on the card |
 | the page says **Connect** lists no device | the pairing window is closed. The board advertises only while **Phone** is open; `python3 web/ble-note-relay/tools/scan_adv.py` shows the packet |
 | iOS Settings lists no gadget | expected: the board is found inside the page, not in iOS Settings |
 | `bind: address already in use` on 8766 | a Hermes gateway owns that port. Set `NOTES_PORT=8767` |

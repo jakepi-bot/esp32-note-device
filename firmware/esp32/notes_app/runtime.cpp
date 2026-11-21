@@ -291,6 +291,11 @@ void Runtime::close_net(uint32_t now) {
   // The retry clock starts from the close, not from the boot: that is the duty
   // cycle's down half.
   next_net_retry_ms_ = now + kNetRetryMs;
+  // The bar belongs to the window: a closed window has no batch to draw.
+  if (batch_running_) {
+    batch_running_ = false;
+    notify_upload();
+  }
 }
 
 const char* Runtime::net_reason() const {
@@ -328,6 +333,10 @@ void Runtime::tick(uint32_t now, bool wifi_link) {
 
   if (mode_ == Mode::Recording) {
     if (capture_.full()) finish_note(now, "cap");
+    // A recording does not defer the window's clock, its close or the retry that
+    // follows it (QA D4): only the upload planner waits for the microphone. The
+    // station itself already powers down at the deadline through wants_network().
+    step_window(now);
     return;
   }
   if (mode_ == Mode::Syncing) {
@@ -345,7 +354,10 @@ void Runtime::tick(uint32_t now, bool wifi_link) {
   if (static_cast<int32_t>(now - next_retention_ms_) >= 0) run_retention(now, false);
 
   if (mode_ == Mode::Idle) begin_sync(now);
+  step_window(now);
+}
 
+void Runtime::step_window(uint32_t now) {
   // A transfer in flight keeps its window: closing the station under the
   // uploader would waste the bytes it has already sent (`step_sync` above may
   // have left the mode Syncing).
@@ -366,6 +378,14 @@ void Runtime::tick(uint32_t now, bool wifi_link) {
   }
 }
 
+void Runtime::notify_ui() {
+  if (ui_.changed) ui_.changed();
+}
+
+void Runtime::notify_upload() {
+  if (ui_.upload) ui_.upload(batch_running_, batch_done_, batch_total_);
+}
+
 void Runtime::on_mic(const int16_t* samples, size_t count) {
   if (mode_ != Mode::Recording || samples == nullptr || count == 0) return;
   // The writer's task does the card work; without it (no memory for the ring)
@@ -377,6 +397,8 @@ void Runtime::on_mic(const int16_t* samples, size_t count) {
 void Runtime::on_clock_synced() {
   if (io_.time) io_.time->on_synced();
   ESP_LOGI(TAG, "clock synced");
+  // Home draws the clock's state: it has to hear that it moved.
+  notify_ui();
 }
 
 // ---------------------------------------------------------------------------
@@ -413,15 +435,18 @@ void Runtime::start_note(uint32_t now) {
   if (!io_.mic) {
     error_ = "No microphone";
     ESP_LOGW(TAG, "not recording: this board brought up no microphone");
+    notify_ui();
     return;
   }
   if (!ensure_sd()) {
     error_ = sd_error_.empty() ? "No SD card" : sd_error_;
+    notify_ui();
     return;
   }
   run_retention(now, true);
   if (low_space_) {
     error_ = kLowSpaceError;
+    notify_ui();
     return;
   }
 
@@ -441,6 +466,7 @@ void Runtime::start_note(uint32_t now) {
     error_ = error.empty() ? "Cannot write to the card" : error;
     sd_ready_ = false;
     sd_mount::release();
+    notify_ui();
     return;
   }
   io_.config->set(kSeqKey, std::to_string(counter));
@@ -457,6 +483,9 @@ void Runtime::start_note(uint32_t now) {
   mode_ = Mode::Recording;
   error_.clear();
   io_.mic->start(notes::kSampleRate);
+  // The screens moved to the recording face on the key; the runtime says so too,
+  // so a console-started recording (`notes record`) reaches the glass.
+  notify_ui();
   ESP_LOGI(TAG, "recording %s (cap %d s)", meta_.note_id.c_str(), io_.config->note_max_s());
 }
 
@@ -477,6 +506,7 @@ void Runtime::finish_note(uint32_t now, const char* why) {
     sd_ready_ = false;
     sd_mount::release();
     refresh_counts();
+    notify_ui();
     return;
   }
   // note.json is the commit: until it lands the note does not exist.
@@ -487,6 +517,7 @@ void Runtime::finish_note(uint32_t now, const char* why) {
     sd_ready_ = false;
     sd_mount::release();
     refresh_counts();
+    notify_ui();
     return;
   }
   error_.clear();
@@ -510,6 +541,7 @@ void Runtime::abort_note(const char* why) {
   if (capture_.active()) capture_.abort();
   mode_ = Mode::Idle;
   ESP_LOGW(TAG, "recording dropped: %s", why);
+  notify_ui();
 }
 
 // ---------------------------------------------------------------------------
@@ -565,6 +597,13 @@ void Runtime::begin_sync(uint32_t now) {
     sync_id_ = id;
     attempt_ = wire.attempts;
     retry_waiting_ = false;
+    // The batch the glass draws: one bar for this window's work, not a note.
+    if (!batch_running_) {
+      batch_running_ = true;
+      batch_done_ = 0;
+      batch_total_ = static_cast<uint8_t>(pending_ > 255 ? 255 : pending_);
+      notify_upload();
+    }
     mode_ = Mode::Syncing;
     ESP_LOGI(TAG, "uploading %s (%s)", id.c_str(), notes::human_bytes(meta_.bytes).c_str());
     return;
@@ -590,6 +629,10 @@ void Runtime::step_sync(uint32_t now) {
     retry_waiting_ = false;
     error_.clear();
     refresh_counts();
+    // A sent note loses its mark and the bar moves: one publish for both.
+    if (batch_done_ < 255) ++batch_done_;
+    if (pending_ == 0) batch_running_ = false;
+    notify_upload();
     ESP_LOGI(TAG, "note %s synced (HTTP %d)", id.c_str(), uploader_.http_status());
     return;
   }
@@ -598,7 +641,9 @@ void Runtime::step_sync(uint32_t now) {
     store_.move(id, notes::NoteState::Pending, notes::NoteState::Failed);
     retry_waiting_ = false;
     attempt_ = 0;
+    batch_running_ = false;
     refresh_counts();
+    if (ui_.upload_failed) ui_.upload_failed();
     return;
   }
 
@@ -698,12 +743,21 @@ bool Runtime::ensure_sd() {
 }
 
 void Runtime::refresh_counts() {
-  if (!ensure_sd()) return;
+  const bool was_ready = sd_ready_;
+  const uint32_t was_pending = pending_, was_sent = sent_, was_failed = failed_;
+  if (!ensure_sd()) {
+    // The card went away: the glass draws NO CARD, so it has to hear about it
+    // even though no count moved.
+    if (was_ready) notify_ui();
+    return;
+  }
   pending_ = store_.count(notes::NoteState::Pending);
   sent_ = store_.count(notes::NoteState::Sent);
   failed_ = store_.count(notes::NoteState::Failed);
   // A waiting note is the reason to advertise: the port opens a window for it.
   if (io_.ble) io_.ble->pending(pending_);
+  // The screens cache these; a scan that found the same numbers costs no frame.
+  if (!was_ready || was_pending != pending_ || was_sent != sent_ || was_failed != failed_) notify_ui();
 }
 
 void Runtime::run_retention(uint32_t now, bool force) {

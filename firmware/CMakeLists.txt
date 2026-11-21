@@ -87,8 +87,11 @@ if(HG_BUILD_TESTS)
   # screen machine, the copy, the list's order and marks, the refresh class of
   # every transition, and play/delete against a real temp card. The card work
   # is POSIX, like the notes store's own tests, so MSVC skips this one.
+  # ui_state.* is the adapter's refresh policy (which fact is re-read on which
+  # event): test_notes_refresh.cpp drives it against a real card, which is the
+  # case the QA pass on t_5baa6311 found missing (defect D1).
   if(NOT MSVC)
-    add_executable(hg_notes_ui_tests tests/main.cpp tests/test_notes_screens.cpp)
+    add_executable(hg_notes_ui_tests tests/main.cpp tests/test_notes_screens.cpp tests/test_notes_refresh.cpp)
     target_include_directories(hg_notes_ui_tests PRIVATE esp32/main)
     target_link_libraries(hg_notes_ui_tests PRIVATE hg_core)
     target_sources(hg_notes_ui_tests PRIVATE esp32/main/notes_app/ui_keys.cpp
@@ -96,6 +99,7 @@ if(HG_BUILD_TESTS)
                                             esp32/main/notes_app/ui_render.cpp
                                             esp32/main/notes_app/ui_app.cpp
                                             esp32/main/notes_app/ui_cache.cpp
+                                            esp32/main/notes_app/ui_state.cpp
                                             esp32/main/notes_app/wav_player.cpp
                                             esp32/main/notes/notes_store.cpp
                                             esp32/main/notes/notes_queue.cpp

@@ -25,17 +25,17 @@ namespace {
 
 const char* TAG = "hg.ui";
 
-// The panel is 200x200 at 1 bit; the counters tick at 5 s and the recording cap
-// is config's (300 s by default).
-constexpr uint32_t kCounterStepS = 5;
 // Playback reads 100 ms at a time: small enough that a stop lands within a
 // frame, large enough that the card is not asked for 77 tiny reads a second.
 constexpr size_t kPlayFrames = 2400;
 // While a note plays, the reader keeps one buffer in the speaker and waits.
 constexpr uint32_t kPlayPaceMs = 20;
-// Battery is an ADC read; the band's icon and About need it, and a note's
-// metadata wants millivolts. Once a minute is enough for both.
-constexpr uint32_t kPowerPollMs = 60000;
+// The band's facts are a string compare and a clock read: once a second is
+// cheap and makes a link that came up between events land on the glass.
+constexpr uint32_t kFactsMs = 1000;
+// Battery is an ADC read and the card's free space is a statfs: about 200 ms a
+// year at this cadence, and About is the only screen that reads them.
+constexpr uint32_t kSlowFactsMs = 60000;
 
 const char* screen_name(notesui::Screen screen) {
   switch (screen) {
@@ -53,192 +53,83 @@ const char* screen_name(notesui::Screen screen) {
   return "?";
 }
 
-}  // namespace
+// apply() can reach itself (a pairing answer hands the screen back), and the
+// runtime's publish must wait for the outermost one: a flag, saved and set on
+// the way in, put back on the way out.
+struct InApply {
+  bool& flag;
+  bool was;
+  explicit InApply(bool& f) : flag(f), was(f) { flag = true; }
+  ~InApply() { flag = was; }
+};
 
-std::string NotesUi::device_id() {
-  // The same identity the Hermes build has: the stored device key, hashed. The
-  // key is generated once and never leaves the device; the notes image reuses
-  // it so a reflash does not orphan the notes already in the vault.
-  std::string stored;
-  if (ports_.storage != nullptr) {
-    auto value = ports_.storage->get("device_key");
-    if (value) stored = *value;
-  }
-  std::vector<uint8_t> key;
-  if (!stored.empty()) hg::crypto::base64_decode(stored, key);
-  if (key.size() != 32) {
-    key.assign(32, 0);
-    ports_.system->random_bytes(key.data(), key.size());
-    if (ports_.storage != nullptr) {
-      if (!ports_.storage->set("device_key", hg::crypto::base64_encode(key.data(), key.size()))) {
-        ESP_LOGW(TAG, "could not save the device key: this identity lasts until the next restart");
-      }
-    }
-  }
-  return hg::proto::device_id_for_key(key.data(), key.size());
-}
+}  // namespace
 
 void NotesUi::begin(const Ports& ports) {
   ports_ = ports;
-  if (ports_.system != nullptr) {
-    device_id_ = device_id();
-    auto name = ports_.storage != nullptr ? ports_.storage->get("name") : std::nullopt;
+  if (ports_.system != nullptr && ports_.storage != nullptr) {
+    auto name = ports_.storage->get("name");
     device_name_ = name && !name->empty() ? *name : std::string(CONFIG_HG_DEFAULT_NAME);
-    auto seq = ports_.storage != nullptr ? ports_.storage->get("note_seq") : std::nullopt;
-    seq_ = seq ? static_cast<uint32_t>(std::strtoul(seq->c_str(), nullptr, 10)) : 0;
+  } else {
+    device_name_ = CONFIG_HG_DEFAULT_NAME;
   }
-  std::snprintf(snap_.firmware, sizeof snap_.firmware, "%s",
+
+  // The ports' first answers, before the first frame: the band's link and clock,
+  // and one slow read for the battery and About's card space. Leaving them out
+  // is what froze the boot frame (QA D1: clock_set defaulted true, wifi_up
+  // false, and nothing ever corrected them).
+  facts_ = read_facts();
+  poll_facts(ports_.system != nullptr ? ports_.system->now_ms() : 0, true);
+
+  notesui::Snapshot seed;
+  std::snprintf(seed.firmware, sizeof seed.firmware, "%s",
                 ports_.firmware != nullptr ? ports_.firmware : "");
-  std::snprintf(snap_.device, sizeof snap_.device, "%s", device_name_.c_str());
-  snap_.note_max_s = ports_.config != nullptr ? static_cast<uint32_t>(ports_.config->note_max_s()) : 300;
+  std::snprintf(seed.device, sizeof seed.device, "%s", device_name_.c_str());
+  seed.note_max_s = ports_.config != nullptr ? static_cast<uint32_t>(ports_.config->note_max_s()) : 300;
+  seed.wifi_up = facts_.wifi_up;
+  seed.clock_set = facts_.clock_set;
+  seed.card_free_bytes = facts_.card_free_bytes;
+  seed.battery_pct = facts_.battery_pct;
+  seed.external = facts_.external;
 
-  // The card was mounted by app_main; ensure() is the check that the three
-  // folders exist, and its answer is Home's NO CARD.
-  card_ready_ = ports_.store != nullptr && ports_.store->ensure();
-  snap_.card = card_ready_;
-  load_counts();
-  load_window();
-  refresh_power();
-
-  app_.begin(snap_);
+  state_.begin(seed, ports_.store);
+  begun_ = true;
   first_frame_ = true;
   render(notesui::Refresh::Full);
-  ESP_LOGI(TAG, "screen %s, %u notes (%u to send)", screen_name(app_.screen()), snap_.note_count,
-           snap_.count_pending);
+  ESP_LOGI(TAG, "screen %s, %u notes (%u to send), card %s, clock %s, wifi %s", screen_name(state_.screen()),
+           static_cast<unsigned>(state_.snapshot().note_count),
+           static_cast<unsigned>(state_.snapshot().count_pending),
+           state_.snapshot().card ? "up" : "none", facts_.clock_set ? "set" : "unset",
+           facts_.wifi_up ? "up" : "down");
 }
 
-void NotesUi::refresh_power() {
-  if (ports_.power == nullptr) return;
-  const auto status = ports_.power->read();
-  if (!status) return;
-  snap_.battery_pct = status->battery_percent ? static_cast<int8_t>(*status->battery_percent) : -1;
-  snap_.external = status->external_power.value_or(false);
-  battery_mv_ = status->battery_mv ? static_cast<int>(*status->battery_mv) : 0;
-  // The low-power rule (§4.2): 10 % or less, and not on a cable.
-  snap_.low_power = snap_.battery_pct >= 0 && snap_.battery_pct <= 10 && !snap_.external;
-}
-
-void NotesUi::load_counts() {
-  if (ports_.store == nullptr) {
-    snap_.card = false;
-    snap_.count_pending = snap_.count_sent = snap_.count_failed = 0;
-    snap_.note_count = 0;
-    snap_.stub_first = snap_.stub_rows = 0;
-    return;
-  }
-  card_ready_ = cache_.reload(*ports_.store);
-  snap_.card = card_ready_;
-  snap_.count_pending = cache_.pending();
-  snap_.count_sent = cache_.sent();
-  snap_.count_failed = cache_.failed();
-  snap_.note_count = static_cast<uint16_t>(cache_.note_count());
-  snap_.stub_first = snap_.stub_rows = 0;  // the window is stale by construction
-  if (ports_.radio != nullptr) ports_.radio->set_pending(snap_.count_pending);
-}
-
-void NotesUi::load_window() {
-  // The app owns this answer: it is the layer that decides which stubs a frame
-  // reads, so the caller cannot fill a window the renderer does not use.
-  const notesui::Window want = app_.window();
-  const uint8_t first = want.first;
-  const uint8_t rows = want.rows;
-  // Only a window that moved costs card reads (§15.4).
-  if (first == snap_.stub_first && rows == snap_.stub_rows) return;
-  if (ports_.store == nullptr || !card_ready_) {
-    snap_.stub_first = snap_.stub_rows = 0;
-    return;
-  }
-  cache_.fill(*ports_.store, snap_, first, rows);
-}
-
-void NotesUi::publish(uint16_t dirty) {
-  // Link and clock are cheap and always read here; they are what the band shows.
-  snap_.wifi_up = ports_.wifi != nullptr && !ports_.wifi->current().empty();
+notesui::Facts NotesUi::read_facts() const {
+  // The slow facts are carried over: only poll_facts(slow) re-reads them.
+  notesui::Facts f = facts_;
+  f.wifi_up = ports_.wifi != nullptr && !ports_.wifi->current().empty();
   hg::WallTime wall;
-  snap_.clock_set = ports_.system != nullptr && ports_.system->wall_time(wall);
-  snap_.upload_active = upload_active_;
-  snap_.upload_failed = uploaded_failed_;
-  snap_.upload_done = upload_done_;
-  snap_.upload_total = upload_total_;
-  snap_.play_pos_s = play_pos_s_.load();
-  load_counts();
-  load_window();
-  const notesui::Outcome out = app_.publish(snap_, dirty);
-  apply(out, ports_.system != nullptr ? ports_.system->now_ms() : 0);
+  f.clock_set = ports_.system != nullptr && ports_.system->wall_time(wall);
+  return f;
 }
 
-void NotesUi::apply(const notesui::Outcome& outcome, uint32_t now_ms) {
-  // The screen may have just moved: a cursor step rotates the list's window and
-  // opening a note changes the index, so the stubs this frame will read must be
-  // on hand *before* it draws. This is an event path, not the draw path — the
-  // renderer itself still reads no card (§15.4), and the window only costs a
-  // read when it actually moved.
-  load_window();
-  // The runtime owns the work that is not a screen: recording, the sync window
-  // and the shutdown. When it takes an effect the screens do not repeat it.
-  if (hook_ && outcome.effect != notesui::Effect::None && hook_(outcome.effect, outcome.note)) {
-    if (outcome.draw) render(outcome.refresh);
-    return;
-  }
-  switch (outcome.effect) {
-    case notesui::Effect::None:
-      break;
-    case notesui::Effect::PowerOff:
-      stop_playback();
-      if (capture_.active()) finish_recording(false);
-      ESP_LOGI(TAG, "PWR: powering off");
-      if (ports_.power != nullptr) ports_.power->power_off();
-      break;
-    case notesui::Effect::BeginRecording:
-      start_recording(now_ms);
-      break;
-    case notesui::Effect::EndRecording:
-      finish_recording(true);
-      break;
-    case notesui::Effect::DiscardRecording:
-      finish_recording(false);
-      break;
-    case notesui::Effect::StartPlayback:
-      start_playback(outcome.note);
-      break;
-    case notesui::Effect::StopPlayback:
-      stop_playback();
-      break;
-    case notesui::Effect::SyncNow:
-      sync_requested_ = true;
-      break;
-    case notesui::Effect::OpenPhoneWindow:
-      if (ports_.radio != nullptr) ports_.radio->open_pairing();
-      break;
-    case notesui::Effect::OpenWifiSetup:
-      if (ports_.wifi != nullptr) ports_.wifi->start_setup();
-      break;
-    case notesui::Effect::PairingAllow:
-      if (ports_.radio != nullptr) ports_.radio->answer_pairing(true);
-      apply(app_.pairing_answer(true), now_ms);
-      return;  // pairing_answer already drew
-    case notesui::Effect::PairingRefuse:
-      if (ports_.radio != nullptr) ports_.radio->answer_pairing(false);
-      apply(app_.pairing_answer(false), now_ms);
-      return;
-    case notesui::Effect::DeleteNote: {
-      const std::string* found_id = cache_.id_at(outcome.note);
-      if (ports_.store == nullptr || found_id == nullptr) break;
-      const std::string id = *found_id;
-      notes::NoteState found = notes::NoteState::Pending;
-      if (ports_.store->erase(id, &found)) {
-        ESP_LOGI(TAG, "deleted %s", id.c_str());
-        // The frame about to be drawn is the list without this row: the counts
-        // and the window are re-read here, on this event, not in the draw path.
-        load_counts();
-        load_window();
-      } else {
-        ESP_LOGW(TAG, "could not delete %s", id.c_str());
+void NotesUi::poll_facts(uint32_t now_ms, bool slow) {
+  if (slow && begun_) {
+    if (ports_.power != nullptr) {
+      const auto status = ports_.power->read();
+      if (status) {
+        facts_.battery_pct = status->battery_percent ? static_cast<int8_t>(*status->battery_percent) : -1;
+        facts_.external = status->external_power.value_or(false);
       }
-      break;
     }
+    uint64_t total = 0, free_bytes = 0;
+    // About's card line: the mount is the console `sd`'s source too, so the two
+    // answers cannot disagree (QA D3 - it read 0.0G because nothing wrote it).
+    if (sd_mount::space(&total, &free_bytes)) facts_.card_free_bytes = free_bytes;
   }
-  if (outcome.draw) render(outcome.refresh);
+  facts_ = read_facts();
+  if (!begun_) return;
+  const notesui::Outcome out = state_.set_facts(facts_, now_ms);
+  apply(out, now_ms);
 }
 
 void NotesUi::render(notesui::Refresh refresh) {
@@ -248,7 +139,7 @@ void NotesUi::render(notesui::Refresh refresh) {
   const hg::DisplayInfo info = ports_.display->info();
   if (info.width == 0 || info.height == 0) return;
   hg::Canvas canvas(fb, info.width, info.height, info.swap_bytes);
-  const notesui::ScreenDraw frame = app_.frame();
+  const notesui::ScreenDraw frame = state_.app().frame();
   notesui::draw(canvas, frame);
 
   // Entering or leaving a screen is always full; within a screen the driver's
@@ -262,12 +153,112 @@ void NotesUi::render(notesui::Refresh refresh) {
   ports_.display->flush(0, info.height);
 }
 
+void NotesUi::draw(const notesui::Outcome& outcome, uint32_t now_ms) {
+  if (publish_pending_) {
+    // Something the effect did moved the card (a note committed, a delete, the
+    // card lost). The snapshot behind this frame is stale, so publish instead of
+    // drawing it and then drawing the truth a moment later.
+    publish_pending_ = false;
+    const uint16_t dirty = static_cast<uint16_t>(pending_dirty_ | notesui::DirtyQueue | notesui::DirtyList);
+    pending_dirty_ = notesui::DirtyNone;
+    const notesui::Outcome after = state_.publish(now_ms, dirty, outcome.refresh);
+    if (after.draw) render(after.refresh);
+    return;
+  }
+  if (outcome.draw) render(outcome.refresh);
+}
+
+void NotesUi::publish(uint16_t dirty, notesui::Refresh at_least) {
+  if (!begun_) return;
+  const uint32_t now = ports_.system != nullptr ? ports_.system->now_ms() : esp_timer_get_time() / 1000;
+  const notesui::Outcome out = state_.publish(now, dirty, at_least);
+  apply(out, now);
+}
+
+void NotesUi::apply(const notesui::Outcome& outcome, uint32_t now_ms) {
+  const InApply guard(in_apply_);
+  // The screen may have just moved: a cursor step rotates the list's window and
+  // opening a note changes the index, so the stubs this frame will read must be
+  // on hand *before* it draws. UiState does that inside each entry point; the
+  // draw path itself still reads no card (§15.4).
+  if (!begun_) return;
+  // The runtime owns the work that is not a screen: recording, the sync window
+  // and the shutdown. When it takes an effect the screens do not repeat it.
+  if (hook_ && outcome.effect != notesui::Effect::None && hook_(outcome.effect, outcome.note)) {
+    draw(outcome, now_ms);
+    return;
+  }
+  switch (outcome.effect) {
+    case notesui::Effect::None:
+      break;
+    case notesui::Effect::PowerOff:
+      stop_playback();
+      ESP_LOGI(TAG, "PWR: powering off");
+      if (ports_.power != nullptr) ports_.power->power_off();
+      break;
+    case notesui::Effect::BeginRecording:
+    case notesui::Effect::EndRecording:
+    case notesui::Effect::DiscardRecording:
+      // The runtime declined (no microphone, no card, or a note already in
+      // flight). This class used to record on its own here, which made an
+      // unqueued note nobody counted (QA D6). Leave the recording screen instead.
+      ESP_LOGW(TAG, "the runtime declined to record: nothing is being captured");
+      if (state_.screen() == notesui::Screen::Recording) {
+        apply(state_.press(notesui::Key::BootTap, now_ms), now_ms);
+        return;
+      }
+      break;
+    case notesui::Effect::StartPlayback:
+      start_playback(outcome.note);
+      break;
+    case notesui::Effect::StopPlayback:
+      stop_playback();
+      break;
+    case notesui::Effect::SyncNow:
+      // run_effect() hands this to Runtime::sync_now; without a hook there is no
+      // window to open.
+      ESP_LOGW(TAG, "no runtime to sync with");
+      break;
+    case notesui::Effect::OpenPhoneWindow:
+      if (ports_.radio != nullptr) ports_.radio->open_pairing();
+      break;
+    case notesui::Effect::OpenWifiSetup:
+      if (ports_.wifi != nullptr) ports_.wifi->start_setup();
+      break;
+    case notesui::Effect::PairingAllow:
+      if (ports_.radio != nullptr) ports_.radio->answer_pairing(true);
+      apply(state_.pairing_answer(true), now_ms);
+      return;  // pairing_answer already drew
+    case notesui::Effect::PairingRefuse:
+      if (ports_.radio != nullptr) ports_.radio->answer_pairing(false);
+      apply(state_.pairing_answer(false), now_ms);
+      return;
+    case notesui::Effect::DeleteNote: {
+      const std::string* found_id = state_.cache().id_at(outcome.note);
+      if (ports_.store == nullptr || found_id == nullptr) break;
+      const std::string id = *found_id;
+      notes::NoteState found = notes::NoteState::Pending;
+      if (ports_.store->erase(id, &found)) {
+        ESP_LOGI(TAG, "deleted %s", id.c_str());
+        // The frame about to be drawn is the list without this row: the counts
+        // and the window are re-read on this event, not in the draw path.
+        publish_pending_ = true;
+        pending_dirty_ = static_cast<uint16_t>(pending_dirty_ | notesui::DirtyQueue | notesui::DirtyList);
+      } else {
+        ESP_LOGW(TAG, "could not delete %s", id.c_str());
+      }
+      break;
+    }
+  }
+  draw(outcome, now_ms);
+}
+
 void NotesUi::press(notesui::Key key) {
   const uint32_t now = ports_.system != nullptr ? ports_.system->now_ms() : esp_timer_get_time() / 1000;
-  refresh_power();  // one ADC read per press: the band is a fact, not a tick
-  const notesui::Outcome out = app_.press(key, now);
+  poll_facts(now, false);  // the band is a fact, not a tick
+  const notesui::Outcome out = state_.press(key, now);
   apply(out, now);
-  ESP_LOGI(TAG, "key %u -> screen %s", static_cast<unsigned>(key), screen_name(app_.screen()));
+  ESP_LOGI(TAG, "key %u -> screen %s", static_cast<unsigned>(key), screen_name(state_.screen()));
 }
 
 void NotesUi::tick(uint32_t now_ms) {
@@ -276,107 +267,33 @@ void NotesUi::tick(uint32_t now_ms) {
     // all the app has to do is draw the same screen again (§15.2).
     render(notesui::Refresh::Full);
   }
-  static uint32_t last_power_ms = 0;
-  if (now_ms - last_power_ms >= kPowerPollMs) {
-    last_power_ms = now_ms;
-    refresh_power();
+
+  const uint32_t since_facts = now_ms - last_facts_ms_;
+  if (last_facts_ms_ == 0 || since_facts >= kFactsMs) {
+    const bool slow = last_slow_facts_ms_ == 0 || now_ms - last_slow_facts_ms_ >= kSlowFactsMs;
+    last_facts_ms_ = now_ms == 0 ? 1 : now_ms;
+    if (slow) last_slow_facts_ms_ = last_facts_ms_;
+    poll_facts(now_ms, slow);
   }
 
   // Playback publishes its position; the screen draws at 5 s (§9.2).
   if (play_state_.load() == Play::Running) {
     const uint32_t pos = play_pos_s_.load();
-    if (pos != snap_.play_pos_s) {
-      snap_.play_pos_s = pos;
-      const notesui::Outcome out = app_.tick(now_ms);
-      apply(out, now_ms);
+    if (pos != state_.snapshot().play_pos_s) {
+      state_.set_play(pos, 0);
+      apply(state_.tick(now_ms), now_ms);
     }
     if (play_done_.exchange(false)) {
-      apply(app_.playback_finished(), now_ms);
+      apply(state_.playback_finished(), now_ms);
       stop_playback();
     }
   } else {
-    const notesui::Outcome out = app_.tick(now_ms);
-    apply(out, now_ms);
+    apply(state_.tick(now_ms), now_ms);
   }
-}
-
-void NotesUi::start_recording(uint32_t now_ms) {
-  if (ports_.store == nullptr || ports_.mic == nullptr || ports_.system == nullptr) {
-    ESP_LOGW(TAG, "no card or no microphone: nothing to record");
-    return;
-  }
-  std::string error;
-  bool started = false;
-  for (int tries = 0; tries < 5 && !started; ++tries) {
-    ++seq_;
-    note_id_ = notes::make_note_id(device_id_, std::time(nullptr), seq_);
-    started = capture_.start(*ports_.store, note_id_, snap_.note_max_s, error);
-  }
-  if (!started) {
-    card_ready_ = false;
-    sd_mount::release();
-    ESP_LOGW(TAG, "cannot record: %s", error.c_str());
-    return;
-  }
-  if (!writer_ready_) {
-    writer_ready_ = writer_.begin();
-    writer_.bind(&capture_);
-  }
-  if (ports_.storage != nullptr) ports_.storage->set("note_seq", std::to_string(seq_));
-  if (!ports_.mic->start(notes::kSampleRate)) {
-    ESP_LOGW(TAG, "the microphone did not start");
-    finish_recording(false);
-    return;
-  }
-  ESP_LOGI(TAG, "recording %s (cap %u s)", note_id_.c_str(), static_cast<unsigned>(snap_.note_max_s));
-}
-
-void NotesUi::on_mic_samples(const int16_t* samples, size_t count) {
-  if (!capture_.active() || samples == nullptr) return;
-  capture_.feed(samples, count);
-  if (writer_ready_) writer_.push(samples, count);
-}
-
-void NotesUi::finish_recording(bool keep) {
-  if (ports_.mic != nullptr) ports_.mic->stop();
-  if (writer_ready_) writer_.drain(30000);
-  if (!capture_.active()) return;
-  if (!keep) {
-    writer_.discard();
-    capture_.abort();
-    ESP_LOGI(TAG, "note discarded");
-    return;
-  }
-  notes::Meta meta;
-  meta.note_id = note_id_;
-  meta.device_id = device_id_;
-  meta.device_name = device_name_;
-  meta.firmware = ports_.firmware != nullptr ? ports_.firmware : "";
-  meta.created_ms = static_cast<int64_t>(std::time(nullptr)) * 1000;
-  meta.recorded_at = notes::iso8601_utc(std::time(nullptr));
-  meta.battery_mv = battery_mv_;
-
-  std::string error;
-  if (!capture_.finish(meta, error)) {
-    card_ready_ = false;
-    sd_mount::release();
-    ESP_LOGW(TAG, "note not saved: %s", error.c_str());
-    return;
-  }
-  meta.idempotency_key = meta.note_id;
-  if (!ports_.store->write_meta(meta.note_id, meta, error)) {
-    ESP_LOGW(TAG, "note.json not written: %s", error.c_str());
-    return;
-  }
-  ESP_LOGI(TAG, "note %s kept: %u s, %u bytes", meta.note_id.c_str(), meta.duration_s,
-           static_cast<unsigned>(meta.bytes));
-  if (ports_.radio != nullptr) ports_.radio->note_saved();
-  load_counts();
-  publish(notesui::DirtyQueue | notesui::DirtyList);
 }
 
 void NotesUi::start_playback(uint16_t index) {
-  const std::string* found = cache_.id_at(index);
+  const std::string* found = state_.cache().id_at(index);
   if (ports_.speaker == nullptr || ports_.store == nullptr || found == nullptr) return;
   if (play_task_ != nullptr) return;  // one at a time
   const std::string& id = *found;
@@ -404,7 +321,9 @@ void NotesUi::start_playback(uint16_t index) {
   play_stop_.store(false);
   play_done_.store(false);
   play_state_ = Play::Running;
-  snap_.play_total_s = info.duration_s;
+  // The note's own length, not the stub's: a truncated WAV would otherwise
+  // promise more than it has.
+  state_.set_play(0, info.duration_s);
   if (xTaskCreate(&NotesUi::play_task, "note-play", 4096, this, 4, &play_task_) != pdPASS) {
     play_task_ = nullptr;
     play_state_ = Play::Idle;
@@ -445,42 +364,47 @@ void NotesUi::stop_playback() {
   play_state_ = Play::Stopping;
 }
 
-void NotesUi::on_pairing_ask() { apply(app_.pairing_ask(0), ports_.system ? ports_.system->now_ms() : 0); }
+void NotesUi::on_pairing_ask() { apply(state_.pairing_ask(0), ports_.system ? ports_.system->now_ms() : 0); }
 
 void NotesUi::on_pairing_passkey(uint32_t passkey) {
   // The passkey replaces the dashes on the ask; nothing else about the screen
   // moves, so this is a partial redraw.
-  const notesui::Outcome out = app_.pairing_ask(passkey);
-  apply(out, ports_.system ? ports_.system->now_ms() : 0);
+  const uint32_t now = ports_.system ? ports_.system->now_ms() : 0;
+  apply(state_.pairing_ask(passkey), now);
+}
+
+void NotesUi::on_runtime_change() {
+  if (!begun_) return;
+  if (in_apply_) {
+    // An effect is mid-flight: the runtime moved the card while the screen is
+    // still deciding its frame. draw() publishes it once the effect returns.
+    publish_pending_ = true;
+    pending_dirty_ = static_cast<uint16_t>(pending_dirty_ | notesui::DirtyQueue | notesui::DirtyList);
+    return;
+  }
+  publish(static_cast<uint16_t>(notesui::DirtyQueue | notesui::DirtyList | notesui::DirtyRecording));
 }
 
 void NotesUi::on_upload(bool active, uint8_t done, uint8_t total) {
-  upload_active_ = active;
-  upload_done_ = done;
-  upload_total_ = total;
-  if (active) uploaded_failed_ = false;
-  publish(notesui::DirtyUpload | notesui::DirtyQueue);
+  if (!begun_) return;
+  state_.set_upload(active, done, total);
+  publish(static_cast<uint16_t>(notesui::DirtyUpload | notesui::DirtyQueue));
 }
 
 void NotesUi::on_upload_failed() {
-  upload_active_ = false;
-  uploaded_failed_ = true;
+  if (!begun_) return;
+  state_.set_upload_failed();
   publish(notesui::DirtyUpload);
-}
-
-bool NotesUi::take_sync_request() {
-  const bool asked = sync_requested_;
-  sync_requested_ = false;
-  return asked;
 }
 
 std::string NotesUi::console(std::string_view line) {
   if (line == "ui") {
-    char out[160];
-    std::snprintf(out, sizeof out, "screen %s, %u notes, %u to send, %u failed, card %s, wifi %s",
-                  screen_name(app_.screen()), static_cast<unsigned>(snap_.note_count),
-                  static_cast<unsigned>(snap_.count_pending), static_cast<unsigned>(snap_.count_failed),
-                  snap_.card ? "up" : "none", snap_.wifi_up ? "up" : "down");
+    const notesui::Snapshot& snap = state_.snapshot();
+    char out[200];
+    std::snprintf(out, sizeof out, "screen %s, %u notes, %u to send, %u failed, card %s, wifi %s, clock %s",
+                  screen_name(state_.screen()), static_cast<unsigned>(snap.note_count),
+                  static_cast<unsigned>(snap.count_pending), static_cast<unsigned>(snap.count_failed),
+                  snap.card ? "up" : "none", snap.wifi_up ? "up" : "down", snap.clock_set ? "set" : "unset");
     return out;
   }
   if (line == "ui home") {

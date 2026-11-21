@@ -4,14 +4,15 @@
 //
 // It carries the hardware and nothing above it: the board table, the e-paper
 // panel, the card, the codec, the console, the clock and the radio. There is no
-// hg::App here, no core UI, no i18n, no faces, no Opus and no WebSocket, so the
-// notes image holds no symbol from any of them.
+// hg::App here, no core UI, no i18n, no faces, no Opus and no WebSocket, so no
+// symbol from any of those is linked. What it does carry from the core is the
+// canvas and the font the screens draw through (hg::Canvas in ui_render.cpp),
+// which is the renderer's, not the Hermes UI's.
 //
 // What this file is: the loop. It owns the board's pieces and the two keys; the
 // non-UI work (recording, the queue, the radio's duty cycle, power) is
-// notes_app/runtime.cpp, and the screens (notes_app/ui_keys.*) answer the keys
-// with their two-key map. Drawing the real status face is the screens' card;
-// until then the panel shows the plain face below and `screen` reads it back.
+// notes_app/runtime.cpp, and the screens (notes_app/ui_app.*, ui_state.*, drawn
+// by ui_render.cpp over ui_device.cpp's ports) answer the keys.
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 
 #include <cstdio>
@@ -452,7 +453,6 @@ extern "C" void app_main(void) {
   // the runtime's, which is what run_effect() hands it.
   hgp::NotesUi::Ports ui_ports;
   ui_ports.display = &g_epd;
-  ui_ports.mic = &g_codec_mic;
   ui_ports.speaker = &g_codec_speaker;
   ui_ports.power = &g_latch;
   ui_ports.radio = &g_radio;
@@ -465,6 +465,16 @@ extern "C" void app_main(void) {
   ui_ports.firmware = esp_app_get_description()->version;
   g_ui.set_effect_hook(run_effect);
   g_ui.begin(ui_ports);
+
+  // The runtime's other half reaches the glass through these (QA D1): a note
+  // committed after power-on, a delete, an upload step and a lost card all
+  // publish into the screens' snapshot instead of waiting for the next reboot.
+  // Set after begin(), so the first frame is the screens' own read of the card.
+  hgn::Runtime::UiHooks ui_hooks;
+  ui_hooks.changed = [] { g_ui.on_runtime_change(); };
+  ui_hooks.upload = [](bool active, uint8_t done, uint8_t total) { g_ui.on_upload(active, done, total); };
+  ui_hooks.upload_failed = [] { g_ui.on_upload_failed(); };
+  g_runtime.set_ui_hooks(ui_hooks);
 
   hgp::console::begin();
   ESP_LOGI(TAG, "notes app ready");

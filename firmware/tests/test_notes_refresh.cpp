@@ -1,0 +1,222 @@
+// The screens' refresh policy, driven without a board (QA D1).
+//
+// test_notes_screens.cpp feeds hand-built Snapshots straight into ScreenApp: it
+// checks what the glass says, never when the glass is told to say it. That is
+// exactly the layer the QA pass found broken - the snapshot was rebuilt only
+// from callbacks nothing called, so a note recorded after power-on never reached
+// the glass and Home's band and hero froze at the boot frame. These cases drive
+// notesui::UiState - the adapter's policy - against a real card in a temp
+// directory, so the event-on-the-card -> new-frame rule is a test.
+#include "check.hpp"
+
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <string>
+
+#include "notes/notes_capture.hpp"
+#include "notes/notes_store.hpp"
+#include "notes_app/strings.hpp"
+#include "notes_app/ui_state.hpp"
+#include "notes_app/ui_view.hpp"
+
+namespace notes = hgp::notes;
+using namespace hgp::notesui;
+using hgp::notes::Meta;
+using hgp::notes::NoteState;
+using hgp::notes::Store;
+
+namespace {
+
+// The stamps are local time; a fixed TZ keeps the strings identical on every
+// host (the device gets its TZ from port_time).
+struct FixedZone {
+  FixedZone() {
+    setenv("TZ", "UTC", 1);
+    tzset();
+  }
+} g_fixed_zone;
+
+struct TempDir {
+  std::string path;
+  TempDir() {
+    char tmpl[] = "/tmp/hg-ui-refresh-XXXXXX";
+    const char* made = mkdtemp(tmpl);
+    path = made ? made : "/tmp/hg-ui-refresh-fallback";
+  }
+  ~TempDir() {
+    const std::string cmd = "rm -rf '" + path + "'";
+    if (std::system(cmd.c_str()) != 0) return;
+  }
+};
+
+// A note on the card, the way the runtime commits one: the folder and the
+// note.json that makes it exist (no audio: the list and the counts do not read
+// it).
+bool make_note(Store& store, const std::string& id, const char* recorded_at, uint32_t seconds = 2,
+               NoteState where = NoteState::Pending) {
+  std::string error;
+  if (!store.ensure()) return false;
+  if (!store.create_note(id, error)) return false;
+  Meta meta;
+  meta.note_id = id;
+  meta.device_id = "hg-test";
+  meta.device_name = "test";
+  meta.firmware = "0.0.0";
+  meta.recorded_at = recorded_at;
+  meta.duration_s = seconds;
+  meta.bytes = seconds * notes::kSampleRate * 2;
+  meta.idempotency_key = id;
+  if (!store.write_meta(id, meta, error)) return false;
+  return where == NoteState::Pending || store.move(id, NoteState::Pending, where);
+}
+
+// A seed the way ui_device.cpp builds one: the strings and the cap, no counts.
+Snapshot seed_for(const char* firmware = "0.7.1", bool wifi = false, bool clock = true) {
+  Snapshot seed;
+  std::snprintf(seed.firmware, sizeof seed.firmware, "%s", firmware);
+  std::snprintf(seed.device, sizeof seed.device, "%s", "notes-test");
+  seed.note_max_s = 300;
+  seed.wifi_up = wifi;
+  seed.clock_set = clock;
+  return seed;
+}
+
+}  // namespace
+
+TEST("refresh: a note committed after boot reaches the next frame (QA D1)") {
+  TempDir dir;
+  Store store(dir.path);
+  UiState ui;
+  ui.begin(seed_for(), &store);
+  CHECK(ui.snapshot().note_count == 0);
+  CHECK(ui.snapshot().card);
+  CHECK(std::string(build_home(ui.snapshot()).sub) == sub::kBootToRecord);
+
+  // The runtime commits a note behind the adapter's back, then says so - the
+  // publish the QA pass found missing entirely.
+  CHECK(make_note(store, "hg-69ffb4e9-20261121T140203-0001", "2026-11-21T14:02:03Z"));
+  const Outcome out = ui.publish(1000, static_cast<uint16_t>(DirtyQueue | DirtyList));
+  CHECK(out.draw);
+  CHECK(ui.snapshot().note_count == 1);
+  CHECK(ui.snapshot().count_pending == 1);
+
+  const HomeView view = build_home(ui.snapshot());
+  CHECK(std::string(view.band) == "1 TO SEND");
+  CHECK(std::string(view.hero) == "OFFLINE");  // one to send, no association
+  CHECK(std::string(view.sub) == "LAST 14:02");
+}
+
+TEST("refresh: the boot frame knows the card it booted with (QA D2)") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(make_note(store, "hg-69ffb4e9-20261121T140203-0002", "2026-11-21T14:02:03Z"));
+
+  UiState ui;
+  ui.begin(seed_for(), &store);
+  // begin() fills the window after the machine has the counts, so the very first
+  // frame carries the newest note - not "BOOT TO RECORD" over 58 sent notes.
+  const HomeView view = build_home(ui.snapshot());
+  CHECK(ui.snapshot().note_count == 1);
+  CHECK(std::string(view.sub) == "LAST 14:02");
+  CHECK(std::string(view.band) == "1 TO SEND");
+}
+
+TEST("refresh: a key press reads the card before the screen machine acts (QA D1)") {
+  TempDir dir;
+  Store store(dir.path);
+  UiState ui;
+  ui.begin(seed_for(), &store);
+  CHECK(ui.app().state().note_count == 0);
+
+  CHECK(make_note(store, "hg-69ffb4e9-20261121T140203-0003", "2026-11-21T14:02:03Z"));
+  // No publish: the press itself has to see the note, or the list opens empty.
+  ui.press(Key::BootHold, 2000);  // Home -> menu
+  CHECK(ui.screen() == Screen::Menu);
+  ui.press(Key::Power, 3000);  // the Notes row: PWR selects
+  CHECK(ui.screen() == Screen::NoteList);
+  CHECK(ui.app().state().note_count == 1);
+  CHECK(ui.snapshot().note_count == 1);
+
+  const Window window = ui.window();
+  CHECK(window.first == 0);
+  CHECK(window.rows == 1);
+  const ListView list = build_list(ui.snapshot(), 0);
+  CHECK(list.count == 1);
+  CHECK(list.rows == 1);
+  CHECK(std::string(list.row[0].when) == "21 Nov 14:02");
+}
+
+TEST("refresh: an upload's progress and its failure reach the glass") {
+  TempDir dir;
+  Store store(dir.path);
+  UiState ui;
+  ui.begin(seed_for(), &store);
+  CHECK(make_note(store, "hg-69ffb4e9-20261121T140203-0004", "2026-11-21T14:02:03Z"));
+  ui.publish(1000, static_cast<uint16_t>(DirtyQueue | DirtyList));
+
+  ui.set_upload(true, 1, 3);
+  const Outcome running = ui.publish(2000, DirtyUpload);
+  CHECK(running.draw);
+  HomeView view = build_home(ui.snapshot());
+  CHECK(ui.snapshot().upload_active);
+  CHECK(std::string(view.hero) == home::kUploading);
+  CHECK(std::string(view.sub) == "1 OF 3 SENT");
+  CHECK(view.bar_pct == 33);
+
+  ui.set_upload_failed();
+  const Outcome failed = ui.publish(3000, DirtyUpload);
+  CHECK(failed.draw);
+  view = build_home(ui.snapshot());
+  CHECK(ui.snapshot().upload_failed);
+  CHECK(!ui.snapshot().upload_active);
+  CHECK(std::string(view.hero) == home::kNoSync);
+}
+
+TEST("refresh: the link, the clock and the card's space are facts, not once-at-boot") {
+  TempDir dir;
+  Store store(dir.path);
+  UiState ui;
+  ui.begin(seed_for("0.7.1", false, true), &store);
+
+  Facts facts;
+  facts.card_free_bytes = 62900000000ull;  // 62.9 GB, the desk card's answer
+  const Outcome out = ui.set_facts(facts, 1000);
+  CHECK(out.draw);
+  CHECK(ui.snapshot().card_free_bytes == 62900000000ull);
+  CHECK(std::string(build_about(ui.snapshot()).value[3]) == "62.9G");  // QA D3
+
+  Facts offline = facts;
+  offline.wifi_up = true;
+  CHECK(ui.set_facts(offline, 2000).draw);  // the link came up: the band moves
+  CHECK(ui.snapshot().wifi_up);
+
+  // The same facts again cost no frame.
+  CHECK(!ui.set_facts(offline, 3000).draw);
+}
+
+TEST("refresh: the list says when it is not the whole card (QA D7)") {
+  TempDir dir;
+  Store store(dir.path);
+  // One more note than the list keeps: the count line has to admit the window.
+  for (unsigned i = 0; i <= kMaxListRows; ++i) {
+    char id[64];
+    std::snprintf(id, sizeof id, "hg-69ffb4e9-20261121T140203-%04u", i);
+    CHECK(make_note(store, id, "2026-11-21T14:02:03Z", 2, NoteState::Sent));
+  }
+  UiState ui;
+  ui.begin(seed_for(), &store);
+  CHECK(ui.snapshot().count_sent == kMaxListRows + 1);  // the true total
+  CHECK(ui.snapshot().count_pending == 0);
+  CHECK(ui.snapshot().note_count == kMaxListRows);          // what the list holds
+  CHECK(ui.snapshot().list_truncated);
+  CHECK(ui.snapshot().notes_total() == kMaxListRows + 1);
+
+  const ListView list = build_list(ui.snapshot(), 0);
+  CHECK(list.key_line == nullptr);
+  CHECK(std::string(list.key_count) == "128+");
+}

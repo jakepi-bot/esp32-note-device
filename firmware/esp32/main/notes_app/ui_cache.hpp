@@ -32,6 +32,10 @@ class Cache {
   uint32_t sent() const { return sent_; }
   uint32_t failed() const { return failed_; }
   uint32_t note_count() const { return static_cast<uint32_t>(ids_.size()); }
+  // True when the card holds more notes than the list keeps: the list is the
+  // newest kMaxListRows and the screens have to say so (QA D7 - it used to
+  // truncate silently).
+  bool truncated() const { return truncated_; }
   const std::vector<std::string>& ids() const { return ids_; }
   const std::string* id_at(uint16_t index) const {
     return index < ids_.size() ? &ids_[index] : nullptr;
@@ -44,6 +48,7 @@ class Cache {
 
  private:
   bool card_ = false;
+  bool truncated_ = false;
   uint32_t pending_ = 0, sent_ = 0, failed_ = 0;
   std::vector<std::string> ids_;
 };

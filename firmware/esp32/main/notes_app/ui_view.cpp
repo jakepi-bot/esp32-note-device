@@ -219,6 +219,10 @@ ListView build_list(const Snapshot& snap, uint16_t selected) {
     view.key_line = list::kFailed;
   } else if (snap.count_pending > 0) {
     view.key_line = list::kToSend;
+  } else if (snap.list_truncated) {
+    // The list is the newest kMaxListRows of a bigger card: the title line says
+    // so instead of printing a count that is not the card's (QA D7).
+    std::snprintf(view.key_count, sizeof view.key_count, "%u+", static_cast<unsigned>(snap.note_count));
   } else {
     std::snprintf(view.key_count, sizeof view.key_count, "%u", static_cast<unsigned>(snap.note_count));
   }

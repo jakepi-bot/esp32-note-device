@@ -94,8 +94,8 @@ void begin() {
   // console_line() (notes_app/main.cpp) answers these directly, and without a
   // registration esp_console answers "Unrecognized command" before the app ever
   // sees the line: the boot face's battery, clock and link could not be read
-  // back from a host at all.
-  for (const char* name : {"about", "battery", "clock", "radio", "sd", "keys"}) {
+  // back from a host at all. `ui` is the screens' own report (`ui`, `ui home`).
+  for (const char* name : {"about", "battery", "clock", "radio", "sd", "keys", "ui"}) {
     esp_console_cmd_t cmd = {};
     cmd.command = name;
     cmd.help = "Notes app status (see: notes status)";

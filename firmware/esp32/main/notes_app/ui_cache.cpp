@@ -38,6 +38,7 @@ void read_stub(notes::Store& store, const std::string& id, NoteStub& stub) {
 bool Cache::reload(notes::Store& store) {
   card_ = store.ensure();
   pending_ = sent_ = failed_ = 0;
+  truncated_ = false;
   ids_.clear();
   if (!card_) return false;
 
@@ -53,8 +54,13 @@ bool Cache::reload(notes::Store& store) {
   ids_.erase(std::unique(ids_.begin(), ids_.end()), ids_.end());
   std::reverse(ids_.begin(), ids_.end());  // newest first
   // The screens hold one page plus the whole cursor's worth; a card pruned at
-  // 500 sent notes never shows more than the newest few hundred.
-  if (ids_.size() > kMaxListRows) ids_.resize(kMaxListRows);
+  // 500 sent notes never shows more than the newest few hundred. The list is
+  // bounded, and says so on its title line when it is (QA D7): the totals in
+  // notes_total() stay true either way.
+  if (ids_.size() > kMaxListRows) {
+    ids_.resize(kMaxListRows);
+    truncated_ = true;
+  }
   return true;
 }
 

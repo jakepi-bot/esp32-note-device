@@ -18,6 +18,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -94,6 +95,18 @@ class Runtime {
   // read the identity from: the device then has nothing to upload with.
   bool begin(const Io& io);
 
+  // What the glass may need to know. The runtime owns the recording, the queue,
+  // the card and the upload; the screens cache all four, so every change is
+  // published here. These were missing entirely (QA D1), which is why the glass
+  // kept the frame it drew at boot: a note recorded after power-on, an upload, a
+  // delete and a lost card never reached it.
+  struct UiHooks {
+    std::function<void()> changed;                              // counts, list or card state
+    std::function<void(bool, uint8_t, uint8_t)> upload;         // active, done, total
+    std::function<void()> upload_failed;                        // the note moved to failed/
+  };
+  void set_ui_hooks(UiHooks hooks) { ui_ = std::move(hooks); }
+
   // The app loop's pass. `wifi_link` is whether a window currently holds an
   // association (Wifi::current() is not empty): the upload and the SNTP sync
   // only run while it does.
@@ -147,10 +160,16 @@ class Runtime {
   void begin_sync(uint32_t now);
   void step_sync(uint32_t now);
   void step_ble(uint32_t now);
+  // The window's own clock and its close, split out of tick() so a recording
+  // cannot defer them (QA D4).
+  void step_window(uint32_t now);
   void run_retention(uint32_t now, bool force);
   bool ensure_sd();
   void refresh_counts();
   void refresh_battery();
+  // The glass's side of a state change: one publish, no state of its own.
+  void notify_ui();
+  void notify_upload();
   std::string notes_url() const;
   std::string sign(std::string_view canonical) const;
 
@@ -179,6 +198,11 @@ class Runtime {
   bool ble_linked_ = false;
 
   uint32_t pending_ = 0, sent_ = 0, failed_ = 0;
+  // The upload batch the glass draws: notes this window has sent and how many it
+  // set out to send. The counters are the screen's progress bar, nothing else.
+  bool batch_running_ = false;
+  uint8_t batch_done_ = 0, batch_total_ = 0;
+  UiHooks ui_;
   bool sd_ready_ = false;
   std::string sd_error_;
   uint32_t sd_probe_ms_ = 0;

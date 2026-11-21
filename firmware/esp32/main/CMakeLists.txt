@@ -138,6 +138,7 @@ set(HG_NOTES_SOURCES
     "notes_app/ui_render.cpp"
     "notes_app/ui_app.cpp"
     "notes_app/ui_cache.cpp"
+    "notes_app/ui_state.cpp"
     "notes_app/wav_player.cpp"
     "port_display_epd.cpp"
     "device_config.cpp"

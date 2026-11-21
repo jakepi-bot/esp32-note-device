@@ -83,6 +83,9 @@ struct Snapshot {
   // Newest first (spec §6.3). The order is the caller's: sort by note id,
   // descending, as plain strings.
   uint16_t note_count = 0;
+  // True when the card holds more notes than the list keeps: the count line then
+  // says "128+" rather than pretending that is the whole card (QA D7).
+  bool list_truncated = false;
 
   uint32_t notes_total() const { return count_pending + count_sent + count_failed; }
 };

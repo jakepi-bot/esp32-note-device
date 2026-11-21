@@ -138,6 +138,15 @@ Uploader::Step Uploader::step() {
       error_ = "cannot read recording.wav";
       return Step::Retry;
     }
+    if (audio_read_short(read_, file_bytes_)) {
+      // Hashing a prefix would sign a digest the server cannot match and send a
+      // body that stops early. The card is not giving the file back right now;
+      // ask for the retry.
+      phase_ = Phase::Finished;
+      error_ = "cannot read recording.wav: stopped at " + std::to_string(read_) + " of " +
+               std::to_string(file_bytes_) + " bytes";
+      return Step::Retry;
+    }
     std::fseek(file_, 0, SEEK_SET);
     const auto digest = hasher_.finish();
     meta_.sha256 = hg::crypto::hex(digest.data(), digest.size());
@@ -188,6 +197,7 @@ Uploader::Step Uploader::step() {
       phase_ = Phase::Finished;
       return Step::Retry;
     }
+    read_ = 0;  // count the body again: the hash pass has its own total
     phase_ = Phase::Sending;
     return Step::Running;
   }
@@ -195,12 +205,22 @@ Uploader::Step Uploader::step() {
   if (phase_ == Phase::Sending) {
     const size_t n = std::fread(buf_, 1, kChunk, file_);
     if (n > 0) {
+      read_ += static_cast<uint32_t>(n);
       if (!write_all(buf_, n)) {
         close();
         phase_ = Phase::Finished;
         return Step::Retry;
       }
       return Step::Running;
+    }
+    if (audio_read_short(read_, file_bytes_)) {
+      // Same rule as the hash pass: do not close the body early and wait out a
+      // request that can never be answered. Retry the note as it is.
+      close();
+      phase_ = Phase::Finished;
+      error_ = "cannot read recording.wav: stopped at " + std::to_string(read_) + " of " +
+               std::to_string(file_bytes_) + " bytes";
+      return Step::Retry;
     }
     if (!tail_sent_) {
       if (!write_all(request_.tail.data(), request_.tail.size())) {

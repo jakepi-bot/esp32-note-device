@@ -3,6 +3,7 @@
 #include "port_display_epd.hpp"
 #if CONFIG_HG_BOARD_WS_EPAPER_154
 
+#include <algorithm>
 #include <cstring>
 
 #include "driver/gpio.h"
@@ -77,6 +78,10 @@ constexpr int64_t kRailSettleMs = 50;
 
 int64_t now_ms() { return esp_timer_get_time() / 1000; }
 
+// Bytes staged into internal RAM per SPI transaction: small enough that the
+// allocation is never the problem, large enough to keep the bus busy.
+constexpr size_t kTxChunk = 1024;
+
 }  // namespace
 
 bool EpdDisplay::begin(const EpdConfig& cfg) {
@@ -89,7 +94,8 @@ bool EpdDisplay::begin(const EpdConfig& cfg) {
   if (!image_) image_ = static_cast<uint8_t*>(heap_caps_malloc(image_bytes, MALLOC_CAP_8BIT));
   sent_ = static_cast<uint8_t*>(heap_caps_malloc(image_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (!sent_) sent_ = static_cast<uint8_t*>(heap_caps_malloc(image_bytes, MALLOC_CAP_8BIT));
-  if (!fb_ || !image_ || !sent_) {
+  tx_ = static_cast<uint8_t*>(heap_caps_malloc(kTxChunk, MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
+  if (!fb_ || !image_ || !sent_ || !tx_) {
     ESP_LOGE(TAG, "no memory for the %ux%u framebuffer", cfg.width, cfg.height);
     return false;
   }
@@ -236,9 +242,17 @@ void EpdDisplay::refresh() {
   if (full) {
     panel_init();
     command(0x24);
-    write(sent_, image_bytes);
+    bool taken = write(sent_, image_bytes);
     command(0x26);
-    write(sent_, image_bytes);
+    taken = write(sent_, image_bytes) && taken;
+    if (!taken) {
+      // Half a frame in the panel's RAM would print as garbage: do not trigger
+      // the update, and let the UI redraw so the next pass is a clean full one.
+      partial_ = false;
+      repaint_ = true;
+      force_full_ = true;
+      return;
+    }
     command(0x22);
     data(0xc7);
     command(0x20);
@@ -253,7 +267,11 @@ void EpdDisplay::refresh() {
     return;
   }
   command(0x24);
-  write(sent_, image_bytes);
+  if (!write(sent_, image_bytes)) {
+    repaint_ = true;  // the panel keeps the frame it has; redraw it in full
+    force_full_ = true;
+    return;
+  }
   command(0x22);
   data(0xcf);
   command(0x20);
@@ -303,14 +321,30 @@ void EpdDisplay::data(uint8_t byte) {
   gpio_set_level(static_cast<gpio_num_t>(cfg_.cs), 1);
 }
 
-void EpdDisplay::write(const uint8_t* bytes, size_t len) {
+bool EpdDisplay::write(const uint8_t* bytes, size_t len) {
+  // Slice through the internal staging buffer: `sent_` and every other image
+  // buffer are in PSRAM, and the SPI driver cannot DMA from it, so a write of
+  // the whole 5,000-byte frame asked internal RAM for a temporary buffer of the
+  // same size on every update. Under a Wi-Fi transfer the largest free internal
+  // block falls to a few KiB, that request failed with ESP_ERR_NO_MEM, and the
+  // panel quietly kept the previous frame. A fixed 1 KiB buffer never asks.
   gpio_set_level(static_cast<gpio_num_t>(cfg_.dc), 1);
   gpio_set_level(static_cast<gpio_num_t>(cfg_.cs), 0);
-  spi_transaction_t t = {};
-  t.length = len * 8;
-  t.tx_buffer = bytes;
-  spi_device_polling_transmit(spi_, &t);
+  for (size_t off = 0; off < len; off += kTxChunk) {
+    const size_t n = std::min(kTxChunk, len - off);
+    memcpy(tx_, bytes + off, n);
+    spi_transaction_t t = {};
+    t.length = n * 8;
+    t.tx_buffer = tx_;
+    if (spi_device_polling_transmit(spi_, &t) != ESP_OK) {
+      gpio_set_level(static_cast<gpio_num_t>(cfg_.cs), 1);
+      ESP_LOGE(TAG, "the panel took %u of %u bytes; the frame is redrawn", static_cast<unsigned>(off),
+               static_cast<unsigned>(len));
+      return false;
+    }
+  }
   gpio_set_level(static_cast<gpio_num_t>(cfg_.cs), 1);
+  return true;
 }
 
 bool EpdDisplay::wait_busy() {

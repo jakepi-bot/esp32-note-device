@@ -20,7 +20,7 @@ logic shared through `port.hpp`, inert on every board that does not set
 
 | Module | Files | Role |
 |---|---|---|
-| Display driver | `main/port_display_epd.{hpp,cpp}` | `EpdDisplay`: the whole panel in one RGB565 framebuffer (PSRAM), thresholded to 1 bit on flush, refreshed full or partial by a task off the app loop |
+| Display driver | `main/port_display_epd.{hpp,cpp}` | `EpdDisplay`: the whole panel in one RGB565 framebuffer (PSRAM), thresholded to 1 bit on flush, pushed through a 1 KiB internal DMA staging buffer, refreshed full or partial by a task off the app loop |
 | UI state machine | `main/ui_state.{hpp,cpp}` | `UiState`: idle / recording / uploading / error, published on the core's notice line |
 | Durable config | `main/device_config.{hpp,cpp}` | `DeviceConfig`: NVS-backed typed settings that survive reboots |
 | Mode interfaces | `main/modes/live_mode.hpp`, `main/modes/notes_mode.hpp` | `LiveMode` (implemented: `LiveModeImpl` over the hardware-free `LiveState`) and `NotesMode`, still the stub the offline task replaces |
@@ -180,6 +180,15 @@ keeps it in `pending/` under the contract's backoff (5 s doubling to 300 s),
 and the retry is byte-identical because `note.json` persists the
 `idempotency_key` (the note id): a retry after a lost acknowledgement is
 answered `200 duplicate`, so a recording is stored once, never twice.
+
+A read that stops before the size `stat()` reports is a read failure, not the
+end of the file: `fread` answers 0 for both, and the sending phase used to take
+it as EOF and close a body shorter than the `Content-Length` it had already
+declared. The server waited for the rest, the request timed out at 20 s, and
+the whole note went out again on the retry (measured on the board: 393,216 of
+2,861,484 bytes in the first attempt). `notes::audio_read_short`
+(`main/notes/notes_uploader.hpp`) is the rule both passes now apply, so a short
+read is a `Retry` with the byte counts in the error line.
 
 A note whose audio is gone is terminal too, decided before the uploader is
 asked: `notes::plan_upload` (`main/notes/notes_queue.cpp`) takes the
@@ -363,6 +372,17 @@ setting starts off here and motion only costs refreshes if you turn it back
 on), no 10 fps expectations, clear before darkening, and the
 driver's refresh policy (partial by default, a full refresh every 20
 partial ones, on boot and after a failed transfer) does the rest.
+
+The panel image and its snapshot live in PSRAM (18.9 KB of an 8 MB part that
+the internal heap cannot spare), and this chip's SPI cannot DMA out of PSRAM:
+the driver allocates a private internal buffer the size of the write when it
+must, which for the 5,000-byte frame is 5,000 bytes of internal RAM on every
+update. During a Wi-Fi transfer the largest free internal block falls to a few
+KiB, that request failed with `ESP_ERR_NO_MEM`, and the panel silently kept the
+frame it had. `EpdDisplay::write` now copies 1 KiB at a time through one fixed
+internal DMA buffer, so no panel update asks internal RAM for anything, and a
+write that still fails sets the redraw + full-refresh request instead of
+leaving a half-updated screen.
 
 ## Out of scope in the foundation
 

@@ -19,6 +19,7 @@
 #include "notes/notes_capture.hpp"
 #include "notes/notes_queue.hpp"
 #include "notes/notes_store.hpp"
+#include "notes/notes_uploader.hpp"
 
 using namespace hgp::notes;
 
@@ -592,4 +593,16 @@ TEST("the delete answers are the exact strings the console prints") {
   CHECK_EQ(unknown_note_answer("hg-1"), std::string("@error unknown note hg-1"));
   CHECK_EQ(deleted_failed_answer(0), std::string("@ok deleted 0 failed"));
   CHECK_EQ(deleted_failed_answer(12), std::string("@ok deleted 12 failed"));
+}
+
+TEST("a read that stops short of the card's size is a read failure, not the end of the file") {
+  // The board logged a 2.8 MB note whose first attempt sent 393,216 body bytes
+  // and then waited out the 20 s answer timeout: fread returned 0, the uploader
+  // took it for EOF, and the server kept waiting for the rest of a body it had
+  // been promised (t_76b2657a). Only a read that reaches the size stat() reports
+  // may end the file.
+  CHECK(!audio_read_short(2861484, 2861484));  // read to the end
+  CHECK(audio_read_short(0, 2861484));         // nothing came back
+  CHECK(audio_read_short(393216, 2861484));    // a prefix, exactly 6 chunks in
+  CHECK(!audio_read_short(45, 45));            // the smallest note the uploader takes
 }

@@ -53,7 +53,7 @@ class EpdDisplay final : public hg::Display {
   bool wait_busy();
   void command(uint8_t cmd);
   void data(uint8_t byte);
-  void write(const uint8_t* bytes, size_t len);
+  bool write(const uint8_t* bytes, size_t len);  // false: the panel did not take it
   void set_lut(const uint8_t* lut);
 
   EpdConfig cfg_{};
@@ -61,6 +61,11 @@ class EpdDisplay final : public hg::Display {
   uint16_t* fb_ = nullptr;   // the UI's RGB565 framebuffer
   uint8_t* image_ = nullptr;  // next panel image, 1 bit per pixel
   uint8_t* sent_ = nullptr;   // snapshot the refresh task transmits
+  // The panel image lives in PSRAM, which this chip's SPI cannot DMA from: the
+  // driver would ask internal RAM for a private buffer the size of each write
+  // (5,000 bytes) and gives up when the largest free block is smaller. One
+  // fixed internal buffer, written through in kTxChunk slices, asks for none.
+  uint8_t* tx_ = nullptr;     // internal DMA staging for a panel write
   SemaphoreHandle_t lock_ = nullptr;  // guards image_/dirty_
   SemaphoreHandle_t gate_ = nullptr;  // flush signals: rows went dirty
   std::atomic<bool> repaint_{false};  // a refresh failed: redraw the screen

@@ -18,6 +18,15 @@
 
 namespace hgp::notes {
 
+// True when a read of recording.wav stopped before the size the card reports.
+// `fread` returning 0 looks like the end of the file either way, and the
+// Sending phase used to take it as one: it sent a body shorter than the
+// Content-Length it had already declared, the server sat waiting for the rest,
+// and the note only landed after the request timed out and the whole 2.8 MB was
+// sent again. It is a failed read, and the upload has to say so and retry.
+// Inline so the host tests can hold the rule without the device HTTP stack.
+inline bool audio_read_short(uint32_t read_bytes, uint32_t file_bytes) { return read_bytes != file_bytes; }
+
 // Base64 HMAC-SHA256 of the canonical string with the device key (the core
 // keeps the key; see hg::App::sign).
 using Signer = std::function<std::string(std::string_view)>;

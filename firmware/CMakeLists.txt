@@ -59,14 +59,15 @@ if(HG_BUILD_TESTS)
   # AutoHome is the quiet-minute clock, and the status screen's copy is composed
   # from plain data.
   add_executable(hg_epaper_mode_tests tests/main.cpp tests/test_epaper_live_mode.cpp tests/test_epaper_status.cpp
-                                  tests/test_epaper_keys.cpp tests/test_epaper_auto_home.cpp)
+                                  tests/test_epaper_keys.cpp tests/test_epaper_auto_home.cpp tests/test_notes_ui.cpp)
   target_include_directories(hg_epaper_mode_tests PRIVATE esp32/main)
   target_link_libraries(hg_epaper_mode_tests PRIVATE hg_core)
   if(MSVC)
     target_compile_options(hg_epaper_mode_tests PRIVATE /utf-8)
   endif()
   target_sources(hg_epaper_mode_tests PRIVATE esp32/main/modes/live_state.cpp esp32/main/modes/status_screen.cpp
-                                            esp32/main/modes/home_keys.cpp esp32/main/modes/auto_home.cpp)
+                                            esp32/main/modes/home_keys.cpp esp32/main/modes/auto_home.cpp
+                                            esp32/main/notes_app/ui_keys.cpp)
   add_test(NAME hg_epaper_mode_tests COMMAND hg_epaper_mode_tests)
 
   # The Bluetooth note sync's protocol (esp32/main/notes/notes_ble.*): packets,

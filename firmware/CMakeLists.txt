@@ -66,15 +66,17 @@ if(HG_BUILD_TESTS)
 
   # The offline notes' portable half: note ids, note.json, the multipart
   # request, the response rules, and the card tree against a temp directory.
-  add_executable(hg_epaper_notes_tests tests/main.cpp tests/test_epaper_notes.cpp)
-  target_include_directories(hg_epaper_notes_tests PRIVATE esp32/main)
-  target_link_libraries(hg_epaper_notes_tests PRIVATE hg_core)
-  target_sources(hg_epaper_notes_tests PRIVATE esp32/main/notes/notes_queue.cpp esp32/main/notes/notes_store.cpp
-                                                   esp32/main/notes/notes_capture.cpp)
-  if(MSVC)
-    target_compile_options(hg_epaper_notes_tests PRIVATE /utf-8)
+  # notes_store and notes_capture do their file work with POSIX open/rename and
+  # dirent, which the device and every Unix host have and MSVC does not: the
+  # card-tree tests are skipped on Windows rather than faked.
+  if(NOT MSVC)
+    add_executable(hg_epaper_notes_tests tests/main.cpp tests/test_epaper_notes.cpp)
+    target_include_directories(hg_epaper_notes_tests PRIVATE esp32/main)
+    target_link_libraries(hg_epaper_notes_tests PRIVATE hg_core)
+    target_sources(hg_epaper_notes_tests PRIVATE esp32/main/notes/notes_queue.cpp esp32/main/notes/notes_store.cpp
+                                                     esp32/main/notes/notes_capture.cpp)
+    add_test(NAME hg_epaper_notes_tests COMMAND hg_epaper_notes_tests)
   endif()
-  add_test(NAME hg_epaper_notes_tests COMMAND hg_epaper_notes_tests)
 
   # A dev tool, not a test: POSTs the exact bytes the firmware uploads to a
   # live endpoint (see the header comment), so the device's half of the

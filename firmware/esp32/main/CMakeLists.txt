@@ -49,8 +49,7 @@ if(CONFIG_HG_BOARD_WS_EPAPER_154)
         "notes/notes_ble.cpp"
         "notes/notes_store.cpp"
         "notes/notes_capture.cpp"
-        "notes/notes_uploader.cpp"
-        "notes/sd_mount.cpp")
+        "notes/notes_uploader.cpp")
 endif()
 # The RGB panel driver (ST7701 over an I/O expander) only builds for the chips
 # with an LCD_CAM RGB scanout: port_rgb.cpp is compiled out on every other
@@ -85,6 +84,12 @@ idf_component_register(
         "port_parallel.cpp"
         "port_rgb.cpp"
         "port_sdlog.cpp"
+        # port_sdlog.cpp is built for every board and calls these, whether or not
+        # the board has a card slot (a board with none leaves sd.enabled false and
+        # the mount declines), so the implementation cannot follow the notes
+        # modules behind CONFIG_HG_BOARD_WS_EPAPER_154: that made every ESP32-P4
+        # image fail to link.
+        "notes/sd_mount.cpp"
         "port_power.cpp"
         "port_latch_power.cpp"
         "port_opus.cpp"

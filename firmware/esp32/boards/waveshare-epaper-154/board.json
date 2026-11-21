@@ -1,0 +1,6 @@
+{
+  "title": "Waveshare ESP32-S3-ePaper-1.54",
+  "summary": "200x200 e-paper screen, microphone and onboard speaker.",
+  "docs": "docs/hardware.md#waveshare-esp32-s3-epaper-154",
+  "ready_made": true
+}

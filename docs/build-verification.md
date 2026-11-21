@@ -77,4 +77,4 @@ firmware change; `tools/check_size.py` fails the build when a slot overflows.
   flashed and validated on hardware, but this verification stops at a successful
   link and package step.
 - No hardware-in-the-loop test is automated yet; display, audio and SD behaviour
-  are still verified by hand on the board (see [AUDIT.md](AUDIT.md) §10).
+  are still verified by hand on the board (see [audit.md](audit.md) §10).

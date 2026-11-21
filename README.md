@@ -16,7 +16,7 @@ Status (2026-11-20): firmware 0.6.0 builds from a clean checkout, is flashed on 
 physical board, and has been validated end to end over Wi-Fi — pairing to a live
 Hermes hub, live assistant turns (record → stream → reply → spoken reply), and
 offline voice notes recorded to the card and uploaded to the notes endpoint.
-Hardware detail and assumptions are in [docs/AUDIT.md](docs/AUDIT.md).
+Hardware detail and assumptions are in [docs/audit.md](docs/audit.md).
 
 ## Hardware
 
@@ -131,7 +131,7 @@ firmware/sim/       desktop simulator (same core)
 plugin/             Hermes Gadget plugin, incl. the notes endpoint (port 8766)
 python/             host-side client library (`hermes-gadget` CLI)
 tests/              plugin and CLI test suites
-docs/               SDK documentation; docs/AUDIT.md is this device's audit
+docs/               SDK documentation; docs/audit.md is this device's audit
 linux/              Raspberry Pi install/image tooling
 site/               installer and documentation site
 ```
@@ -149,11 +149,15 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) first; they
 cover documentation, verification, licensing, and contributor credit. Changes to
 the device belong on feature branches off `main`.
 
-## Lineage and license
+## Lineage
 
 Fork of [Adolanium/hermes-gadget-sdk](https://github.com/Adolanium/hermes-gadget-sdk)
 (MIT, "Hermes Gadget SDK contributors"), with the e-paper board port, the offline
 voice-note stack, and the notes ingestion path added here. The upstream README is
-kept as [README.upstream.md](README.upstream.md). This repository is MIT licensed
-([LICENSE](LICENSE)); third-party notices are in [NOTICE](NOTICE),
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and [LICENSES/](LICENSES).
+kept as [README.upstream.md](README.upstream.md).
+
+## License
+
+This repository is MIT licensed ([LICENSE](LICENSE)); third-party notices are in
+[NOTICE](NOTICE), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and
+[LICENSES/](LICENSES/).

@@ -188,6 +188,7 @@ class Runtime {
   int battery_pct_ = -1;
   uint16_t battery_mv_ = 0;
   bool charging_ = false, external_ = false;
+  bool charging_known_ = false;  // the board has a charge signal to read
 
   std::vector<uint8_t> key_;  // 32 bytes; the HMAC's key, never logged
   std::string device_id_, device_name_, token_;

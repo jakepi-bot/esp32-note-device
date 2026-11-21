@@ -193,7 +193,12 @@ void Runtime::refresh_battery() {
     battery_pct_ = -1;
     return;
   }
-  charging_ = status->charging.value_or(false);
+  if (status->charging) {
+    charging_ = *status->charging;
+    charging_known_ = true;
+  } else {
+    charging_known_ = false;  // this board brings no charge signal out to a pin
+  }
   external_ = status->external_power.value_or(false);
   if (status->battery_mv) battery_mv_ = *status->battery_mv;
   if (status->battery_percent) {
@@ -884,9 +889,10 @@ std::string Runtime::console(std::string_view args) {
   }
   if (cmd == "battery") {
     refresh_battery();
-    char buf[96];
-    std::snprintf(buf, sizeof buf, "@ok battery %d%% (%u mV), %s%s", battery_pct_, static_cast<unsigned>(battery_mv_),
-                  charging_ ? "charging" : "discharging", external_ ? ", external power" : "");
+    char buf[110];
+    std::snprintf(buf, sizeof buf, "@ok battery %d%% (%u mV), %s, %s", battery_pct_, static_cast<unsigned>(battery_mv_),
+                  charging_known_ ? (charging_ ? "charging" : "not charging") : "charge signal not wired",
+                  external_ ? "external power" : "on battery");
     return buf;
   }
   if (cmd == "wifi") {

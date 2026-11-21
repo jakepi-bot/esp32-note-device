@@ -392,3 +392,50 @@ the mbedTLS X.509 bundle; that is most of the difference, and it is the price of
 the upload, the setup page and SNTP. The notes image is still 577 KB (28%)
 smaller than the Hermes app in flash and 28% smaller in static RAM.
 
+### On the desk unit (2026-11-21)
+
+Flashed `pio run -e notes -t upload` over `/dev/ttyACM0` and driven from the
+host over the console (`about`, `battery`, `clock`, `radio`, `wifi`, `keys`,
+`notes …`, `phone …`, `screen`), one pass per acceptance item:
+
+| Item | Evidence |
+|---|---|
+| boots to the status face | `hg.ui: screen home, 57 notes (0 to send)` and a full refresh at 3.7 s; `screen` read back over the console decodes to Home: `ALL SENT`, `READY`, the key hint |
+| joins the configured Wi-Fi | `hg.wifi: connected, ip 192.168.1.106` inside the window; `about` answers `wifi on` only then |
+| SNTP sets the clock | `hg.time: asking pool.ntp.org for the time` at the address, `hg.notes: clock synced` 1.3 s later, `SNTP stopped (the network went down)` when the window closes |
+| uploads a pending note with a valid HMAC | `hg.notes.up: note …: HTTP 202 -> accepted` and the gateway's `notes_ingest` line for it; a 202 is only sent after `protocol.verify_note_mac` passes against the enrolled device key |
+| BLE pairing ask, phone client | `hg.phone: a phone asks to pair; waiting for the screen` on connect, allow, `pairing passkey 449047` shown on the device and typed by the client, `bluetoothctl` then reports `Paired: yes` (bonded, passkey entry) |
+| battery percentage sane | `100% (4164 mV)` on USB; the board has no charge-signal pin, which the console now says instead of "discharging" |
+| clean shutdown, no lost writes | `notes poweroff`: recording finished, writer drained, card unmounted, latch left up because the board is on USB, card remounted, `58 notes`, `card ok`, `sd 62.9 GB free` — the count is unchanged by the pass |
+
+Three defects the desk pass found, all fixed here:
+
+- **The station's link was never reported.** `Wifi::connected()`/`disconnected()`
+  were called by `hg::App` on `NetUp`/`WifiDisconnected`; the notes app has no
+  `hg::App` and dispatched neither, so `current()` stayed empty after a real join.
+  The window then uploaded nothing and never started SNTP, and the retry clock
+  kept calling `esp_wifi_connect()` on a connected station ("disconnect before
+  connecting to new ap"). `Wifi::tick()` now reads the link from the driver
+  (`esp_wifi_sta_get_ap_info` plus the station's address) and applies the
+  transition; both transition functions are idempotent, so the Hermes app's event
+  path is not competing (`loss_applied_` keeps the backoff from being counted
+  twice).
+- **The console never saw the notes app's own commands.** `about`, `battery`,
+  `clock`, `radio`, `sd` and `keys` answered "Unrecognized command": `esp_console`
+  answers before the app is asked, and only `notes`/`screen` were registered.
+  They are now registered behind `#if HG_NOTES_APP`.
+- **Dropping the latch on USB killed the card instead of the device.** The card
+  sits on the latched rail, so `power_off()` (which only writes the pin) left a
+  running board with no storage. `Runtime::shutdown()` now leaves the latch alone
+  when external power is present, reports it, and remounts: a person unplugs it.
+
+Two console verbs exist for this bench work and for QA without a finger on the
+board: `notes poweroff` (the PWR-hold path) and `phone allow` / `phone refuse`
+(the two answers the pairing ask takes from a key).
+
+Measured duty cycle in the pass: radio up 26.5 s of 69.3 s of uptime across two
+windows, and the counter did not move afterwards (`26.457/74.147 s` at rest) —
+the device holds no association between windows. The first join attempt after a
+boot ends in `reason 2 auth expired` and succeeds on the port's 20 s retry; that
+is the existing fast-join fallback, not the window logic, and it costs about
+20 s of a 120 s window.

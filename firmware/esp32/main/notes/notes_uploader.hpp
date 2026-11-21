@@ -24,7 +24,11 @@ namespace hgp::notes {
 // Content-Length it had already declared, the server sat waiting for the rest,
 // and the note only landed after the request timed out and the whole 2.8 MB was
 // sent again. It is a failed read, and the upload has to say so and retry.
-// Inline so the host tests can hold the rule without the device HTTP stack.
+//
+// `ferror` is not the test. The board logged this with the card saying
+// `sdmmc_read_blocks failed (0x101)` 60 ms earlier and `ferror` clear: the
+// failed read arrives as a short file, so the count is the only signal there
+// is. Inline so the host tests can hold the rule without the device HTTP stack.
 inline bool audio_read_short(uint32_t read_bytes, uint32_t file_bytes) { return read_bytes != file_bytes; }
 
 // Base64 HMAC-SHA256 of the canonical string with the device key (the core

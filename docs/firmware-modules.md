@@ -188,7 +188,10 @@ declared. The server waited for the rest, the request timed out at 20 s, and
 the whole note went out again on the retry (measured on the board: 393,216 of
 2,861,484 bytes in the first attempt). `notes::audio_read_short`
 (`main/notes/notes_uploader.hpp`) is the rule both passes now apply, so a short
-read is a `Retry` with the byte counts in the error line.
+read is a `Retry` with the byte counts in the error line. The size, not
+`ferror`, is the test: the card logged `sdmmc_read_blocks failed (0x101)` 60 ms
+before one such stop with the error flag clear, because the failed read reaches
+`fread` as a short file.
 
 A note whose audio is gone is terminal too, decided before the uploader is
 asked: `notes::plan_upload` (`main/notes/notes_queue.cpp`) takes the

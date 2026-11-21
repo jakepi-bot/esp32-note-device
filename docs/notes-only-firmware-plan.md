@@ -184,3 +184,65 @@ flash and RAM numbers recorded in the spec.
 
 Still open, to settle in phase 2: delete removes the card's copy only (the vault
 note stays). Confirmation copy reads "Hold BOOT to delete, tap to keep."
+
+## 9. Item 6: the phone site and the Docker app (nothing secret to type)
+
+### What is true today
+
+- The relay page asks for four fields: notes endpoint, device id, device key and
+  (if set) an access token. All four are kept in `localStorage`, including the
+  device key, because **the page signs the upload itself**: `X-Gadget-Mac` is
+  `HMAC-SHA256(device_key, canonical)`.
+- The device id is not readable over Bluetooth: `info` answers
+  `ok ble-note-sync/1 mtu N` and nothing else.
+- Discovery is the browser's chooser, filtered on the note service. One tap, but
+  only after the fields are typed.
+- The pairing PIN is already the security boundary: a phone must be allowed on
+  the device (BOOT) and complete LE Secure Connections with a six-digit passkey
+  before it can read a single note. The site itself has no login, and needs none.
+
+### Design
+
+1. **The device signs, the phone relays.** Add one control command,
+   `sign <note_id>`, answered `ok {"ts":N,"mac":"base64"}` computed on the device
+   with its own key (`hg::crypto` already does this for the Wi-Fi uploader). The
+   page sends exactly those values as `X-Gadget-Ts` / `X-Gadget-Mac`. The server
+   contract does not change, and **the key never reaches the phone**.
+2. **The device id comes over Bluetooth.** `info` becomes
+   `ok ble-note-sync/2 device hg-… mtu N`, so the page fills the id in itself.
+   The id is public data (it is printed by `hermes gadget devices`).
+3. **The endpoint is the page's own origin**, as it already is when the page is
+   served by the container. Nothing to type.
+4. **Remember the device.** `navigator.bluetooth.getDevices()` where the browser
+   supports it (Chrome for Android does) reuses the granted device without a
+   chooser; Bluefy may not, and the fallback is the one-tap chooser.
+5. **Sign at send, not at fetch.** The server allows a 300 s old timestamp, so
+   the page asks for a signature immediately before each POST attempt and asks
+   again on retry. A note fetched today and posted tomorrow still works because
+   the signature is fresh.
+6. **Stop storing secrets.** On load the page deletes `relay.key` and
+   `relay.token`; it stores only the endpoint and the device id.
+
+### Why not a PIN on the site
+
+Reading a note requires a paired phone (BOOT allow plus passkey), and uploading
+it requires a signature only the device can produce. A site PIN would be a third
+secret to type that protects nothing the first two do not.
+
+### What the container keeps doing
+
+`POST /notes/v1` verifies the same canonical string with the key it already holds
+in `devices.json`, so the Docker app needs no change beyond logging the rejection
+reason. It still exposes `/health`, still serves the page at `/`, and still writes
+through the Hermes pipeline.
+
+### Edge cases to handle
+
+- Device clock unset (no SNTP yet): `sign` refuses with `no clock`, and the page
+  says so instead of posting a signature the server will reject.
+- A signature requested, then the phone sits on the page for ten minutes: post
+  fails with 401, the page re-signs and retries once.
+- Two notes fetched, one posted: signatures are per note (idempotency key and
+  audio hash are in the canonical string).
+- `getDevices()` granted but the device is asleep or out of range: fall back to
+  the chooser, do not dead-end.

@@ -405,7 +405,10 @@ Sanitized logs and diagnostics:
 
 ## Bluetooth
 
-The [phone app link](protocol.md#phone-app-over-bluetooth) is off on every board. Turning it on adds NimBLE, ESP-IDF's Bluetooth LE stack, to the image: about 204 KB of flash on the AMOLED-1.75C (measured: 1,335,152 → 1,543,968 bytes) plus its RAM once it runs. Bluetooth also shares the antenna with Wi-Fi. So each board turns it on only after someone has checked it on that board.
+The [phone app link](protocol.md#phone-app-over-bluetooth) is on for one board,
+the Waveshare ESP32-S3-ePaper-1.54 V2 (`waveshare-epaper-154`), which also carries
+the [Bluetooth note sync](ble-note-sync.md). Every other board leaves it off.
+Turning it on adds NimBLE, ESP-IDF's Bluetooth LE stack, to the image: about 204 KB of flash on the AMOLED-1.75C (measured: 1,335,152 → 1,543,968 bytes) plus its RAM once it runs. Bluetooth also shares the antenna with Wi-Fi. So each board turns it on only after someone has checked it on that board.
 
 To try it on a board, build it yourself with two changes, then flash over USB:
 
@@ -455,6 +458,14 @@ Voice and OTA with a phone connected:
 One-hour run:
 Failed or untested steps:
 ```
+
+The board that has it on today is the exception on purpose: it is the note
+taker, and Bluetooth is the only way its notes leave the card with no network. The
+steps to record for it are [Bluetooth note sync §10](ble-note-sync.md#10-test-steps)
+(pairing, MTU, a whole note, an interrupted one that resumes, an empty note, an
+unpaired phone, Wi-Fi beside Bluetooth). They have not been run on hardware yet;
+until that report is attached, treat this board's Bluetooth as enabled and built,
+not verified.
 
 Attach the report to a pull request that makes the two changes for that board and adds Bluetooth to its row in the table above. The board's next release then ships with the link. A report for one board doesn't turn it on for another.
 

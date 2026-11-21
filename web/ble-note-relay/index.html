@@ -1,0 +1,327 @@
+<!doctype html>
+<!--
+  The phone side of the Bluetooth note sync: a Web Bluetooth central that takes
+  a note off the device and posts it to Hermes. docs/ble-note-sync.md explains
+  the workflow; relay.mjs is the protocol and the upload, and this page is the
+  radio and the buttons.
+
+  No build step and no dependencies: open it, or serve the folder
+  (`python3 -m http.server` in this directory).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hermes note relay</title>
+<style>
+  :root { color-scheme: dark; --bg:#101317; --fg:#e6e8ea; --dim:#8b949e; --line:#272c33; --accent:#5ec8a0; --bad:#e06c75; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 -apple-system, system-ui, sans-serif; padding:18px; max-width:720px; margin:0 auto; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.hint { color:var(--dim); margin:0 0 18px; font-size:13px; }
+  fieldset { border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin:0 0 14px; }
+  legend { color:var(--dim); font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
+  label { display:block; font-size:12px; color:var(--dim); margin:8px 0 2px; }
+  input { width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:#0b0e11; color:var(--fg); font-size:14px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; }
+  .row > * { flex:1 1 160px; }
+  button { padding:10px 14px; border-radius:9px; border:1px solid var(--line); background:#171c22; color:var(--fg); font-size:14px; font-weight:600; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#08120d; }
+  button:disabled { opacity:.45; }
+  ul { list-style:none; padding:0; margin:0; }
+  li.note { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:0 0 8px; display:flex; justify-content:space-between; gap:10px; align-items:center; }
+  li.note small { color:var(--dim); display:block; font-weight:400; }
+  li.note .state { font-size:12px; color:var(--dim); white-space:nowrap; }
+  #log { font:12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; background:#0b0e11; border:1px solid var(--line); border-radius:10px; padding:10px; height:180px; overflow:auto; white-space:pre-wrap; color:#b9c2cc; }
+</style>
+</head>
+<body>
+<h1>Hermes note relay</h1>
+<p class="hint">Takes the voice notes waiting on the e-paper gadget over Bluetooth and posts them to Hermes. Works with no Wi-Fi on the device, only Bluetooth between it and this phone.</p>
+
+<fieldset>
+  <legend>Hermes and the device</legend>
+  <div class="row">
+    <div><label for="url">Notes endpoint</label><input id="url" placeholder="http://192.168.1.20:8766/notes/v1" /></div>
+    <div><label for="device">Device id (the board's)</label><input id="device" placeholder="waveshare-epaper-154-xxxx" /></div>
+  </div>
+  <div class="row">
+    <div><label for="key">Device key (base64, from the host)</label><input id="key" type="password" placeholder="from ~/.hermes/plugin-data/gadget/devices.json" /></div>
+    <div><label for="token">Access token (only if the host sets one)</label><input id="token" type="password" /></div>
+  </div>
+</fieldset>
+
+<div class="row" style="margin-bottom:14px">
+  <button id="connect" class="primary">Connect to the gadget</button>
+  <button id="refresh" disabled>List notes</button>
+  <button id="drain" disabled>Fetch every note</button>
+</div>
+
+<ul id="notes"></ul>
+<div id="log" aria-live="polite"></div>
+
+<script type="module">
+import {
+  Assembler, CONTROL_UUID, DATA_UUID, SERVICE_UUID, TAG,
+  parseListLines, postNote, sha256Hex,
+} from './relay.mjs';
+
+const $ = (id) => document.getElementById(id);
+const logEl = $('log');
+const log = (message) => {
+  logEl.textContent += `${new Date().toLocaleTimeString()}  ${message}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+};
+
+const SETTINGS = ['url', 'device', 'key', 'token'];
+for (const name of SETTINGS) {
+  $('url').value ||= 'http://192.168.1.20:8766/notes/v1';
+  $(name).value = localStorage.getItem(`relay.${name}`) || $(name).value;
+  $(name).addEventListener('change', () => localStorage.setItem(`relay.${name}`, $(name).value));
+}
+
+/** One connection: the data subscription collects packets, and the control
+ *  characteristic is written one command at a time. */
+class Session {
+  constructor(control, data) {
+    this.control = control;
+    this.data = data;
+    this.assembler = new Assembler();
+    this.waiters = [];
+    this.onPacket = null;
+    data.addEventListener('characteristicvaluechanged', (event) => {
+      const value = event.target.value;
+      const packet = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+      const kind = this.assembler.feed(packet);
+      if (this.onPacket) this.onPacket(kind, packet);
+      if (kind !== 'ignore') this._settle(kind);
+    });
+  }
+
+  async start() {
+    await this.data.startNotifications();
+  }
+
+  /** Writes a command line (the device reads them in order). */
+  async write(line) {
+    const bytes = new TextEncoder().encode(line);
+    if (this.control.properties.writeWithoutResponse && this.control.writeValueWithoutResponse) {
+      await this.control.writeValueWithoutResponse(bytes);
+    } else if (this.control.writeValueWithResponse) {
+      await this.control.writeValueWithResponse(bytes);
+    } else {
+      await this.control.writeValue(bytes);
+    }
+  }
+
+  /** Resolves on the next packet of one of `kinds`, or rejects on timeout. */
+  next(kinds, timeoutMs = 15000) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.waiters = this.waiters.filter((w) => w !== waiter);
+        reject(new Error(`no ${kinds.join('/')} from the device`));
+      }, timeoutMs);
+      const waiter = { kinds, resolve, timer };
+      this.waiters.push(waiter);
+    });
+  }
+
+  _settle(kind) {
+    const waiter = this.waiters.find((w) => w.kinds.includes(kind));
+    if (!waiter) return;
+    clearTimeout(waiter.timer);
+    this.waiters = this.waiters.filter((w) => w !== waiter);
+    waiter.resolve(kind);
+  }
+
+  reset() {
+    this.assembler = new Assembler();
+  }
+}
+
+let session = null;
+let device = null;
+
+function settings() {
+  const url = $('url').value.trim();
+  const deviceId = $('device').value.trim();
+  const keyBase64 = $('key').value.trim();
+  const accessToken = $('token').value.trim();
+  if (!url || !deviceId || !keyBase64) throw new Error('fill in the endpoint, the device id and the key first');
+  return { url, deviceId, keyBase64, accessToken };
+}
+
+async function connect() {
+  if (!navigator.bluetooth) {
+    log('this browser has no Web Bluetooth. On iOS use Bluefy; on a computer use Chrome or Edge.');
+    return;
+  }
+  device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
+  device.addEventListener('gattserverdisconnected', () => {
+    log('disconnected');
+    session = null;
+    toggle(false);
+  });
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService(SERVICE_UUID);
+  const control = await service.getCharacteristic(CONTROL_UUID);
+  const data = await service.getCharacteristic(DATA_UUID);
+  session = new Session(control, data);
+  await session.start();
+  // The hello answer carries the MTU the device will pack its notifications to.
+  const hello = session.next(['text', 'error']);
+  await session.write('hello');
+  await hello;
+  log(`connected: ${session.assembler.lines.at(-1) ?? 'no answer'}`);
+  toggle(true);
+  await refresh();
+}
+
+function toggle(connected) {
+  for (const id of ['refresh', 'drain']) $(id).disabled = !connected;
+  $('connect').textContent = connected ? 'Reconnect' : 'Connect to the gadget';
+}
+
+async function refresh() {
+  if (!session) return;
+  session.reset();
+  const answered = session.next(['text', 'error'], 8000);
+  await session.write('list');
+  try {
+    await answered;
+  } catch (error) {
+    log(String(error.message));
+    return;
+  }
+  // The list arrives as several lines in the same buffer; wait for the END
+  // line rather than the first one.
+  for (let i = 0; i < 40 && !session.assembler.lines.includes('END'); i++) {
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  const { notes } = parseListLines(session.assembler.lines);
+  render(notes);
+  log(`${notes.length} note(s) waiting`);
+}
+
+let notes = [];
+
+function render(waiting) {
+  notes = waiting;
+  const list = $('notes');
+  list.textContent = '';
+  for (const note of waiting) {
+    const li = document.createElement('li');
+    li.className = 'note';
+    const left = document.createElement('div');
+    left.innerHTML = `<strong></strong><small></small>`;
+    left.querySelector('strong').textContent = note.id;
+    left.querySelector('small').textContent =
+      `${(note.bytes / 1024).toFixed(0)} KB · ${note.durationSeconds}s · ${note.recordedAt}`;
+    const state = document.createElement('span');
+    state.className = 'state';
+    state.textContent = note.bytes === 0 ? 'empty' : 'waiting';
+    const button = document.createElement('button');
+    button.textContent = 'Send';
+    button.disabled = note.bytes === 0;
+    button.onclick = () => send(note, state, button);
+    const right = document.createElement('div');
+    right.append(state, button);
+    li.append(left, right);
+    list.append(li);
+  }
+}
+
+/** Takes one note off the device and posts it. Resumable: a broken link leaves
+ *  the bytes already received in place, and `resume` continues from there. */
+async function send(note, state, button) {
+  button.disabled = true;
+  const { url, deviceId, keyBase64, accessToken } = settings();
+  let offset = 0;
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const assembler = new Assembler();
+      session.assembler = assembler;
+      let ackedAt = 0;
+      let sinceAck = 0;
+      let flushTimer = null;
+
+      // The device sends a window (16 notifications) and then waits for an
+      // acknowledgement. Waiting for it to fill the window wastes a round trip
+      // on a short note, so a quiet link is flushed too.
+      const flush = async () => {
+        if (assembler.received <= ackedAt) return;
+        ackedAt = assembler.received;
+        state.textContent = `${Math.round((ackedAt / note.bytes) * 100)}%`;
+        await session.write(`ack ${ackedAt}`);
+      };
+      session.onPacket = () => {
+        clearTimeout(flushTimer);
+        flushTimer = setTimeout(() => void flush().catch((e) => log(String(e.message))), 250);
+      };
+      try {
+        await session.write(offset > 0 ? `resume ${note.id} ${offset}` : `get ${note.id}`);
+        for (;;) {
+          const kind = await session.next(['block', 'end', 'error'], 20000);
+          if (kind === 'error') throw new Error(assembler.errors.at(-1) || 'the device refused the note');
+          if (kind === 'end') break;
+          if (++sinceAck >= 8) {
+            sinceAck = 0;
+            await flush();
+          }
+        }
+      } finally {
+        clearTimeout(flushTimer);
+        session.onPacket = null;
+      }
+
+      const audio = assembler.bytes();
+      if (audio.length !== note.bytes) throw new Error(`short note: ${audio.length}/${note.bytes}`);
+      if (note.sha256) {
+        const digest = await sha256Hex(audio);
+        if (digest !== note.sha256) throw new Error('the note arrived corrupted; not posting it');
+      }
+
+      state.textContent = 'posting';
+      const result = await postNote({
+        url, keyBase64, accessToken, deviceId,
+        recordedAt: note.recordedAt,
+        durationSeconds: note.durationSeconds,
+        idempotencyKey: note.id,
+        audio,
+      });
+      log(`POST ${url} -> ${result.status} ${String(result.body).slice(0, 120)}`);
+      if (!result.ok) throw new Error(`Hermes said ${result.status}`);
+      // Only now does the device let the note go (pending/ -> sent/).
+      await session.write(`done ${note.id}`);
+      state.textContent = 'sent';
+      log(`${note.id} is in Hermes`);
+      return;
+    }
+  } catch (error) {
+    offset = session?.assembler?.received ?? 0;
+    state.textContent = offset ? 'stopped, retry' : 'failed';
+    log(`${note.id}: ${error.message}${offset ? ` (${offset} bytes kept)` : ''}`);
+    button.disabled = false;
+  }
+}
+
+/** One at a time, re-listing first: another phone may have taken a note. */
+async function drainAll() {
+  for (let guard = 0; guard < 50; guard++) {
+    await refresh();
+    const next = notes.find((note) => note.bytes > 0);
+    if (!next) break;
+    const row = [...document.querySelectorAll('#notes li.note')].find(
+      (li) => li.querySelector('strong').textContent === next.id,
+    );
+    await send(next, row.querySelector('.state'), row.querySelector('button'));
+  }
+  await refresh();
+}
+
+$('connect').onclick = () => connect().catch((error) => log(String(error.message)));
+$('refresh').onclick = () => refresh().catch((error) => log(String(error.message)));
+$('drain').onclick = () => drainAll().catch((error) => log(String(error.message)));
+</script>
+</body>
+</html>

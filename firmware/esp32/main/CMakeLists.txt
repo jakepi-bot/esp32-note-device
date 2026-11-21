@@ -46,6 +46,7 @@ if(CONFIG_HG_BOARD_WS_EPAPER_154)
         "modes/mode_router.cpp"
         "modes/status_screen.cpp"
         "notes/notes_queue.cpp"
+        "notes/notes_ble.cpp"
         "notes/notes_store.cpp"
         "notes/notes_capture.cpp"
         "notes/notes_uploader.cpp"

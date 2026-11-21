@@ -42,3 +42,23 @@ CONFIG_LWIP_TCP_WND_DEFAULT=32768
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768
 CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# Bluetooth LE: the phone app link (docs/protocol.md#phone-app-over-bluetooth)
+# and the note sync the phone drives when there is no Wi-Fi
+# (docs/ble-note-sync.md). NimBLE is about 200 KB of code, which the default
+# 1.9 MB app slots cannot hold beside the firmware: this board is flashed with
+# partitions-epaper-8mb.csv, two 3.875 MB slots, so an update still fits.
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions-epaper-8mb.csv"
+CONFIG_BT_ENABLED=y
+# CONFIG_BT_BLUEDROID_ENABLED is not set
+CONFIG_BT_NIMBLE_ENABLED=y
+# CONFIG_BT_NIMBLE_ROLE_CENTRAL is not set
+# CONFIG_BT_NIMBLE_ROLE_OBSERVER is not set
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_NVS_PERSIST=y
+# The note sync packs a notification to whatever MTU the phone asks for; this is
+# the ceiling it asks for in return.
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
+# Wi-Fi and Bluetooth share the antenna: keep the radio schedule fair, or a
+# note uploads over Wi-Fi while the phone waits.
+CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y

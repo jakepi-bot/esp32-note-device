@@ -775,6 +775,10 @@ BoardConfig make() {
   // No cancel button: BOOT held for 2 s taps CANCEL (spec section 6.1).
   b.buttons.talk_hold_cancel_ms = 2000;
   b.talk_label = "BOOT";
+  // Bluetooth LE: the phone link and the note sync (docs/ble-note-sync.md).
+  // The build needs the NimBLE lines in this board's sdkconfig.defaults and the
+  // 8 MB partition table beside them.
+  b.bluetooth = true;
   b.light_sleep = true;  // dozing on battery; keep_pins_through_sleep holds the latch and panel
   return b;
 }

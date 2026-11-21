@@ -46,6 +46,14 @@ void PhoneLink::close_pairing() {}
 void PhoneLink::forget() {}
 void PhoneLink::set_name(const std::string&) {}
 
+// The note sync lives on the same stack; without NimBLE there is nothing to
+// register and the notes mode never asks.
+bool NoteLink::available() const { return false; }
+bool NoteLink::connected() const { return false; }
+uint16_t NoteLink::mtu() const { return 23; }
+bool NoteLink::poll_command(std::string&) { return false; }
+bool NoteLink::send_frame(const uint8_t*, size_t) { return false; }
+
 #else
 
 namespace {
@@ -56,13 +64,18 @@ constexpr uint32_t kForgetDropMs = 1000;  // lets the reply to `phone forget` le
 constexpr uint16_t kNone = BLE_HS_CONN_HANDLE_NONE;
 
 // dc530001-7a2a-400f-b8f6-e87185576192 and its characteristics ...0002 (command)
-// and ...0003 (reply), little-endian as NimBLE stores them.
+// and ...0003 (reply), little-endian as NimBLE stores them. The note sync's own
+// service is ...00a0 with ...00a1 (control) and ...00a2 (data) beside it.
 constexpr uint8_t kUuidBase[16] = {0x92, 0x61, 0x57, 0x85, 0x71, 0xe8, 0xf6, 0xb8,
                                    0x0f, 0x40, 0x2a, 0x7a, 0x00, 0x00, 0x53, 0xdc};
 ble_uuid128_t g_service_uuid, g_command_uuid, g_reply_uuid;
+ble_uuid128_t g_note_service_uuid, g_note_control_uuid, g_note_data_uuid;
 ble_gatt_chr_def g_chrs[3];
-ble_gatt_svc_def g_svcs[2];
+ble_gatt_chr_def g_note_chrs[3];
+ble_gatt_svc_def g_svcs[3];
 uint16_t g_reply_handle = 0;
+uint16_t g_note_control_handle = 0;
+uint16_t g_note_data_handle = 0;
 
 struct Line {
   uint16_t conn;
@@ -70,6 +83,18 @@ struct Line {
   char text[kMaxLine + 1];
 };
 QueueHandle_t g_lines = nullptr;
+
+// One command line from the note-sync control characteristic, waiting for the
+// app task. `resume <id> <offset>` is the longest thing the phone can send.
+constexpr size_t kNoteLine = 96;
+struct NoteLine {
+  uint16_t len;
+  char text[kNoteLine + 1];
+};
+QueueHandle_t g_note_lines = nullptr;
+std::atomic<bool> g_note_subscribed{false};
+std::atomic<uint16_t> g_note_mtu{23};
+std::atomic<bool> g_note_ready{false};
 
 bool g_started = false;  // app task: begin() succeeded
 std::atomic<bool> g_synced{false}, g_pairing{false};
@@ -173,12 +198,16 @@ int on_gap(ble_gap_event* event, void*) {
         return 0;
       }
       g_conn = event->connect.conn_handle;
+      g_note_subscribed = false;
+      g_note_mtu = ble_att_mtu(event->connect.conn_handle);
       ESP_LOGI(TAG, "phone connected");
       post(PhoneSample::Kind::Status);
       return 0;
 
     case BLE_GAP_EVENT_DISCONNECT:
       g_conn = kNone;
+      g_note_subscribed = false;
+      g_note_mtu = 23;
       if (g_pairing_conn == event->disconnect.conn.conn_handle) {
         g_pairing_conn = kNone;
         post(PhoneSample::Kind::Failed);
@@ -190,6 +219,20 @@ int on_gap(ble_gap_event* event, void*) {
 
     case BLE_GAP_EVENT_ADV_COMPLETE:
       advertise();
+      return 0;
+
+    case BLE_GAP_EVENT_MTU:
+      // The phone asked for a bigger ATT MTU: the note sync packs its
+      // notifications to it, and a command has to fit one write.
+      g_note_mtu = event->mtu.value;
+      ESP_LOGI(TAG, "MTU %u", static_cast<unsigned>(event->mtu.value));
+      return 0;
+
+    case BLE_GAP_EVENT_SUBSCRIBE:
+      if (event->subscribe.attr_handle == g_note_data_handle) {
+        g_note_subscribed = event->subscribe.cur_notify;
+        ESP_LOGI(TAG, "note sync %s", event->subscribe.cur_notify ? "subscribed" : "unsubscribed");
+      }
       return 0;
 
     case BLE_GAP_EVENT_PASSKEY_ACTION: {
@@ -262,6 +305,24 @@ int on_access(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctxt, void*) {
   return 0;
 }
 
+int on_note_access(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctxt, void*) {
+  // The control characteristic: one command line per write, only from a phone
+  // paired with the passkey (`trusted`), and never longer than a line.
+  if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) return BLE_ATT_ERR_UNLIKELY;
+  if (!trusted(conn)) return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
+  NoteLine line;
+  uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
+  if (len == 0) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+  if (len > kNoteLine) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+  if (ble_hs_mbuf_to_flat(ctxt->om, line.text, kNoteLine, &len) != 0) return BLE_ATT_ERR_UNLIKELY;
+  line.len = len;
+  line.text[len] = 0;
+  // Four commands queue up while the app task is busy with a screen refresh;
+  // more than that means the phone is not waiting for answers.
+  if (xQueueSend(g_note_lines, &line, 0) != pdTRUE) return BLE_ATT_ERR_INSUFFICIENT_RES;
+  return 0;
+}
+
 // Notifies `reply` and a closing NUL in pieces that fit the link's MTU, waiting
 // for buffers when NimBLE runs out.
 void send_reply(uint16_t conn, std::string reply) {
@@ -329,7 +390,8 @@ bool PhoneLink::begin(const std::string& name) {
     g_name = name;
   }
   g_lines = xQueueCreate(2, sizeof(Line));
-  if (!g_lines || xTaskCreate(worker, "hg_phone", 4096, nullptr, 4, nullptr) != pdPASS) {
+  g_note_lines = xQueueCreate(4, sizeof(NoteLine));
+  if (!g_lines || !g_note_lines || xTaskCreate(worker, "hg_phone", 4096, nullptr, 4, nullptr) != pdPASS) {
     ESP_LOGE(TAG, "out of memory for the phone link");
     return false;
   }
@@ -367,7 +429,30 @@ bool PhoneLink::begin(const std::string& name) {
   g_svcs[0].type = BLE_GATT_SVC_TYPE_PRIMARY;
   g_svcs[0].uuid = &g_service_uuid.u;
   g_svcs[0].characteristics = g_chrs;
+
+  // The note sync (docs/ble-note-sync.md): the phone writes commands to the
+  // control characteristic and subscribes to the data one for the packets.
+  // Both need the same paired phone: a note is private, and an unencrypted
+  // link would let anyone in radio range read it.
+  make_uuid(g_note_service_uuid, 0xa0);
+  make_uuid(g_note_control_uuid, 0xa1);
+  make_uuid(g_note_data_uuid, 0xa2);
+  g_note_chrs[0] = {};
+  g_note_chrs[0].uuid = &g_note_control_uuid.u;
+  g_note_chrs[0].access_cb = on_note_access;
+  g_note_chrs[0].flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC | BLE_GATT_CHR_F_WRITE_AUTHEN;
+  g_note_chrs[0].val_handle = &g_note_control_handle;
+  g_note_chrs[1] = {};
+  g_note_chrs[1].uuid = &g_note_data_uuid.u;
+  g_note_chrs[1].flags = BLE_GATT_CHR_F_NOTIFY;
+  g_note_chrs[1].val_handle = &g_note_data_handle;
+  g_note_chrs[2] = {};
   g_svcs[1] = {};
+  g_svcs[1].type = BLE_GATT_SVC_TYPE_PRIMARY;
+  g_svcs[1].uuid = &g_note_service_uuid.u;
+  g_svcs[1].characteristics = g_note_chrs;
+  g_svcs[2] = {};
+
   ble_svc_gap_init();
   ble_svc_gatt_init();
   int rc = ble_gatts_count_cfg(g_svcs);
@@ -376,6 +461,7 @@ bool PhoneLink::begin(const std::string& name) {
     ESP_LOGE(TAG, "can't register the phone service (%d)", rc);
     return false;
   }
+  g_note_ready = true;
   ble_store_config_init();
   ble_npl_event_init(&g_update_ev, on_update, nullptr);
   ble_npl_event_init(&g_forget_ev, on_forget, nullptr);
@@ -410,6 +496,37 @@ void PhoneLink::set_name(const std::string& name) {
     g_name = name;
   }
   if (g_started) schedule(&g_update_ev);
+}
+
+// -- the note sync's radio side ------------------------------------------------
+
+bool NoteLink::available() const { return g_started && g_note_ready.load(); }
+
+bool NoteLink::connected() const { return g_started && g_conn.load() != kNone; }
+
+uint16_t NoteLink::mtu() const { return g_note_mtu.load(); }
+
+bool NoteLink::poll_command(std::string& out) {
+  if (!g_started || !g_note_lines) return false;
+  NoteLine line;
+  if (xQueueReceive(g_note_lines, &line, 0) != pdTRUE) return false;
+  out.assign(line.text, line.len);
+  // A phone that sends CRLF is the same command as one that sends LF.
+  while (!out.empty() && (out.back() == '\r' || out.back() == '\n')) out.pop_back();
+  return true;
+}
+
+bool NoteLink::send_frame(const uint8_t* data, size_t len) {
+  const uint16_t conn = g_conn.load();
+  if (!g_started || conn == kNone || !g_note_subscribed.load() || len == 0) return false;
+  const uint16_t mtu = ble_att_mtu(conn);
+  const size_t room = mtu > 3 ? static_cast<size_t>(mtu) - 3 : 20;
+  if (len > room) return false;
+  // ble_gatts_notify_custom frees the mbuf either way; ENOMEM here means the
+  // host is out of buffers, and the caller offers the packet again next tick.
+  os_mbuf* om = ble_hs_mbuf_from_flat(data, static_cast<uint16_t>(len));
+  if (!om) return false;
+  return ble_gatts_notify_custom(conn, g_note_data_handle, om) == 0;
 }
 
 #endif  // CONFIG_BT_NIMBLE_ENABLED

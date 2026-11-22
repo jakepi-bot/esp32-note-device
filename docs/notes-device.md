@@ -106,10 +106,29 @@ moves.
 
 ## Phone
 
-The pairing ask is a full screen: the phone's address tail and `Same as phone?`,
-with `BOOT: allow` and `PWR: refuse`. **BOOT allows, PWR refuses, and 20 seconds
-of neither refuses.** Confirm the six-digit code only when the board and the
-phone show the same one. Pairing is remembered.
+The menu's **Phone** row has its own screen, and the Bluetooth window lasts as
+long as it does. `PHONE`, the device's name (what the phone's chooser lists),
+the window's state, a countdown, and the pairing table (`2 OF 3 PAIRED`):
+
+- **ADVERTISING** the controller is coming up, **WAITING** it is on the air and
+  no phone is connected, **CONNECTED** a phone is on the link.
+- The window is **five minutes**. A phone that is connected holds it open: the
+  deadline is pushed a minute out on every pass while the link is up, so it never
+  ends under a phone, and it closes within a minute of the phone leaving.
+- **WINDOW CLOSED** when it expires on its own, with `Radio off` under it and the
+  radio back to rest (plus the policy's 20 s closing grace). The screen stays
+  until a key, because an e-paper page that vanished would not say what happened.
+- **PWR closes the window** (and the radio goes off with it), **HOLD goes back to
+  the menu**, **BOOT does nothing**.
+- A window that cannot open says why in the state slot instead of flashing back
+  to the menu: **PAIRING FULL** (every bond slot taken), **RADIO BUSY** (the
+  controller did not start), **BLE OFF** (a build with no Bluetooth). The same
+  reason is a warning in the log.
+
+The pairing ask is a full screen: `Same as phone?` with the six-digit code,
+`BOOT: allow` and `PWR: refuse`. **BOOT allows, PWR refuses, and 20 seconds of
+neither refuses.** Confirm the code only when the board and the phone show the
+same one. Pairing is remembered.
 
 The board advertises only inside a window: boot with notes waiting, the Phone
 menu row, or shortly after a recording. At rest the radio is off, which is what
@@ -145,7 +164,10 @@ notes/
   queue is empty and the clock is set, and a 15-minute retry clock reopens it while
   work remains.
 - SNTP runs only while the station holds an address.
-- Bluetooth advertises only inside its own windows.
+- Bluetooth advertises only inside its own windows: the two-minute pairing
+  window, the five minutes the Phone screen owns (held open by a connected
+  phone), the minutes after a note, the retry while notes wait, and an explicit
+  `phone wake`. At rest the controller is off.
 - A PWR tap powers off gracefully: the recording is committed, the upload in
   flight is cancelled, the card is flushed and released, the station is stopped,
   and the battery latch drops. On USB the card is mounted again, because the
@@ -155,7 +177,8 @@ notes/
 
 Over USB at 115200: `notes status|list|record|stop|sync|poweroff|mount|format|prune`,
 `screen` for the panel image as hex, `about`, `battery`, `clock`, `radio`, `sd`,
-`keys`, `ui` (`ui home` forces a full-refresh hand-over), `phone
+`keys`, `ui` (`ui home` forces a full-refresh hand-over, `ui press boot|hold|pwr`
+presses a key for a host with no finger on the board), `phone
 pair|wake|allow|refuse`, `wifi-setup [stop]`, and the usual
 `set`/`get`/`diag`/`log`/`help`. The `screen` verb is how a transition's ghosting
 is measured without a camera.

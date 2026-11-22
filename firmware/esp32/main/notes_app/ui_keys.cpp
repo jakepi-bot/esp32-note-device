@@ -22,6 +22,11 @@ Action press_power(State& state) {
       return Action::RefusePhone;
     case Screen::Menu:
       return Action::MenuSelect;  // the menu is the one screen PWR does not power off
+    case Screen::Phone:
+      // PWR is the way out of the Phone screen, and taking it closes the window:
+      // a device that keeps advertising with nothing on the glass is a radio
+      // left on by accident (t_9972e2a1).
+      return Action::ClosePhone;
     case Screen::NoteList:
       return state.note_count == 0 ? Action::None : Action::OpenNote;
     case Screen::NoteAction:
@@ -65,6 +70,8 @@ Action press_boot(State& state) {
       return Action::StopPlay;
     case Screen::About:
       return Action::None;  // the page is whole on one screen
+    case Screen::Phone:
+      return Action::None;  // BOOT does nothing here: the window is PWR's to close
     case Screen::Back:
       return Action::None;
   }
@@ -99,6 +106,10 @@ Action hold_boot(State& state) {
     case Screen::About:
       state.go(Screen::Menu);
       return Action::Back;
+    case Screen::Phone:
+      // Out the same way the row came in: back to the menu, window closed.
+      state.go(Screen::Menu);
+      return Action::ClosePhone;
     case Screen::Back:
       return Action::None;
   }

@@ -164,7 +164,13 @@ Outcome ScreenApp::run(Action action, uint32_t now_ms) {
           out.draw = true;
           return out;
         case MenuItem::Phone:
-          // port_ble owns the panel for the window; the menu keeps its row.
+          // The row has its own screen now: advertising, waiting, connected and
+          // the countdown. It used to hand the window to port_ble and stay on
+          // the menu, so a window that failed to open looked like a flash and a
+          // step back (t_9972e2a1).
+          state_.go(Screen::Phone);
+          phone_ = PhoneStatus{};  // advertising, no clock until the port answers
+          phone_left_s_ = 0;
           out.effect = Effect::OpenPhoneWindow;
           out.refresh = Refresh::Full;
           out.draw = true;
@@ -263,6 +269,15 @@ Outcome ScreenApp::run(Action action, uint32_t now_ms) {
       return out;
     case Action::RefusePhone:
       out.effect = Effect::PairingRefuse;
+      return out;
+
+    case Action::ClosePhone:
+      // Back to the menu, and the window ends with the screen: the port closes
+      // it, so the radio is not left advertising behind a page nobody is on.
+      state_.go(Screen::Menu);
+      out.effect = Effect::ClosePhoneWindow;
+      out.refresh = Refresh::Full;
+      out.draw = true;
       return out;
 
     case Action::Back:
@@ -368,9 +383,34 @@ Outcome ScreenApp::pairing_answer(bool allow) {
   return out;
 }
 
+// The Phone screen's window, as the port last reported it. The screen owns what
+// the glass shows; the port owns the radio, so this turns the port's answer into
+// a frame and nothing else.
+Outcome ScreenApp::set_phone(const PhoneStatus& status, uint32_t now_ms) {
+  (void)now_ms;
+  Outcome out;
+  const PhoneStatus before = phone_;
+  phone_ = status;
+  if (state_.screen != Screen::Phone) return out;  // only the Phone screen draws it
+  // The word and the table are facts that change on an event; the countdown is
+  // the only thing that moves by itself, and it moves on the 5 s beat the
+  // recording counter keeps rather than at 1 Hz (§9.2).
+  const bool word_moved = before.phase != status.phase || before.refusal != status.refusal;
+  const bool table_moved = before.paired != status.paired || before.slots != status.slots;
+  const uint32_t left_s = status.left_ms / 1000;
+  // `before.left_ms == 0` is the window just opening (or reopening): the clock
+  // has to be drawn once, then only when the beat moves.
+  const bool countdown_moved =
+      status.left_ms != 0 && (before.left_ms == 0 || left_s / 5 != phone_left_s_ / 5);
+  phone_left_s_ = left_s;
+  if (!word_moved && !table_moved && !countdown_moved) return out;
+  out.draw = true;
+  out.refresh = (word_moved || table_moved) ? Refresh::Full : Refresh::Partial;
+  return out;
+}
+
 Outcome ScreenApp::playback_finished() {
   Outcome out;
-  if (state_.screen != Screen::Playing) return out;
   play_done_ = false;
   snap_.playing = false;
   out.effect = Effect::StopPlayback;
@@ -410,6 +450,7 @@ Window ScreenApp::window() const {
     case Screen::Menu:
     case Screen::Recording:
     case Screen::Pairing:
+    case Screen::Phone:
     case Screen::About:
       // Their glass carries counts and copy, never a note's stamp.
       return w;
@@ -482,6 +523,9 @@ ScreenDraw ScreenApp::frame() const {
     }
     case Screen::About:
       d.about = build_about(snap_);
+      break;
+    case Screen::Phone:
+      d.phone = build_phone(snap_, phone_);
       break;
   }
   return d;

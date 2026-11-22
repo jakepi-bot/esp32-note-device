@@ -50,6 +50,7 @@ struct ScreenDraw {
   RecordingView recording;
   PlayingView playing;
   PairingView pairing;
+  PhoneView phone;
   AboutView about;
 };
 

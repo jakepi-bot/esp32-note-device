@@ -207,6 +207,33 @@ struct PairingView {
   char digits[8] = {};     // "418 207"
 };
 
+// The Phone screen (t_9972e2a1): the Bluetooth window a person asked for.
+// `phase` is the port's answer, `refusal` the reason a window could not open -
+// the screen draws that reason rather than flashing back to Home.
+enum class PhonePhase : uint8_t { Advertising, Waiting, Connected, Refused, Closed };
+enum class PhoneRefusal : uint8_t { None, TableFull, RadioBusy, BleOff };
+
+// Plain input, built by the adapter from PhoneLink's answer. No strings, so the
+// host tests can drive every phase, every refusal and the countdown without a
+// radio.
+struct PhoneStatus {
+  PhonePhase phase = PhonePhase::Advertising;
+  PhoneRefusal refusal = PhoneRefusal::None;
+  uint32_t left_ms = 0;   // the window's countdown
+  uint8_t paired = 0;     // phones in the bond store
+  uint8_t slots = 0;      // bond slots (0: no Bluetooth in this build)
+  bool connected = false;
+};
+
+struct PhoneView {
+  char name[18] = {};      // the device's name, what the phone's chooser shows
+  const char* state = nullptr;  // "WAITING", "CONNECTED", "PAIRING FULL"
+  char countdown[8] = {};  // "4:59"; empty when there is no deadline left
+  char table[20] = {};     // "2 OF 3 PAIRED"; empty when unknown
+  const char* note = nullptr;  // "HOLDING WINDOW OPEN", "BLE OFF", or null
+};
+PhoneView build_phone(const Snapshot& snap, const PhoneStatus& status);
+
 struct AboutView {
   static constexpr uint8_t kRows = 5;
   const char* label[kRows] = {};

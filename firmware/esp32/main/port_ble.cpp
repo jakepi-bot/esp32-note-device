@@ -47,6 +47,9 @@ bool PhoneLink::open_pairing() { return false; }
 void PhoneLink::tick(uint32_t) {}
 void PhoneLink::note_saved() {}
 void PhoneLink::wake() {}
+PhoneOpen PhoneLink::open_phone_window() { return PhoneOpen::BleOff; }
+PhoneWindow PhoneLink::phone_window() const { return PhoneWindow{}; }
+void PhoneLink::close_phone_window() {}
 void PhoneLink::set_pending(uint32_t) {}
 bool PhoneLink::radio_up() const { return false; }
 const char* PhoneLink::radio_reason() const { return "none"; }
@@ -115,6 +118,12 @@ hg::RadioWindow g_window;
 std::atomic<bool> g_up{false};
 bool g_prepared = false;  // app task: the queues and the worker exist
 
+// The bond store's size and count. `slots` is what the pairing table holds
+// (CONFIG_BT_NIMBLE_MAX_BONDS, three on this build); `g_bonds` is the count,
+// cached because ble_store_util_count() walks NVS and the Phone screen polls it.
+constexpr uint8_t kBondSlots = CONFIG_BT_NIMBLE_MAX_BONDS;
+std::atomic<uint8_t> g_bonds{0};
+
 uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
 // Shared by PhoneLink and NoteLink: both are this one radio (port.hpp).
@@ -163,7 +172,8 @@ int bonds() {
 void post(PhoneSample::Kind kind, uint32_t passkey = 0, const uint8_t* peer = nullptr) {
   PhoneSample s{kind, passkey, 0, false, {}};
   if (kind == PhoneSample::Kind::Status) {
-    s.paired = static_cast<uint8_t>(bonds());
+    g_bonds = static_cast<uint8_t>(bonds());
+    s.paired = g_bonds.load();
     s.connected = g_conn.load() != kNone;
   }
   if (peer != nullptr) std::memcpy(s.peer, peer, sizeof(s.peer));
@@ -633,15 +643,75 @@ bool PhoneLink::begin(const std::string& name) {
 }
 
 bool PhoneLink::open_pairing() {
-  if (!g_prepared) return false;
+  if (!g_prepared) {
+    ESP_LOGW(TAG, "pairing refused: this build has no Bluetooth");
+    return false;
+  }
   // The exchange itself needs the host: open the radio window first, and the
-  // tick that follows brings the controller up (or leaves it up).
+  // tick that follows brings the controller up (or leaves it up). The deadline
+  // is logged because "it returned true and nothing happened" is exactly the
+  // report this bench had to rule out.
   g_window.pair(now_ms());
   g_pairing = true;
-  ESP_LOGI(TAG, "pairing open");
-  if (!g_up.load()) start_radio();
+  const bool was_up = g_up.load();
+  if (!was_up && !start_radio()) {
+    ESP_LOGW(TAG, "pairing open on paper, but the controller did not start");
+    return false;
+  }
   if (g_started) schedule(&g_update_ev);
+  ESP_LOGI(TAG, "pairing open for %u ms: radio %s, %u paired of %u", static_cast<unsigned>(g_window.timing().pairing_ms),
+           g_up.load() ? "up" : "starting", g_bonds.load(), kBondSlots);
   return true;
+}
+
+// Menu -> Phone. The window, the pairing flag and the controller are brought up
+// together here, so the screen's five minutes and the console's `phone pair`
+// differ only in how long they last; every refusal is named, because a row that
+// flashes and returns Home is the defect this exists to end (t_9972e2a1).
+PhoneOpen PhoneLink::open_phone_window() {
+  if (!g_prepared) {
+    ESP_LOGW(TAG, "phone window refused: this build has no Bluetooth");
+    return PhoneOpen::BleOff;
+  }
+  const uint8_t paired = static_cast<uint8_t>(bonds());
+  g_bonds = paired;
+  if (paired >= kBondSlots) {
+    // Advertising with no slot to keep the phone in: the store's own policy
+    // (`ble_store_util_status_rr`) would evict the oldest partner mid-exchange,
+    // which is worse than saying no.
+    ESP_LOGW(TAG, "phone window refused: the pairing table is full (%u of %u)", paired, kBondSlots);
+    return PhoneOpen::TableFull;
+  }
+  g_window.phone(now_ms());
+  g_pairing = true;
+  if (!g_up.load() && !start_radio()) {
+    ESP_LOGE(TAG, "phone window refused: the controller did not start");
+    return PhoneOpen::RadioBusy;
+  }
+  if (g_started) schedule(&g_update_ev);  // advertise now, fast: a phone is looking
+  const uint32_t left = g_window.phone_left_ms(now_ms());
+  ESP_LOGI(TAG, "phone window open: %u of %u paired, %u ms on the clock, radio %s%s", paired, kBondSlots,
+           static_cast<unsigned>(left), g_up.load() ? "up" : "starting",
+           g_conn.load() != kNone ? ", a phone is connected" : "");
+  return PhoneOpen::Opened;
+}
+
+PhoneWindow PhoneLink::phone_window() const {
+  PhoneWindow w;
+  w.slots = kBondSlots;
+  w.paired = g_bonds.load();
+  w.ready = g_up.load();
+  w.connected = g_conn.load() != kNone;
+  w.left_ms = g_window.phone_left_ms(now_ms());
+  return w;
+}
+
+void PhoneLink::close_phone_window() {
+  if (!g_prepared) return;
+  const uint32_t left = g_window.phone_left_ms(now_ms());
+  if (left == 0) return;  // already over: closing twice is not an event
+  g_window.phone_closed(now_ms());
+  ESP_LOGI(TAG, "phone window closed by the screen with %u s to run", static_cast<unsigned>(left / 1000));
 }
 
 void PhoneLink::answer_pairing(bool allow) {
@@ -687,7 +757,28 @@ void PhoneLink::tick(uint32_t now_ms_arg) {
   // A link that is up keeps the window warm; the policy reads that from the
   // connect/disconnect events, so all this has to do is bring the controller
   // up inside a window and stop it once the window (and its grace) is over.
+  const bool phone_was_open = g_window.phone_left_ms(now_ms_arg) != 0;
   const bool want = g_window.tick(now_ms_arg);
+  // The pairing exchange is allowed exactly as long as one of its windows is
+  // open. Derived here rather than set and forgotten: the notes app opened a
+  // pairing window at boot and never closed it, so the device advertised as
+  // pairable long after every window had expired.
+  const bool pairing_want = g_window.pairing_open(now_ms_arg);
+  if (pairing_want != g_pairing.load()) {
+    if (pairing_want) {
+      g_pairing = true;
+    } else {
+      close_pairing();  // also refuses a phone still waiting for the screen
+    }
+  }
+  // The Phone screen's window ran out on its own. This is the one place that
+  // sees the deadline pass, so it is where the reason it closed is written.
+  const uint32_t phone_left = g_window.phone_left_ms(now_ms_arg);
+  if (phone_was_open && phone_left == 0) {
+    ESP_LOGI(TAG, "phone window closed on its own: %u of %u paired, %s, radio %s", g_bonds.load(), kBondSlots,
+             g_conn.load() != kNone ? "a phone is still connected" : "no phone connected",
+             want ? hg::RadioWindow::name(g_window.why(now_ms_arg)) : "going off");
+  }
   if (want && !g_up.load()) {
     start_radio();
   } else if (!want && g_up.load()) {
@@ -698,9 +789,22 @@ void PhoneLink::tick(uint32_t now_ms_arg) {
 void PhoneLink::note_saved() { radio_note_saved(); }
 
 void PhoneLink::wake() {
-  if (!g_prepared) return;
+  if (!g_prepared) {
+    ESP_LOGW(TAG, "wake refused: this build has no Bluetooth");
+    return;
+  }
   g_window.trigger(now_ms());
-  if (!g_up.load()) start_radio();
+  if (!g_up.load() && !start_radio()) {
+    ESP_LOGW(TAG, "wake refused: the controller did not start");
+    return;
+  }
+  // Re-advertise on every wake, not only on the first: a wake inside another
+  // window (boot, a note, a link that just dropped) used to leave the radio up
+  // and silent, which is a window that looks open and cannot be found.
+  if (g_started) schedule(&g_update_ev);
+  ESP_LOGI(TAG, "wake window open for %u ms, radio %s, %u paired of %u",
+           static_cast<unsigned>(g_window.timing().trigger_ms), g_up.load() ? "up" : "starting", g_bonds.load(),
+           kBondSlots);
 }
 
 void PhoneLink::set_pending(uint32_t count) { radio_set_pending(count); }

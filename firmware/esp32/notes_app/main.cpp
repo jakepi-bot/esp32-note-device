@@ -126,12 +126,21 @@ bool run_effect(hgp::notesui::Effect effect, uint16_t note) {
     case Effect::StartPlayback:
     case Effect::StopPlayback:
     case Effect::OpenWifiSetup:
-    case Effect::OpenPhoneWindow:
     case Effect::PairingAllow:
     case Effect::PairingRefuse:
     case Effect::DeleteNote:
       (void)note;
       return false;  // the screens' own: playback, the ports' windows, the card
+    case Effect::OpenPhoneWindow:
+    case Effect::ClosePhoneWindow:
+      // The screens' own too, and the one this bench could not see: the runtime
+      // declined the Phone window while the UI pushed it at a second, different
+      // call, so a window that never opened left no line anywhere. It is logged
+      // here and answered by port_ble, which is the only place that can say why
+      // (t_9972e2a1).
+      (void)note;
+      ESP_LOGI(TAG, "the Phone window is the screens' own: port_ble opens it and says why not");
+      return false;
   }
   return false;
 }
@@ -308,7 +317,10 @@ std::string console_line(std::string_view line) {
   }
   if (line == "phone wake") {
     g_radio.wake();
-    return "@ok window open";
+    char out[96];
+    std::snprintf(out, sizeof out, "@ok wake: ble %s (%s)", g_radio.radio_up() ? "up" : "down",
+                  g_radio.radio_reason());
+    return out;
   }
   if (line.rfind("notes", 0) == 0 && (line.size() == 5 || line[5] == ' ')) {
     return g_runtime.console(line.size() > 6 ? line.substr(6) : std::string_view());

@@ -21,6 +21,8 @@ RadioWindow::Timing timing() {
   t.retry_ms = 300000;
   t.retry_hold_ms = 30000;
   t.trigger_ms = 60000;
+  t.phone_ms = 300000;
+  t.phone_link_ms = 60000;
   t.grace_ms = 20000;
   return t;
 }
@@ -125,4 +127,50 @@ TEST("the reasons stack: the longest one wins and the rest still end") {
   CHECK_EQ(RadioWindow::name(w.why(kStart + 130000)), std::string("note"));
   CHECK(w.tick(kStart + 200000));  // the note window's grace
   CHECK(!w.tick(kStart + 215000));
+}
+
+// The Phone screen's window (t_9972e2a1): five minutes, held open by a link, and
+// over on its own - the three things the report could not tell apart.
+TEST("the phone window is five minutes, then the grace, then rest") {
+  RadioWindow w(timing());
+  w.phone(kStart);
+  CHECK(w.warm(kStart));
+  CHECK_EQ(RadioWindow::name(w.why(kStart)), std::string("phone"));
+  CHECK_EQ(w.phone_left_ms(kStart), 300000u);
+  CHECK_EQ(w.phone_left_ms(kStart + 299000), 1000u);
+  CHECK(w.pairing_open(kStart + 299000));  // a phone may pair inside it
+  CHECK_EQ(w.phone_left_ms(kStart + 301000), 0u);
+  CHECK(!w.pairing_open(kStart + 301000));
+  CHECK(w.tick(kStart + 301000));  // the grace the policy adds to every window
+  CHECK(!w.tick(kStart + 321000));
+  CHECK_EQ(RadioWindow::name(w.why(kStart + 321000)), std::string("rest"));
+}
+
+TEST("a connected phone holds the phone window open, and it ends a minute after it leaves") {
+  RadioWindow w(timing());
+  w.phone(kStart);
+  // Four minutes in a phone connects: every pass pushes the deadline a minute
+  // out, so the window never expires under the link.
+  w.connected(true, kStart + 240000);
+  CHECK(w.tick(kStart + 240000));
+  CHECK(w.tick(kStart + 290000));  // past the original five minutes
+  CHECK_EQ(w.phone_left_ms(kStart + 290000), 60000u);
+  CHECK(w.tick(kStart + 600000));  // ten minutes, still connected, still open
+  CHECK(w.phone_left_ms(kStart + 600000) > 0);
+  // The phone leaves: at most a minute of window is left, then it is over.
+  w.connected(false, kStart + 600000);
+  CHECK(w.tick(kStart + 630000));
+  CHECK(w.phone_left_ms(kStart + 630000) > 0);
+  CHECK_EQ(w.phone_left_ms(kStart + 661000), 0u);
+  CHECK(w.tick(kStart + 661000));  // the closing grace
+  CHECK(!w.tick(kStart + 682000));
+}
+
+TEST("closing the phone window by hand ends it at once, with no grace") {
+  RadioWindow w(timing());
+  w.phone(kStart);
+  w.phone_closed(kStart + 1000);
+  CHECK_EQ(w.phone_left_ms(kStart + 1000), 0u);
+  CHECK(!w.pairing_open(kStart + 1000));
+  CHECK(!w.tick(kStart + 1000));
 }

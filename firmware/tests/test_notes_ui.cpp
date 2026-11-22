@@ -115,3 +115,11 @@ TEST("every menu row has a label and Back is reachable from the list") {
   CHECK(std::string(menu_label(MenuItem::Back)) == "Back");
   CHECK(std::string(action_label(NoteActionItem::Delete)) == "Delete");
 }
+
+TEST("the Phone screen: PWR closes the window, a hold goes back, a tap does nothing") {
+  State s = at(Screen::Phone);
+  CHECK(press_power(s) == Action::ClosePhone);
+  CHECK(press_boot(s) == Action::None);
+  CHECK(hold_boot(s) == Action::ClosePhone);
+  CHECK(s.screen == Screen::Menu);  // back to the row it came from
+}

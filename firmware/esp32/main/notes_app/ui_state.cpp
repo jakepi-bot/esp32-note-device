@@ -126,6 +126,10 @@ Outcome UiState::pairing_ask(uint32_t passkey) { return app_.pairing_ask(passkey
 
 Outcome UiState::pairing_answer(bool allow) { return app_.pairing_answer(allow); }
 
+// The Phone screen's window is the port's answer, not the card's: hand it to the
+// machine, which decides whether the glass moves.
+Outcome UiState::set_phone(const PhoneStatus& status, uint32_t now_ms) { return app_.set_phone(status, now_ms); }
+
 Outcome UiState::playback_finished() {
   adopt_app_facts();
   const Outcome synced = sync_app();

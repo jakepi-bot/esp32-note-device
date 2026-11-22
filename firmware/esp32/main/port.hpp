@@ -1011,6 +1011,25 @@ namespace console {
 void begin();
 }
 
+// Why the Phone screen's window did not open, as the port answers it. The
+// screen renders each of these: a window that cannot open is never a silent
+// flash back to Home (t_9972e2a1).
+enum class PhoneOpen : uint8_t {
+  Opened,
+  TableFull,  // every bond slot is taken: a new phone would evict an old one
+  RadioBusy,  // the controller did not come up
+  BleOff,     // this build has no Bluetooth, or begin() never ran
+};
+
+// The Phone screen's window as the port sees it: no strings, no policy.
+struct PhoneWindow {
+  bool ready = false;      // the controller is up, so advertising is on the air
+  uint32_t left_ms = 0;    // the screen's countdown; 0 once the window is over
+  uint8_t paired = 0;      // phones in the bond store
+  uint8_t slots = 0;       // bond slots the table holds (0: unknown, no Bluetooth)
+  bool connected = false;  // a phone is connected right now (one at a time)
+};
+
 // A phone companion app over Bluetooth LE, on boards with BoardConfig::bluetooth
 // (port_ble.cpp; docs/protocol.md#phone-app-over-bluetooth). The phone writes a
 // console line and reads the reply as notifications. Only a phone paired with
@@ -1028,8 +1047,20 @@ class PhoneLink {
   void tick(uint32_t now_ms);
   // A note just landed in pending/: open the window a phone can take it in.
   void note_saved();
-  // The console's `phone wake`: an explicit, short window.
+  // An explicit, short window: the console's `phone wake`, which the bench uses
+  // to prove advertising starts without a finger on the board. The screen's own
+  // window is open_phone_window() below.
   void wake();
+  // Menu -> Phone: the five-minute window the person asked for, extended while
+  // a phone stays connected. Says why it did not open instead of failing
+  // silently; the screen draws that answer.
+  PhoneOpen open_phone_window();
+  // The same window's state without touching the radio: the Phone screen polls
+  // this, so a countdown and a connect land on the glass.
+  PhoneWindow phone_window() const;
+  // The screen's close: the countdown stops, the window is over now, and the
+  // controller goes off once any link is down.
+  void close_phone_window();
   // How many notes are waiting for a phone (drives the retry window).
   void set_pending(uint32_t count);
   // Whether the controller is up right now, and why it is (for `diag`/log).

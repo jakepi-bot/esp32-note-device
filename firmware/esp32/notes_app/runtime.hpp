@@ -130,6 +130,11 @@ class Runtime {
   bool wants_network(uint32_t now_ms) const { return net_open(now_ms); }
   void sync_now(uint32_t now_ms);
   const char* net_reason() const;
+  // The radio's standing choice, kept in NVS (`wifi`, on by default): on means
+  // the station stays associated after boot instead of closing every window, off
+  // is the duty cycle below. The last choice survives a power cycle.
+  bool wifi_stay() const { return wifi_stay_; }
+  void set_wifi_stay(bool on);
   // The setup page a phone opened: the window must not close under it.
   bool setup_window() const;
 
@@ -141,6 +146,11 @@ class Runtime {
   Status status(uint32_t now_ms) const;
   std::string console(std::string_view args);
   bool recording() const { return mode_ == Mode::Recording; }
+  // The capture's own elapsed second, read off the WAV the writer has filled.
+  // The screens adopt it as their origin when the runtime - not a key - started
+  // the capture (`notes record`), so the counter on the glass is the length of
+  // the file and not the time since the glass noticed.
+  uint32_t record_elapsed_s() const { return capture_.seconds(); }
 
  private:
   enum class Mode : uint8_t { Idle, Recording, Syncing };
@@ -151,7 +161,7 @@ class Runtime {
   // Retry is the one that reopens itself, on its own slow clock, while a note
   // waits or the clock is still unset: a device that has been offline for an
   // hour must not need a reboot to upload what it recorded.
-  enum class Net : uint8_t { Closed, Boot, Note, Manual, Clock, Retry };
+  enum class Net : uint8_t { Closed, Boot, Note, Manual, Clock, Retry, Stay };
 
   bool load_identity();
   void start_note(uint32_t now);
@@ -206,6 +216,7 @@ class Runtime {
   bool sd_ready_ = false;
   std::string sd_error_;
   uint32_t sd_probe_ms_ = 0;
+  uint8_t sd_probes_ = 0;  // attempts since boot: the first ones retry quickly
   uint32_t next_scan_ms_ = 0, next_retention_ms_ = 0, next_battery_ms_ = 0;
   bool low_space_ = false;
 
@@ -221,6 +232,7 @@ class Runtime {
   uint32_t net_until_ms_ = 0;
   uint32_t next_net_retry_ms_ = 0;  // the slow clock a closed window comes back on
   bool net_was_up_ = false;  // an association held during this window
+  bool wifi_stay_ = true;    // the `wifi` setting: stay associated (on) or duty-cycle (off)
   // Milliseconds the Wi-Fi window has been open since boot: the duty cycle's up
   // half, which is what `notes status` reports (the Bluetooth window is the
   // port's own and is bounded by hg::RadioWindow).

@@ -37,6 +37,25 @@ constexpr uint32_t kFactsMs = 1000;
 // year at this cadence, and About is the only screen that reads them.
 constexpr uint32_t kSlowFactsMs = 60000;
 
+const char* effect_name(notesui::Effect effect) {
+  switch (effect) {
+    case notesui::Effect::None: return "no effect";
+    case notesui::Effect::PowerOff: return "a power-off";
+    case notesui::Effect::BeginRecording: return "the start of a recording";
+    case notesui::Effect::EndRecording: return "the end of a recording";
+    case notesui::Effect::DiscardRecording: return "a discarded recording";
+    case notesui::Effect::StartPlayback: return "playback";
+    case notesui::Effect::StopPlayback: return "a playback stop";
+    case notesui::Effect::SyncNow: return "a sync";
+    case notesui::Effect::OpenWifiSetup: return "the Wi-Fi setup page";
+    case notesui::Effect::OpenPhoneWindow: return "the phone window";
+    case notesui::Effect::PairingAllow: return "a pairing answer";
+    case notesui::Effect::PairingRefuse: return "a pairing refusal";
+    case notesui::Effect::DeleteNote: return "a delete";
+  }
+  return "an effect";
+}
+
 const char* screen_name(notesui::Screen screen) {
   switch (screen) {
     case notesui::Screen::Home: return "home";
@@ -85,7 +104,7 @@ void NotesUi::begin(const Ports& ports) {
   std::snprintf(seed.firmware, sizeof seed.firmware, "%s",
                 ports_.firmware != nullptr ? ports_.firmware : "");
   std::snprintf(seed.device, sizeof seed.device, "%s", device_name_.c_str());
-  seed.note_max_s = ports_.config != nullptr ? static_cast<uint32_t>(ports_.config->note_max_s()) : 300;
+  seed.note_max_s = ports_.config != nullptr ? static_cast<uint32_t>(ports_.config->note_max_s()) : 86400;
   seed.wifi_up = facts_.wifi_up;
   seed.clock_set = facts_.clock_set;
   seed.card_free_bytes = facts_.card_free_bytes;
@@ -198,16 +217,22 @@ void NotesUi::apply(const notesui::Outcome& outcome, uint32_t now_ms) {
       break;
     case notesui::Effect::BeginRecording:
     case notesui::Effect::EndRecording:
-    case notesui::Effect::DiscardRecording:
+    case notesui::Effect::DiscardRecording: {
       // The runtime declined (no microphone, no card, or a note already in
       // flight). This class used to record on its own here, which made an
-      // unqueued note nobody counted (QA D6). Leave the recording screen instead.
-      ESP_LOGW(TAG, "the runtime declined to record: nothing is being captured");
-      if (state_.screen() == notesui::Screen::Recording) {
-        apply(state_.press(notesui::Key::BootTap, now_ms), now_ms);
-        return;
+      // unqueued note nobody counted (QA D6); it then bounced Home through a
+      // synthetic key press, which asked the runtime to stop a capture that had
+      // never started. Undo the move the effect was for and draw the screen the
+      // device is really on: a decline must not leave RECORDING on the glass.
+      ESP_LOGW(TAG, "the runtime declined %s: nothing is being captured", effect_name(outcome.effect));
+      const notesui::Outcome undone = state_.decline(outcome.effect);
+      if (undone.draw) {
+        draw(undone, now_ms);
+      } else {
+        draw(outcome, now_ms);
       }
-      break;
+      return;
+    }
     case notesui::Effect::StartPlayback:
       start_playback(outcome.note);
       break;
@@ -268,6 +293,11 @@ void NotesUi::tick(uint32_t now_ms) {
     render(notesui::Refresh::Full);
   }
 
+  // The capture first: the runtime's answer decides which face the rest of this
+  // pass draws, and a capture that ended under the glass is worth the frame.
+  const notesui::Outcome followed = sync_capture();
+  if (followed.draw) apply(followed, now_ms);
+
   const uint32_t since_facts = now_ms - last_facts_ms_;
   if (last_facts_ms_ == 0 || since_facts >= kFactsMs) {
     const bool slow = last_slow_facts_ms_ == 0 || now_ms - last_slow_facts_ms_ >= kSlowFactsMs;
@@ -290,6 +320,13 @@ void NotesUi::tick(uint32_t now_ms) {
   } else {
     apply(state_.tick(now_ms), now_ms);
   }
+}
+
+notesui::Outcome NotesUi::sync_capture() {
+  if (!capture_probe_.recording) return notesui::Outcome{};
+  const uint32_t now = ports_.system != nullptr ? ports_.system->now_ms() : esp_timer_get_time() / 1000;
+  const uint32_t elapsed = capture_probe_.elapsed_s ? capture_probe_.elapsed_s() : 0;
+  return state_.set_capture(capture_probe_.recording(), elapsed, now);
 }
 
 void NotesUi::start_playback(uint16_t index) {
@@ -382,7 +419,12 @@ void NotesUi::on_runtime_change() {
     pending_dirty_ = static_cast<uint16_t>(pending_dirty_ | notesui::DirtyQueue | notesui::DirtyList);
     return;
   }
-  publish(static_cast<uint16_t>(notesui::DirtyQueue | notesui::DirtyList | notesui::DirtyRecording));
+  // A capture that started or ended is the runtime's news too: take its own
+  // answer before drawing, so a stop made from the console cannot leave the
+  // counter running over a note already on the card.
+  const notesui::Outcome followed = sync_capture();
+  publish(static_cast<uint16_t>(notesui::DirtyQueue | notesui::DirtyList | notesui::DirtyRecording),
+          followed.draw ? notesui::Refresh::Full : notesui::Refresh::None);
 }
 
 void NotesUi::on_upload(bool active, uint8_t done, uint8_t total) {

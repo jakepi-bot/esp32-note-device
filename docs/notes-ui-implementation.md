@@ -46,6 +46,24 @@ table:
 
 `ui_device.cpp` translates that into `request_full_refresh()` before the flush.
 
+## The recording face follows the runtime
+
+`ScreenApp` does not decide whether a capture is running: `Runtime::recording()`
+does, and `NotesUi` asks it on every tick and on every runtime change
+(`sync_capture`). Two moves come out of that:
+
+* a capture that ends with no key — a console `notes stop`, a microphone or card
+  error, the runtime's own abort — takes the glass off the recording face, so the
+  counter cannot run on over a note already on the card;
+* a capture no key started — a console `notes record` — puts Home onto the
+  recording face, with the runtime's own elapsed second as the counter's origin.
+  Any other screen keeps its place: a person reading the list is not yanked.
+
+When the runtime refuses a recording at the press (`no microphone`, `no card`, a
+note already in flight), the screen machine undoes the entry (`decline()`), so
+the recording face is never painted for a capture that does not exist, and the
+adapter logs a warning rather than falling through quietly.
+
 ## Playback
 
 `wav_player.cpp` reads the note's own `recording.wav` (chunk walk, so a `LIST`

@@ -78,9 +78,11 @@ bool ensure(bool format_if_needed, std::string* error) {
     return false;
   }
   // Two callers (the log mirror's task and the app loop) probe on their own
-  // clocks; one attempt per 10 s is enough for both, and a format always runs.
+  // clocks; one attempt per second is enough for both, and a format always
+  // runs. A second, not ten: a card that is slow to answer after power-on is
+  // then found in the first second of a boot and not the thirty-first.
   const uint32_t now = static_cast<uint32_t>(esp_timer_get_time() / 1000);
-  if (!format_if_needed && g_last_attempt_ms != 0 && now - g_last_attempt_ms < 10000) {
+  if (!format_if_needed && g_last_attempt_ms != 0 && now - g_last_attempt_ms < 1000) {
     if (error) *error = g_last_error.empty() ? std::string("no card") : g_last_error;
     xSemaphoreGive(g_lock);
     return false;
@@ -130,7 +132,17 @@ bool ensure(bool format_if_needed, std::string* error) {
   esp_log_level_set("SD_HOST", ESP_LOG_NONE);
   esp_log_level_set("vfs_fat_sdmmc", ESP_LOG_NONE);
   sdmmc_card_t* card = nullptr;
-  const esp_err_t err = esp_vfs_fat_sdmmc_mount(kMountPoint, &host, &slot, &mount_cfg, &card);
+  const int64_t began = esp_timer_get_time();
+  esp_err_t err = esp_vfs_fat_sdmmc_mount(kMountPoint, &host, &slot, &mount_cfg, &card);
+  if (err != ESP_OK) {
+    // A card that did not answer at 20 MHz often answers at the probing clock:
+    // 1-bit wiring, a long ribbon and a slow cell all show up here, and one
+    // second attempt at boot is cheaper than a card that is not found for 30 s.
+    card = nullptr;
+    host.max_freq_khz = SDMMC_FREQ_PROBING;
+    err = esp_vfs_fat_sdmmc_mount(kMountPoint, &host, &slot, &mount_cfg, &card);
+  }
+  const int64_t took_ms = (esp_timer_get_time() - began) / 1000;
   esp_log_level_set("sdmmc_cmd", ESP_LOG_WARN);
   esp_log_level_set("sdmmc_sd", ESP_LOG_WARN);
   esp_log_level_set("sdmmc_periph", ESP_LOG_WARN);
@@ -146,14 +158,15 @@ bool ensure(bool format_if_needed, std::string* error) {
     // Once per reason, not once per attempt: the caller retries on its clock.
     if (why != g_last_error) {
       g_last_error = why;
-      ESP_LOGW(TAG, "no card mounted: %s", why.c_str());
+      ESP_LOGW(TAG, "no card mounted: %s (after %d ms)", why.c_str(), static_cast<int>(took_ms));
     }
     return false;
   }
   g_last_error.clear();
   g_card = card;
   g_mounted = true;
-  ESP_LOGI(TAG, "mounted %s (%s)%s", kMountPoint, card->cid.name, format_if_needed ? ", formatted" : "");
+  ESP_LOGI(TAG, "mounted %s (%s) in %d ms at %d kHz%s", kMountPoint, card->cid.name, static_cast<int>(took_ms),
+           host.max_freq_khz, format_if_needed ? ", formatted" : "");
   return true;
 }
 

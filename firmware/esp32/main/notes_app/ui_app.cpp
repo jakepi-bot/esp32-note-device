@@ -103,11 +103,13 @@ Outcome ScreenApp::run(Action action, uint32_t now_ms) {
       return out;
 
     case Action::StartRecording:
-      // A device that cannot record says so on Home already (NO CARD); starting
-      // a session it cannot finish would only produce a broken note.
-      if (!snap_.card) return stay(Refresh::None);
+      // Whether a capture can start is the runtime's answer, not this one's: the
+      // card may have come back since the last publish, and a device that cannot
+      // record says so in the runtime's own words. A decline puts the screen back
+      // on Home before the frame is drawn (decline(), through the adapter), so
+      // the glass never claims a session that is not happening.
       snap_.recording = true;
-      snap_.record_elapsed_s = 0;
+      snap_.record_elapsed_s = 0;  // the entry frame is 0:00, full refresh
       record_start_ms_ = now_ms;
       record_draw_s_ = 0;
       out.effect = Effect::BeginRecording;
@@ -325,8 +327,10 @@ Outcome ScreenApp::tick(uint32_t now_ms) {
       // The cap reached: the same commit a tap does (§13.2 row 10).
       return run(Action::StopKeep, now_ms);
     }
-    // 5 s cadence, driven by a tick count - never a delay in the draw path.
-    if (elapsed != record_draw_s_ && elapsed / 5 != record_draw_s_ / 5) {
+    // 30 s cadence, driven by a tick count - never a delay in the draw path.
+    // The entry frame already says 0:00 (run() draws it full), so the first
+    // counter the glass sees is the one at half a minute.
+    if (elapsed != record_draw_s_ && elapsed / 30 != record_draw_s_ / 30) {
       record_draw_s_ = elapsed;
       snap_.record_elapsed_s = elapsed;
       out.refresh = Refresh::Partial;
@@ -344,6 +348,64 @@ Outcome ScreenApp::tick(uint32_t now_ms) {
       out.refresh = Refresh::Partial;
       out.draw = true;
     }
+  }
+  return out;
+}
+
+Outcome ScreenApp::follow_capture(bool recording, uint32_t elapsed_s, uint32_t now_ms) {
+  Outcome out;
+  if (recording && state_.screen == Screen::Home) {
+    // A capture no key started: the console's `notes record`. The runtime asks
+    // for the glass on purpose (`notify_ui` says so), so Home hands over. Any
+    // other screen keeps its place - a person reading the list is not to be
+    // yanked into the recording face, and the capture runs either way.
+    snap_.recording = true;
+    snap_.record_elapsed_s = elapsed_s;
+    record_draw_s_ = elapsed_s;
+    record_start_ms_ = now_ms - elapsed_s * 1000u;
+    state_.go(Screen::Recording);
+    out.refresh = Refresh::Full;
+    out.draw = true;
+    return out;
+  }
+  if (!recording && state_.screen == Screen::Recording) {
+    // The capture ended with no key: a console `notes stop`, a microphone or
+    // card error, the runtime's own abort. The glass was counting a recording
+    // that no longer exists, which is what a screen state independent of the
+    // runtime state costs - the counter ran on over a note already on the card.
+    snap_.recording = false;
+    snap_.record_elapsed_s = 0;
+    state_.go(Screen::Home);
+    out.refresh = Refresh::Full;
+    out.draw = true;
+  }
+  return out;
+}
+
+Outcome ScreenApp::decline(Effect effect) {
+  Outcome out;
+  switch (effect) {
+    case Effect::BeginRecording:
+      // No capture is running, so the recording face is never painted for it:
+      // the entry frame is replaced by Home before it reaches the panel.
+      if (state_.screen == Screen::Recording) {
+        snap_.recording = false;
+        snap_.record_elapsed_s = 0;
+        record_start_ms_ = 0;
+        record_draw_s_ = 0;
+        state_.go(Screen::Home);
+        out.refresh = Refresh::Full;
+        out.draw = true;
+      }
+      break;
+    case Effect::EndRecording:
+    case Effect::DiscardRecording:
+      // The runtime was not capturing, so there was nothing to stop: the
+      // screens' own move back to Home stands, and the frame it asked for is
+      // the one the device is really on.
+      break;
+    default:
+      break;
   }
   return out;
 }

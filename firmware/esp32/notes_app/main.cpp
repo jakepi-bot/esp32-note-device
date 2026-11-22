@@ -69,6 +69,9 @@ hgp::NotesUi g_ui;
 // immediate once the card is quiet.
 constexpr uint32_t kBootHoldMs = 2000;
 constexpr uint32_t kPowerHoldMs = 1500;
+// A power source that changes under the firmware must not read as a finger on
+// PWR for this long: the sense line is part of the power circuit on this board.
+constexpr uint32_t kKeyLockMs = 2000;
 
 enum class Link : uint8_t { Closed, Up, Down };
 Link g_link = Link::Closed;  // the station's window: closed, associated, joining
@@ -110,10 +113,16 @@ bool run_effect(hgp::notesui::Effect effect, uint16_t note) {
   using hgp::notesui::Action;
   using hgp::notesui::Effect;
   switch (effect) {
-    case Effect::BeginRecording:
-      return !g_runtime.on_action(static_cast<int>(Action::StartRecording)).empty();
-    case Effect::EndRecording:
-      return !g_runtime.on_action(static_cast<int>(Action::StopKeep)).empty();
+    case Effect::BeginRecording: {
+      const std::string answer = g_runtime.on_action(static_cast<int>(Action::StartRecording));
+      if (answer.empty()) ESP_LOGW(TAG, "the runtime would not start a recording (its reason is above)");
+      return !answer.empty();
+    }
+    case Effect::EndRecording: {
+      const std::string answer = g_runtime.on_action(static_cast<int>(Action::StopKeep));
+      if (answer.empty()) ESP_LOGW(TAG, "the runtime was not recording: nothing to commit");
+      return !answer.empty();
+    }
     case Effect::DiscardRecording:
       return !g_runtime.on_action(static_cast<int>(Action::Discard)).empty();
     case Effect::SyncNow:
@@ -138,25 +147,61 @@ bool run_effect(hgp::notesui::Effect effect, uint16_t note) {
 
 // One key's edge, both jobs: a press under the hold time is a tap, a press that
 // reaches it is the hold. `key_since` is 0 when the key is up.
+//
+// Two rules keep a key that is not being pressed from firing. A key that is
+// already down when the firmware starts looking (or right after the power source
+// changed) is ignored until it is let go: on this board the PWR sense line is
+// part of the power circuit, and a level that sits low while the board changes
+// from cable to battery must not read as a finger. The board then powers down
+// 1.5 s later, on a press nobody made, and will not come back on.
 struct KeyPoll {
   bool down = false;
+  bool armed = false;    // the key has been seen up since boot / since a power change
+  bool ignored = false;  // this press began while presses did not count: its release does nothing
   uint32_t since = 0;
 };
 KeyPoll g_pwr, g_boot;
+uint32_t g_keys_ready_ms = 0;  // no press counts before this (boot, power change)
+bool g_keys_locked = false;    // a key is being ignored until it is released
+
+// PWR + BOOT: whatever is down now is not a press. Called at boot and when the
+// power source changes under a finger that is not there.
+void lock_keys(uint32_t now) {
+  g_keys_ready_ms = now + kKeyLockMs;
+  g_keys_locked = true;
+  g_pwr.down = g_boot.down = false;
+  g_pwr.armed = g_boot.armed = false;
+  g_pwr.ignored = g_boot.ignored = false;
+}
 
 template <typename OnTap, typename OnHold>
 void poll_key(int pin, KeyPoll& k, uint32_t now, uint32_t hold_ms, OnTap tap, OnHold hold) {
   if (pin < 0) return;
   const bool pressed = gpio_get_level(static_cast<gpio_num_t>(pin)) == 0;  // both keys are active low
-  if (pressed && !k.down) {
-    k.down = true;
-    k.since = now;
+  if (!pressed) {
+    k.armed = true;
+    if (!k.down) return;
+    k.down = false;
+    if (k.ignored) {  // the tail of a press that never counted
+      k.ignored = false;
+      return;
+    }
+    if (now - k.since >= hold_ms) hold(now - k.since);
+    else tap();
     return;
   }
-  if (pressed || !k.down) return;
-  k.down = false;
-  if (now - k.since >= hold_ms) hold(now - k.since);
-  else tap();
+  if (k.down) return;
+  k.down = true;
+  k.since = now;
+  if (!k.armed || now < g_keys_ready_ms) {
+    // Held through boot or a power change, or the lock is still running: the
+    // press is not a finger, and its release must not become a tap either.
+    k.ignored = true;
+    if (g_keys_locked) {
+      ESP_LOGW(TAG, "a key is down but ignored until it is released");
+      g_keys_locked = false;
+    }
+  }
 }
 
 void poll_keys(uint32_t now) {
@@ -244,6 +289,14 @@ std::string set_line(std::string_view line) {
   const std::string key(line.substr(0, sp));
   std::string value(line.substr(sp + 1));
   if (key == "tailnet" || key == "ts_key") return "@ok ignored: this build has no tailnet";
+  // `set wifi on|off` is the phone setup page's spelling, and it is the same
+  // switch as the console's `wifi on|off`: the choice is stored in NVS and
+  // survives a power cycle.
+  if (key == "wifi") {
+    if (value != "on" && value != "off") return "@error wifi must be on or off";
+    g_runtime.set_wifi_stay(value == "on");
+    return std::string("@ok wifi ") + value;
+  }
   if (key != "server" && key != "token" && key != "name" && key != "notes_url" && key != "timezone")
     return "@error unknown setting " + key;
   if (!g_storage.set(key, value)) return "@error cannot store " + key;
@@ -314,6 +367,39 @@ std::string console_line(std::string_view line) {
     return g_runtime.console(line.size() > 6 ? line.substr(6) : std::string_view());
   }
   if (line == "battery" || line == "wifi" || line == "clock") return g_runtime.console(line);
+  if (line == "power") {
+    // The three lines that decide whether a board on battery stays up: the
+    // latch's pad level, the PWR key's own level, and what the port thinks the
+    // supply is. A latch that reads 0 with a charged cell is a power cut the
+    // moment the cable leaves; a key that reads 0 while nobody touches it is the
+    // phantom press the loop now ignores.
+    const auto ext = g_latch.external_power();
+    char out[180];
+    std::snprintf(out, sizeof out, "@power latch gpio%d=%d (held %s) | pwr key gpio%d=%d (%s) | supply %s", board.latch_power.enable,
+                  g_latch.latch_level(), g_latch.hold() ? "yes" : "NO",
+                  board.latch_power.key, g_latch.key_level(),
+                  g_latch.key_level() == 0 ? "down" : "released",
+                  ext.has_value() ? (*ext ? "cable" : "battery") : "unknown");
+    return out;
+  }
+  if (line.rfind("key ", 0) == 0) {
+    // TEMPORARY (t_704171a7): the same press the loop makes, for a host with no
+    // finger on the board. Removed before this lands.
+    const std::string_view which(line.substr(4));
+    if (which == "boot") {
+      g_ui.press(hgp::notesui::Key::BootTap);
+      return std::string("@ok boot tap");
+    }
+    if (which == "hold") {
+      g_ui.press(hgp::notesui::Key::BootHold);
+      return std::string("@ok boot hold");
+    }
+    if (which == "pwr") {
+      g_ui.press(hgp::notesui::Key::Power);
+      return std::string("@ok pwr tap");
+    }
+    return std::string("@error usage: key boot|hold|pwr");
+  }
   if (line.rfind("set ", 0) == 0) return set_line(line.substr(4));
   // `screen` proves what the panel is showing without a camera pointed at it;
   // one console write takes about 4,000 characters and the image is 5,000, so
@@ -327,7 +413,7 @@ std::string console_line(std::string_view line) {
     }
     return g_epd.image_slice(first, count);
   }
-  return std::string("@error unknown command; about, battery, clock, keys, menu, notes, phone, radio, screen, sd, set, wifi");
+  return std::string("@error unknown command; about, battery, clock, key, keys, menu, notes, phone, radio, screen, sd, set, wifi [on|off]");
 }
 
 // Console lines arrive as events, answered on this task.
@@ -394,10 +480,18 @@ extern "C" void app_main(void) {
   }
 
   // The card: configure() before the first ensure(), and a failure is not
-  // cached, so a card pushed in later still mounts (notes/sd_mount.hpp).
+  // cached, so a card pushed in later still mounts (notes/sd_mount.hpp). A card
+  // that is slow to answer after power-on is retried here, quickly, instead of
+  // being left to the runtime's 30 s clock: five attempts over about four
+  // seconds at boot, then the runtime's own retry takes over.
   hgp::sd_mount::configure(board.sd);
   std::string sd_error;
-  if (hgp::sd_mount::ensure(false, &sd_error)) {
+  bool sd_ok = false;
+  for (int attempt = 0; attempt < 5 && !sd_ok; ++attempt) {
+    sd_ok = hgp::sd_mount::ensure(false, &sd_error);
+    if (!sd_ok) vTaskDelay(pdMS_TO_TICKS(250));  // the ensure() throttle is one attempt per second
+  }
+  if (sd_ok) {
     uint64_t total = 0, free_bytes = 0;
     ESP_LOGI(TAG, "card mounted%s", hgp::sd_mount::space(&total, &free_bytes) ? "" : " (the volume did not report its size)");
     if (total) {
@@ -405,7 +499,7 @@ extern "C" void app_main(void) {
                static_cast<double>(total) / 1e9);
     }
   } else {
-    ESP_LOGW(TAG, "no card: %s", sd_error.empty() ? "the slot did not answer" : sd_error.c_str());
+    ESP_LOGW(TAG, "no card after five attempts: %s", sd_error.empty() ? "the slot did not answer" : sd_error.c_str());
   }
 
   g_config.begin(g_storage);
@@ -464,6 +558,10 @@ extern "C" void app_main(void) {
   ui_ports.store = &g_store;
   ui_ports.firmware = esp_app_get_description()->version;
   g_ui.set_effect_hook(run_effect);
+  // The runtime is the truth about the capture: the screens follow its answer,
+  // so a recording stopped from the console leaves the recording face, and one
+  // started there reaches it.
+  g_ui.set_capture_probe({[] { return g_runtime.recording(); }, [] { return g_runtime.record_elapsed_s(); }});
   g_ui.begin(ui_ports);
 
   // The runtime's other half reaches the glass through these (QA D1): a note
@@ -479,6 +577,12 @@ extern "C" void app_main(void) {
   hgp::console::begin();
   ESP_LOGI(TAG, "notes app ready");
 
+  // Nothing on the keys counts for the first couple of seconds: a key held
+  // through the boot (or a sense line that is low while the board settles) is
+  // not a press, and a phantom one would power the board off on battery.
+  lock_keys(g_system.now_ms());
+
+  bool power_known = false, power_cable = false;
   for (;;) {
     hgp::Event ev;
     // A resting notes device has nothing to animate: the panel is bistable and
@@ -491,6 +595,20 @@ extern "C" void app_main(void) {
       } while (hgp::events::receive(ev, 0));
     }
     const uint32_t now = g_system.now_ms();
+    // The supply changed: plugging or unplugging the cable moves the PWR sense
+    // line, and that edge is not a finger. Lock the keys and say so.
+    if (const auto cable = g_latch.external_power(); cable.has_value()) {
+      if (power_known && *cable != power_cable) {
+        ESP_LOGW(TAG, "power source: %s; keys locked for %u ms", *cable ? "cable" : "battery",
+                 static_cast<unsigned>(kKeyLockMs));
+        lock_keys(now);
+      }
+      power_known = true;
+      power_cable = *cable;
+    }
+    // The pad is the supply on a battery board: keep it driven high. Cheap, and
+    // it only logs when the level was lost.
+    g_latch.hold();
     g_radio.tick(now);  // the Bluetooth window: up inside it, off at rest
     poll_network(now);
     g_runtime.tick(now, g_link == Link::Up);

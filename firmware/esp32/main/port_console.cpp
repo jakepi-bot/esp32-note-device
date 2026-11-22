@@ -95,13 +95,20 @@ void begin() {
   // registration esp_console answers "Unrecognized command" before the app ever
   // sees the line: the boot face's battery, clock and link could not be read
   // back from a host at all. `ui` is the screens' own report (`ui`, `ui home`).
-  for (const char* name : {"about", "battery", "clock", "radio", "sd", "keys", "ui"}) {
+  for (const char* name : {"about", "battery", "clock", "power", "radio", "sd", "keys", "ui"}) {
     esp_console_cmd_t cmd = {};
     cmd.command = name;
     cmd.help = "Notes app status (see: notes status)";
     cmd.func = &run;
     esp_console_cmd_register(&cmd);
   }
+  // A key the loop would see, for a bench with no finger on the board: the same
+  // press, the same screen machine, the same runtime effect.
+  esp_console_cmd_t key = {};
+  key.command = "key";
+  key.help = "Press a key: key boot|hold|pwr";
+  key.func = &run;
+  esp_console_cmd_register(&key);
 #endif
 #endif
   for (const char* name : kCommands) {

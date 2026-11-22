@@ -30,7 +30,12 @@ const char* TAG = "hg.notes";
 // retried while no card answers.
 constexpr uint32_t kScanMs = 5000;
 constexpr uint32_t kIdleScanMs = 30000;  // nothing queued: a resting card is not walked every 5 s
+// A card that is missing is retried quickly for the first minute (a card that
+// answers a moment after power-on is found before a recording is asked for),
+// then on the slow clock that suits a device with no card at all.
 constexpr uint32_t kSdRetryMs = 30000;
+constexpr uint32_t kSdRetryFastMs = 5000;
+constexpr uint8_t kSdFastProbes = 12;
 // The retention rule's own clocks, as on the Hermes build.
 constexpr uint32_t kRetentionMs = 300000;
 constexpr uint32_t kRetentionLowMs = 60000;
@@ -149,15 +154,22 @@ bool Runtime::begin(const Io& io) {
   ensure_sd();
   refresh_counts();
   refresh_battery();
+  // The radio's standing choice: on by default, and whatever it was last set to
+  // survives the power cycle (`set wifi off`, or `wifi off` on the console,
+  // stores it). On means the station stays associated, not just long enough to
+  // upload: the hub, the phone's page and the clock keep it reachable.
+  wifi_stay_ = io_.config->get("wifi").value_or("on") != "off";
   ready_ = true;
-  ESP_LOGI(TAG, "runtime ready: device %s, %u pending, %u sent, %u failed", device_id_.c_str(),
-           static_cast<unsigned>(pending_), static_cast<unsigned>(sent_), static_cast<unsigned>(failed_));
+  ESP_LOGI(TAG, "runtime ready: device %s, %u pending, %u sent, %u failed, wifi %s",
+           device_id_.c_str(), static_cast<unsigned>(pending_), static_cast<unsigned>(sent_),
+           static_cast<unsigned>(failed_), wifi_stay_ ? "stays on" : "windows only");
 
   // A boot with something to do opens the first window itself; an unset clock
   // always does, because every note recorded before it is stamped 1970.
   // A failed note (rejected by the server) is a person's work, not the radio's,
   // so it opens no window.
-  if (pending_ > 0 || !clock_ok()) open_net(now_ms(), clock_ok() ? Net::Boot : Net::Clock);
+  if (wifi_stay_) open_net(now_ms(), Net::Stay);
+  else if (pending_ > 0 || !clock_ok()) open_net(now_ms(), clock_ok() ? Net::Boot : Net::Clock);
   return true;
 }
 
@@ -273,10 +285,15 @@ void Runtime::open_net(uint32_t now, Net why) {
 }
 
 bool Runtime::net_open(uint32_t now) const {
+  // Nothing keeps the station up once shutdown has begun: shutdown() calls this
+  // path after it dropped the radio, and `ready_` is the door that stays shut.
+  if (!ready_) return false;
   // A phone's setup page holds the station up whatever the window is doing: it
   // is the only way to give the device a network when none is saved, and it has
   // its own deadline in the port.
   if (setup_window()) return true;
+  // The standing choice: associate and stay associated, with no window to close.
+  if (wifi_stay_) return true;
   if (net_ == Net::Closed) return false;
   return static_cast<int32_t>(net_until_ms_ - now) > 0;
 }
@@ -305,9 +322,27 @@ const char* Runtime::net_reason() const {
     case Net::Manual: return "asked";
     case Net::Clock: return "clock unset";
     case Net::Retry: return "retry";
+    case Net::Stay: return "always on";
     case Net::Closed: break;
   }
   return "closed";
+}
+
+void Runtime::set_wifi_stay(bool on) {
+  const uint32_t now = now_ms();
+  wifi_stay_ = on;
+  if (io_.config && io_.config->get("wifi").value_or("on") != (on ? "on" : "off"))
+    io_.config->set("wifi", on ? "on" : "off");
+  if (on) {
+    // Associated from this pass on, and kept there (step_window never closes it).
+    if (net_ == Net::Closed) open_net(now, Net::Stay);
+  } else {
+    // Back to the duty cycle: with nothing left to do the window closes now,
+    // otherwise it finishes its work and closes on its own clock.
+    ESP_LOGI(TAG, "Wi-Fi: stays on no more; windows only from here");
+    if (net_ != Net::Closed && mode_ == Mode::Idle && pending_ == 0) close_net(now);
+  }
+  notify_ui();
 }
 
 void Runtime::sync_now(uint32_t now) {
@@ -358,6 +393,12 @@ void Runtime::tick(uint32_t now, bool wifi_link) {
 }
 
 void Runtime::step_window(uint32_t now) {
+  // The standing choice has no deadline: keep the window open with a fresh one,
+  // so nothing below (or the port) treats it as expired.
+  if (wifi_stay_ && ready_ && net_ != Net::Closed) {
+    net_until_ms_ = now + kWindowMs;
+    return;
+  }
   // A transfer in flight keeps its window: closing the station under the
   // uploader would waste the bytes it has already sent (`step_sync` above may
   // have left the mode Syncing).
@@ -726,8 +767,10 @@ void Runtime::step_ble(uint32_t) {
 bool Runtime::ensure_sd() {
   if (sd_ready_) return true;
   const uint32_t now = now_ms();
-  if (sd_probe_ms_ != 0 && static_cast<int32_t>(now - sd_probe_ms_) < static_cast<int32_t>(kSdRetryMs)) return false;
+  const uint32_t retry = sd_probes_ < kSdFastProbes ? kSdRetryFastMs : kSdRetryMs;
+  if (sd_probe_ms_ != 0 && static_cast<int32_t>(now - sd_probe_ms_) < static_cast<int32_t>(retry)) return false;
   sd_probe_ms_ = now == 0 ? 1 : now;
+  if (sd_probes_ < 255) ++sd_probes_;
   std::string error;
   if (!sd_mount::ensure(false, &error)) {
     sd_error_ = error.empty() ? "No SD card" : error;
@@ -950,12 +993,19 @@ std::string Runtime::console(std::string_view args) {
     return buf;
   }
   if (cmd == "wifi") {
-    char buf[160];
-    std::snprintf(buf, sizeof buf, "@wifi station %s, window %s (deadline in %d s), radio %s",
+    if (rest == "on" || rest == "off") {
+      const bool on = rest == "on";
+      set_wifi_stay(on);
+      return std::string("@ok wifi ") + (on ? "on: the station stays associated" : "off: windows only");
+    }
+    if (!rest.empty()) return "@error usage: wifi [on | off]";
+    char buf[220];
+    std::snprintf(buf, sizeof buf,
+                  "@wifi station %s, window %s (deadline in %d s), radio %s, setting %s (remembered)",
                   io_.wifi && !io_.wifi->current().empty() ? io_.wifi->current().c_str() : "off",
                   net_open(now) ? net_reason() : "closed",
                   net_open(now) ? static_cast<int>((net_until_ms_ - now) / 1000) : 0,
-                  io_.wifi && io_.wifi->radio_running() ? "on" : "off");
+                  io_.wifi && io_.wifi->radio_running() ? "on" : "off", wifi_stay_ ? "on" : "off");
     return buf;
   }
   if (cmd == "clock") {

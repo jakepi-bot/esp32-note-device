@@ -86,8 +86,18 @@ class ScreenApp {
   Outcome press(Key key, uint32_t now_ms);
 
   // The loop's heartbeat: the recording counter, the playback position, and the
-  // recording cap. Both counters move at 5 s, never 1 Hz (§9.2).
+  // recording cap. The counter moves every 30 s and the position every 5 s,
+  // never at 1 Hz (§9.2).
   Outcome tick(uint32_t now_ms);
+  // The runtime's own capture, taken as the truth: a capture that ended without
+  // a key (a console `notes stop`, a microphone or card error, the cap) takes
+  // the glass off the recording face, and one the keys did not start (a console
+  // `notes record`) puts it on. Returns the frame that move owes, if any.
+  Outcome follow_capture(bool recording, uint32_t elapsed_s, uint32_t now_ms);
+  // The runtime said no to an effect the screens had already acted on: put the
+  // screen back where the device really is (Home for a recording that never
+  // began), so the frame drawn is the truth and not the intent.
+  Outcome decline(Effect effect);
 
   Outcome pairing_ask(uint32_t passkey);
   Outcome pairing_answer(bool allow);

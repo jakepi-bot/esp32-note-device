@@ -91,7 +91,8 @@ if(HG_BUILD_TESTS)
   # event): test_notes_refresh.cpp drives it against a real card, which is the
   # case the QA pass on t_5baa6311 found missing (defect D1).
   if(NOT MSVC)
-    add_executable(hg_notes_ui_tests tests/main.cpp tests/test_notes_screens.cpp tests/test_notes_refresh.cpp)
+    add_executable(hg_notes_ui_tests tests/main.cpp tests/test_notes_screens.cpp tests/test_notes_refresh.cpp
+                   tests/test_notes_recording.cpp)
     target_include_directories(hg_notes_ui_tests PRIVATE esp32/main)
     target_link_libraries(hg_notes_ui_tests PRIVATE hg_core)
     target_sources(hg_notes_ui_tests PRIVATE esp32/main/notes_app/ui_keys.cpp

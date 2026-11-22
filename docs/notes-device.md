@@ -51,9 +51,18 @@ The resting face, and what it returns to when a screen is left.
 ## Recording
 
 BOOT-tap on Home starts a note. The screen is one word, `RECORDING`, with an
-elapsed counter; the footer says `BOOT: stop` and `HOLD: discard`. BOOT-tap keeps
-the note, BOOT-hold throws it away. Recording continues while the radio does
-whatever it was doing; nothing on this screen waits for the network.
+elapsed counter that starts at `0:00` and moves every 30 s; the footer says
+`BOOT: stop` and `HOLD: discard`. BOOT-tap keeps the note, BOOT-hold throws it
+away. Recording continues while the radio does whatever it was doing; nothing on
+this screen waits for the network. The screens follow the runtime, not the other
+way round: a capture the console ends (`notes stop`) takes the glass back to Home
+instead of leaving a counter running over a note already on the card.
+
+A note runs until the card fills, not for a fixed few minutes, and one note stops
+at 2 GiB (12.4 h at 24 kHz PCM16 mono) so the file stays inside what FAT32 and the
+RIFF size fields hold. `note_max_s` (console `set note_max_s`, 10..86400) is the
+only shorter limit, and its default is 86400, so nothing stops a note early out of
+the box; the counter's second line shows the cap, `OF 24:00` at the default.
 
 A note is written audio first, then `note.json`, so a power cut never leaves a
 note that looks complete but has no audio.
@@ -140,23 +149,33 @@ notes/
 
 ## Radio and power
 
-- Wi-Fi is a window, not a state: it opens on boot with notes waiting or the clock
-  unset, after a note, on **Sync now**, and for the setup page; it closes when the
-  queue is empty and the clock is set, and a 15-minute retry clock reopens it while
-  work remains.
+- Wi-Fi stays on by default (`wifi on`, the setting stored in NVS, remembered
+  across a power cycle): the station associates at boot and keeps its link, so
+  the hub and the phone's page can always reach the device. `wifi off` (console
+  or `set wifi off`) goes back to windows only: a window opens on boot with notes
+  waiting or the clock unset, after a note, on **Sync now**, and for the setup
+  page; it closes when the queue is empty and the clock is set, and a 15-minute
+  retry clock reopens it while work remains.
 - SNTP runs only while the station holds an address.
 - Bluetooth advertises only inside its own windows.
 - A PWR tap powers off gracefully: the recording is committed, the upload in
   flight is cancelled, the card is flushed and released, the station is stopped,
   and the battery latch drops. On USB the card is mounted again, because the
   board stays up.
+- This board has no hardware power switch: the battery latch (GPIO 17) is what
+  keeps the cell connected, so press and hold PWR for about two seconds to start
+  it on battery. The firmware drives the latch high as soon as it runs, keeps it
+  high every pass, and ignores a PWR level that sits low through boot or through
+  a change of power source, so an unplug cannot read as a finger and power the
+  board off.
 
 ## Console
 
 Over USB at 115200: `notes status|list|record|stop|sync|poweroff|mount|format|prune`,
-`screen` for the panel image as hex, `about`, `battery`, `clock`, `radio`, `sd`,
-`keys`, `ui` (`ui home` forces a full-refresh hand-over), `phone
-pair|wake|allow|refuse`, `wifi-setup [stop]`, and the usual
+`screen` for the panel image as hex, `about`, `battery`, `clock`, `power`, `radio`,
+`sd`, `wifi [on|off]`, `keys`, `ui` (`ui home` forces a full-refresh hand-over),
+`key boot|hold|pwr` (the same press the keys make, for a bench with no finger on
+the board), `phone pair|wake|allow|refuse`, `wifi-setup [stop]`, and the usual
 `set`/`get`/`diag`/`log`/`help`. The `screen` verb is how a transition's ghosting
 is measured without a camera.
 

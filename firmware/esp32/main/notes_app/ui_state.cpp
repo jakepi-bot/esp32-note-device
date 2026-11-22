@@ -115,9 +115,26 @@ Outcome UiState::press(Key key, uint32_t now_ms) {
 
 Outcome UiState::tick(uint32_t now_ms) {
   adopt_app_facts();
+  const Outcome followed = app_.follow_capture(capture_recording_, capture_elapsed_s_, now_ms);
   const Outcome synced = sync_app();
   Outcome out = app_.tick(now_ms);
   merge(out, synced);
+  merge(out, followed);
+  adopt_app_facts();
+  return out;
+}
+
+Outcome UiState::set_capture(bool recording, uint32_t elapsed_s, uint32_t now_ms) {
+  capture_recording_ = recording;
+  capture_elapsed_s_ = elapsed_s;
+  adopt_app_facts();
+  Outcome out = app_.follow_capture(recording, elapsed_s, now_ms);
+  adopt_app_facts();
+  return out;
+}
+
+Outcome UiState::decline(Effect effect) {
+  Outcome out = app_.decline(effect);
   adopt_app_facts();
   return out;
 }

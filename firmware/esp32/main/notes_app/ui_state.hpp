@@ -58,6 +58,13 @@ class UiState {
   Outcome press(Key key, uint32_t now_ms);
 
   Outcome tick(uint32_t now_ms);
+  // The runtime's own capture state, handed over before a tick or a publish.
+  // The screens follow it (ScreenApp::follow_capture): a capture that ended
+  // without a key leaves the recording face, one no key started enters it.
+  Outcome set_capture(bool recording, uint32_t elapsed_s, uint32_t now_ms);
+  // The runtime declined an effect the screens had acted on: put back the move
+  // it was for (ScreenApp::decline) and keep the snapshot honest.
+  Outcome decline(Effect effect);
   Outcome pairing_ask(uint32_t passkey);
   Outcome pairing_answer(bool allow);
   Outcome playback_finished();
@@ -97,6 +104,10 @@ class UiState {
   uint8_t upload_done_ = 0, upload_total_ = 0;
   uint32_t play_pos_s_ = 0;
   uint32_t play_total_s_ = 0;  // 0: the machine's own answer
+  // The runtime's last answer about the capture. Nothing here decides whether a
+  // recording is running: this is what the device says, and the screens follow.
+  bool capture_recording_ = false;
+  uint32_t capture_elapsed_s_ = 0;
 };
 
 }  // namespace hgp::notesui

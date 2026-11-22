@@ -755,8 +755,9 @@ denominator on the glass.
 
 **Update at most once every 5 s**, and never per second. A 14 s note refreshed at
 1 Hz would cost 14 partial refreshes for a bar that gains 12 px per second; at 5 s
-it costs 3 and the bar still reads as live. The number is the same one the
-recording counter uses:
+it costs 3 and the bar still reads as live. The recording counter is slower still
+(30 s, §10.3): it has no bar that has to look live, and a note whose length is
+read once a minute is the same note.
 
 ```c
 if (millis() - last_draw < 5000 && !state_changed) return;   // no flush at all
@@ -822,9 +823,9 @@ y=194  └───────────────────────�
 The elapsed time is the hero and the state word is the label: after one second the
 timer answers "did it start" better than the word does, and it keeps answering it.
 
-**No audio level meter.** The panel updates at most every 5 s, so a VU meter would
-be a 5-second-average of a 1-second signal — it would lie convincingly. A missing
-meter is better than a misleading one.
+**No audio level meter.** The panel updates at most every 30 s while recording, so
+a VU meter would be a half-minute average of a 1-second signal — it would lie
+convincingly. A missing meter is better than a misleading one.
 
 ### 10.2 The two-line footer is the safety rail
 
@@ -837,13 +838,14 @@ lines at all.
 
 | Change | Refresh |
 |---|---|
-| entering (`StartRecording`) | **FULL** |
-| elapsed + bar, every **5 s** | PARTIAL |
+| entering (`StartRecording`) | **FULL** — the frame says `0:00` |
+| elapsed + bar, every **30 s** | PARTIAL |
 | `StopKeep` → Home, `Discard` → Home, `PowerOff` | **FULL** |
 
-At 5 s cadence a 5-minute note costs 60 partials and 3 fulls. At 1 Hz it would cost
-300 partials and 15 full-screen flashes — the difference between a counter and a
-strobe. **The counter is driven by a tick count, never by a blocking delay in the
+At 30 s cadence a 5-minute note costs 10 partials and 3 fulls. At 1 Hz it would
+cost 300 partials and 15 full-screen flashes — the difference between a counter
+and a strobe; at 5 s it still cost 60 partials for a number nobody reads that
+often. **The counter is driven by a tick count, never by a blocking delay in the
 draw path** (§16).
 
 ---
@@ -1319,7 +1321,7 @@ All four ghost sources in this UI, with the mitigation that actually applies:
 | Source | Mechanism | Mitigation |
 |---|---|---|
 | **the selection bar moving** | a 184 × 18 solid block (3,312 black px) must go white on the row it left. Black → white is the transition the partial waveform handles worst | **after 8 consecutive bar moves with no other change, force a full refresh.** 8 moves is 7 vacated rows; one flash per 8 presses is rare enough not to annoy and frequent enough that a list never looks dirty |
-| **the elapsed-time digits** | glyphs change in place; the old strokes have to be erased | the region is repainted to `kPaper` first, and the counter ticks at 5 s (§9.2, §10.3), so at most 20 digit changes before the driver's own full |
+| **the elapsed-time digits** | glyphs change in place; the old strokes have to be erased | the region is repainted to `kPaper` first, and the counter ticks at 30 s (§10.3), so a handful of digit changes before the driver's own full |
 | **progress bars** | **none** — the fill only ever grows | nothing to mitigate, *provided the bar never shrinks*. A bar that resets (e.g. on a retry) must force a full refresh |
 | **screen changes** | §15.2 | full by rule |
 
@@ -1434,7 +1436,7 @@ that wrong once.
 | 10 | The mark key lives on the list's title line | it costs no vertical space and is never off-screen |
 | 11 | Scrolling is a cursor that rotates the window | the bar never leaves the glass, so a wrap never looks like a dropped press |
 | 12 | Delete confirm has no footer, no rows, no selection | it is a question, not a page you navigate; the body is the legend |
-| 13 | No audio level meter while recording | at a 5 s update it would be a 5-second average of a 1-second signal |
+| 13 | No audio level meter while recording | at a 30 s update it would be a half-minute average of a 1-second signal |
 | 14 | No splash screen on boot | a splash costs one extra full refresh before the first useful frame |
 | 15 | Upload progress is a Home substate, not a screen | it is a consequence of recording, not a place you go |
 | 16 | Errors are Home faces, never modals | a modal that needs a press to clear steals the gesture the user wanted to record with |

@@ -68,6 +68,18 @@ class NotesUi {
   using EffectHook = std::function<bool(notesui::Effect, uint16_t note)>;
   void set_effect_hook(EffectHook hook) { hook_ = std::move(hook); }
 
+  // The runtime's own capture, asked on every tick and on every runtime change.
+  // It is the truth the screens follow: a capture that ends without a key takes
+  // the glass off the recording face, and one no key started puts it on. The
+  // alternative - the screen believing its own optimistic flag - is what let the
+  // glass count a recording the runtime had already committed (console `notes
+  // stop`, a microphone error, the card going away).
+  struct CaptureProbe {
+    std::function<bool()> recording;
+    std::function<uint32_t()> elapsed_s;
+  };
+  void set_capture_probe(CaptureProbe probe) { capture_probe_ = std::move(probe); }
+
   // One key, one screen change (§13.2).
   void press(notesui::Key key);
 
@@ -113,9 +125,14 @@ class NotesUi {
   void stop_playback();
   static void play_task(void* arg);
   void play_loop();
+  // Asks the runtime what it is capturing and hands the answer to the screens.
+  // Returns the frame that move owes (Full when the screen changed, none when
+  // the two already agree).
+  notesui::Outcome sync_capture();
 
   Ports ports_;
   EffectHook hook_;
+  CaptureProbe capture_probe_;
   notesui::UiState state_;
   notesui::Facts facts_;
 

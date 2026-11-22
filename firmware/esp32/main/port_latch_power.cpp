@@ -13,12 +13,23 @@ bool LatchPower::begin(const LatchPowerConfig& cfg) {
   // A board can read the battery without a latch. Skip the enable pin then:
   // -1 would select a bogus mask and collide with the flash bus.
   if (cfg.enable >= 0) {
-    // Set the output latch before enabling the pin to avoid a low pulse at boot.
+    // The level goes into the output register first, while the pin is still an
+    // input: enabling the driver then turns it on at 1, with no low pulse. A
+    // low pulse here is a board on battery that switches itself off mid-boot.
+    // Written again after the configuration (a driver that clears the register
+    // must not cost the supply), then read back from the pad and logged.
+    //
+    // INPUT_OUTPUT, not OUTPUT: an output-only pad has its input buffer off, so
+    // the level cannot be read back and every check would report a supply that
+    // had been lost (which is what the first build of this did, once per pass).
     if (gpio_set_level(static_cast<gpio_num_t>(cfg.enable), 1) != ESP_OK) return false;
     gpio_config_t output = {};
     output.pin_bit_mask = 1ULL << cfg.enable;
-    output.mode = GPIO_MODE_OUTPUT;
+    output.mode = GPIO_MODE_INPUT_OUTPUT;
     if (gpio_config(&output) != ESP_OK) return false;
+    if (gpio_set_level(static_cast<gpio_num_t>(cfg.enable), 1) != ESP_OK) return false;
+    ESP_LOGI("hg.power", "battery latch on GPIO %d driven high (pad reads %d)", cfg.enable,
+             gpio_get_level(static_cast<gpio_num_t>(cfg.enable)));
   }
   if (cfg.backlight >= 0) {
     gpio_reset_pin(static_cast<gpio_num_t>(cfg.backlight));
@@ -137,6 +148,38 @@ bool LatchPower::power_off() {
   // still power the device independently.
   if (cfg_.enable < 0) return board_power_off ? board_power_off() : false;
   return gpio_set_level(static_cast<gpio_num_t>(cfg_.enable), 0) == ESP_OK;
+}
+
+int LatchPower::latch_level() {
+  if (cfg_.enable < 0) return -1;
+  return gpio_get_level(static_cast<gpio_num_t>(cfg_.enable));
+}
+
+// The pad is the supply on a battery board. Re-assert it whenever it reads low:
+// a level lost to a reset, a glitch or the pin's own configuration is a board
+// that dies the moment its cable leaves. True when the latch is high afterwards.
+bool LatchPower::hold() {
+  if (cfg_.enable < 0) return true;
+  const auto pin = static_cast<gpio_num_t>(cfg_.enable);
+  if (gpio_get_level(pin) == 1) return true;
+  const esp_err_t err = gpio_set_level(pin, 1);
+  // Once per half minute, not once per pass: a latch that really is lost is a
+  // board that is already off, and a board that cannot read the pad back would
+  // otherwise fill the log.
+  const int64_t now = esp_timer_get_time() / 1000;
+  if (now - last_latch_warn_ms_ >= 30000) {
+    last_latch_warn_ms_ = now;
+    ESP_LOGW("hg.power", "the battery latch on GPIO %d read low: re-asserted (%s); pad now %d", cfg_.enable,
+             err == ESP_OK ? "ok" : esp_err_to_name(err), gpio_get_level(pin));
+  }
+  return err == ESP_OK && gpio_get_level(pin) == 1;
+}
+
+// The PWR key's own level, 1 when released. The console reports it, because a
+// sense line that sits low on battery is a phantom press the firmware ignores.
+int LatchPower::key_level() const {
+  if (cfg_.key < 0) return -1;
+  return gpio_get_level(static_cast<gpio_num_t>(cfg_.key));
 }
 
 }  // namespace hgp

@@ -34,6 +34,7 @@ enum class Effect : uint8_t {
   SyncNow,         // connect, upload every pending note, come back to Home
   OpenWifiSetup,   // port_wifi_setup owns the panel until it returns
   OpenPhoneWindow, // port_ble's advertising window owns it until it returns
+  ClosePhoneWindow,// the Phone screen's back: the window ends now
   PairingAllow,    // BOOT on the ask: let the phone in (port_ble, then leave)
   PairingRefuse,   // PWR on the ask: reject it (port_ble, then leave)
   DeleteNote,
@@ -105,6 +106,12 @@ class ScreenApp {
   Outcome pairing_answer(bool allow);
   Outcome playback_finished();
 
+  // The Phone screen's window as the port reports it: the phase, the countdown
+  // and the pairing table. Returns the frame when the glass moved - a phase
+  // change draws, and so does the countdown once every five seconds, never at
+  // 1 Hz (t_9972e2a1).
+  Outcome set_phone(const PhoneStatus& status, uint32_t now_ms);
+
   Screen screen() const { return state_.screen; }
   const State& state() const { return state_; }
   const Snapshot& snapshot() const { return snap_; }
@@ -137,6 +144,10 @@ class ScreenApp {
   uint32_t play_draw_s_ = 0;   // the position's last drawn second
   uint32_t passkey_ = 0;
   bool play_done_ = false;
+  // The Phone screen's window: what the port last said, and the second the
+  // countdown was last drawn for.
+  PhoneStatus phone_;
+  uint32_t phone_left_s_ = 0;
 };
 
 }  // namespace hgp::notesui

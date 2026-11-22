@@ -60,6 +60,7 @@ inline constexpr const char* kTapKeep = "TAP: keep";
 // The queued recording face: the press ends the wait, it does not keep anything.
 inline constexpr const char* kBootCancel = "BOOT: cancel";
 inline constexpr const char* kHoldCancel = "HOLD: cancel";
+inline constexpr const char* kPwrClose = "PWR: close";
 }  // namespace key
 
 // Durations, shared by Recording and Playing: "%u:%02u" is M:SS and
@@ -107,6 +108,23 @@ namespace pairing {
 inline constexpr const char* kTitle = "PAIRING";
 inline constexpr const char* kSame = "Same as phone?";
 }  // namespace pairing
+
+// The Phone screen: the Bluetooth window a person opened from the menu. The
+// state words are uppercase, one word each, and the refusals name themselves -
+// a window that did not open has to say why (t_9972e2a1).
+namespace phone {
+inline constexpr const char* kTitle = "PHONE";
+inline constexpr const char* kAdvertising = "ADVERTISING";
+inline constexpr const char* kWaiting = "WAITING";
+inline constexpr const char* kConnected = "CONNECTED";
+inline constexpr const char* kClosed = "WINDOW CLOSED";
+inline constexpr const char* kTableFull = "PAIRING FULL";
+inline constexpr const char* kBusy = "RADIO BUSY";
+inline constexpr const char* kBleOff = "BLE OFF";
+inline constexpr const char* kHolding = "Held open";
+inline constexpr const char* kOff = "Radio off";
+inline constexpr const char* kTable = "%u OF %u PAIRED";
+}  // namespace phone
 
 namespace about {
 inline constexpr const char* kTitle = "ABOUT";

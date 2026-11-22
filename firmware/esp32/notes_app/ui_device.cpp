@@ -36,6 +36,22 @@ constexpr uint32_t kFactsMs = 1000;
 // Battery is an ADC read and the card's free space is a statfs: about 200 ms a
 // year at this cadence, and About is the only screen that reads them.
 constexpr uint32_t kSlowFactsMs = 60000;
+// The Phone screen's own poll. It is a handful of atomic reads (the controller,
+// the link, the window's deadline), and 250 ms is what makes a phone that
+// connects land on the glass while the person is still holding it.
+constexpr uint32_t kPhonePollMs = 250;
+
+// Why the Phone window could not open, in words, for the log. The screen has its
+// own copy of these (strings.hpp); this is the serial line an operator reads.
+const char* refusal_name(notesui::PhoneRefusal refusal) {
+  switch (refusal) {
+    case notesui::PhoneRefusal::None: return "no reason";
+    case notesui::PhoneRefusal::TableFull: return "the pairing table is full";
+    case notesui::PhoneRefusal::RadioBusy: return "the radio is busy";
+    case notesui::PhoneRefusal::BleOff: return "Bluetooth is off";
+  }
+  return "?";
+}
 
 const char* effect_name(notesui::Effect effect) {
   switch (effect) {
@@ -49,6 +65,7 @@ const char* effect_name(notesui::Effect effect) {
     case notesui::Effect::SyncNow: return "a sync";
     case notesui::Effect::OpenWifiSetup: return "the Wi-Fi setup page";
     case notesui::Effect::OpenPhoneWindow: return "the phone window";
+    case notesui::Effect::ClosePhoneWindow: return "the phone window's close";
     case notesui::Effect::PairingAllow: return "a pairing answer";
     case notesui::Effect::PairingRefuse: return "a pairing refusal";
     case notesui::Effect::DeleteNote: return "a delete";
@@ -66,6 +83,7 @@ const char* screen_name(notesui::Screen screen) {
     case notesui::Screen::ConfirmDelete: return "confirm-delete";
     case notesui::Screen::Playing: return "playing";
     case notesui::Screen::Pairing: return "pairing";
+    case notesui::Screen::Phone: return "phone";
     case notesui::Screen::About: return "about";
     case notesui::Screen::Back: return "back";
   }
@@ -149,6 +167,42 @@ void NotesUi::poll_facts(uint32_t now_ms, bool slow) {
   if (!begun_) return;
   const notesui::Outcome out = state_.set_facts(facts_, now_ms);
   apply(out, now_ms);
+}
+
+// The Phone screen's window, as the port sees it: the controller, the link, the
+// deadline and the pairing table. A window that is over (left_ms 0) is Closed;
+// one that is up is Waiting, or Connected when a phone is on it; one whose
+// controller is still coming up is Advertising.
+notesui::PhoneStatus NotesUi::read_phone() const {
+  notesui::PhoneStatus status;
+  if (ports_.radio == nullptr) {
+    status.phase = notesui::PhonePhase::Refused;
+    status.refusal = notesui::PhoneRefusal::BleOff;
+    return status;
+  }
+  const PhoneWindow window = ports_.radio->phone_window();
+  status.paired = window.paired;
+  status.slots = window.slots;
+  status.connected = window.connected;
+  status.left_ms = window.left_ms;
+  status.phase = window.left_ms == 0      ? notesui::PhonePhase::Closed
+                 : window.connected       ? notesui::PhonePhase::Connected
+                 : window.ready           ? notesui::PhonePhase::Waiting
+                                          : notesui::PhonePhase::Advertising;
+  return status;
+}
+
+// Only the Phone screen asks for this. Everything else in the screens is driven
+// by events; this is a countdown and a link, so it is polled - on the app task,
+// on its own clock, and never from the draw path.
+void NotesUi::poll_phone(uint32_t now_ms) {
+  if (!begun_ || state_.screen() != notesui::Screen::Phone) {
+    last_phone_ms_ = 0;
+    return;
+  }
+  if (last_phone_ms_ != 0 && now_ms - last_phone_ms_ < kPhonePollMs) return;
+  last_phone_ms_ = now_ms == 0 ? 1 : now_ms;
+  apply(state_.set_phone(read_phone(), now_ms), now_ms);
 }
 
 void NotesUi::render(notesui::Refresh refresh) {
@@ -249,9 +303,54 @@ void NotesUi::apply(const notesui::Outcome& outcome, uint32_t now_ms) {
       // window to open.
       ESP_LOGW(TAG, "no runtime to sync with");
       break;
-    case notesui::Effect::OpenPhoneWindow:
-      if (ports_.radio != nullptr) ports_.radio->open_pairing();
-      break;
+    case notesui::Effect::OpenPhoneWindow: {
+      // The row's own screen. The port answers whether the window opened and,
+      // when it did not, why - and that answer is what the glass shows instead
+      // of a flash back to where the person came from (t_9972e2a1).
+      notesui::PhoneStatus status;
+      if (ports_.radio == nullptr) {
+        status.phase = notesui::PhonePhase::Refused;
+        status.refusal = notesui::PhoneRefusal::BleOff;
+        ESP_LOGW(TAG, "the Phone row has no radio to open");
+      } else {
+        switch (ports_.radio->open_phone_window()) {
+          case PhoneOpen::Opened:
+            status = read_phone();
+            break;
+          case PhoneOpen::TableFull:
+            status.phase = notesui::PhonePhase::Refused;
+            status.refusal = notesui::PhoneRefusal::TableFull;
+            break;
+          case PhoneOpen::RadioBusy:
+            status.phase = notesui::PhonePhase::Refused;
+            status.refusal = notesui::PhoneRefusal::RadioBusy;
+            break;
+          case PhoneOpen::BleOff:
+            status.phase = notesui::PhonePhase::Refused;
+            status.refusal = notesui::PhoneRefusal::BleOff;
+            break;
+        }
+        status.paired = ports_.radio->phone_window().paired;
+        status.slots = ports_.radio->phone_window().slots;
+        if (status.phase == notesui::PhonePhase::Refused) {
+          ESP_LOGW(TAG, "the Phone window did not open: %s", refusal_name(status.refusal));
+        }
+      }
+      last_phone_ms_ = ports_.system != nullptr ? ports_.system->now_ms() : 0;
+      // One frame for the hand-over: the status if it moved the glass, the
+      // row's own screen if it did not (the window opening is always a frame).
+      const notesui::Outcome shown = state_.set_phone(status, now_ms);
+      if (shown.draw) {
+        apply(shown, now_ms);
+      } else {
+        render(notesui::Refresh::Full);
+      }
+      return;  // the Phone frame is drawn; the menu's turn is over
+    }
+    case notesui::Effect::ClosePhoneWindow:
+      if (ports_.radio != nullptr) ports_.radio->close_phone_window();
+      last_phone_ms_ = 0;
+      break;  // the menu's own frame follows below
     case notesui::Effect::OpenWifiSetup:
       if (ports_.wifi != nullptr) ports_.wifi->start_setup();
       break;
@@ -312,6 +411,10 @@ void NotesUi::tick(uint32_t now_ms) {
     if (slow) last_slow_facts_ms_ = last_facts_ms_;
     poll_facts(now_ms, slow);
   }
+
+  // The Phone screen: a countdown and a link, the only things on the glass that
+  // move without an event.
+  poll_phone(now_ms);
 
   // Playback publishes its position; the screen draws at 5 s (§9.2).
   if (play_state_.load() == Play::Running) {
@@ -469,6 +572,19 @@ std::string NotesUi::console(std::string_view line) {
     // A full refresh across the next frame: what a screen hand-over does.
     render(notesui::Refresh::Full);
     return std::string("@ok redrawn");
+  }
+  if (line.rfind("ui press ", 0) == 0) {
+    // A key, for a host with no finger on the board. The same entry the GPIO
+    // poll uses, so what this proves is what a press does (QA and the bench: a
+    // transition that needs a physical key is a transition CI cannot reach).
+    const std::string_view which(line.substr(9));
+    notesui::Key key;
+    if (which == "boot") key = notesui::Key::BootTap;
+    else if (which == "hold") key = notesui::Key::BootHold;
+    else if (which == "pwr") key = notesui::Key::Power;
+    else return std::string("@error usage: ui press boot|hold|pwr");
+    press(key);
+    return std::string("@ok screen ") + screen_name(state_.screen());
   }
   return std::string();
 }

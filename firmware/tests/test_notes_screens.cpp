@@ -642,12 +642,17 @@ TEST("render: every screen inks paper only - x 4..196, y <= 186 at 1 bit") {
   frame.playing.total_s = 14;
   frame.playing.bar_pct = 42;
   std::snprintf(frame.pairing.digits, sizeof frame.pairing.digits, "418 207");
+  std::snprintf(frame.phone.name, sizeof frame.phone.name, "Hermes-1a2b");
+  frame.phone.state = phone::kWaiting;
+  std::snprintf(frame.phone.countdown, sizeof frame.phone.countdown, "4:59");
+  std::snprintf(frame.phone.table, sizeof frame.phone.table, "2 OF 3 PAIRED");
+  frame.phone.note = phone::kHolding;
   frame.about = build_about(Snapshot{});
 
   static uint16_t fb[200 * 200];
   const Screen screens[] = {Screen::Home,   Screen::Menu,     Screen::NoteList,
                             Screen::NoteAction, Screen::ConfirmDelete, Screen::Playing,
-                            Screen::Recording, Screen::Pairing, Screen::About};
+                            Screen::Recording, Screen::Pairing, Screen::Phone, Screen::About};
   for (Screen screen : screens) {
     frame.screen = screen;
     std::memset(fb, 0xFF, sizeof fb);  // paper
@@ -689,4 +694,149 @@ TEST("render: the confirm has no footer, the list marks the exception") {
     }
   }
   CHECK(!inked_below_160);
+}
+
+// ---------------------------------------------------------------------------
+// The Phone screen (t_9972e2a1): the menu row's own screen, the port's answer,
+// the countdown's beat, every refusal, and the window ending on its own.
+
+namespace {
+
+// Menu -> Phone the way a person does it: a hold opens the menu, BOOT walks to
+// the row, PWR selects it. Returns the effect the row produced.
+Outcome open_phone_row(ScreenApp& app, uint32_t now_ms = 0) {
+  for (int i = 0; i < 8 && app.screen() != Screen::Home; ++i) app.press(Key::BootHold, now_ms);
+  app.press(Key::BootHold, now_ms);
+  while (static_cast<MenuItem>(app.state().menu) != MenuItem::Phone) app.press(Key::BootTap, now_ms);
+  return app.press(Key::Power, now_ms);
+}
+
+PhoneStatus phone_status(PhonePhase phase, uint32_t left_ms) {
+  PhoneStatus s;
+  s.phase = phase;
+  s.left_ms = left_ms;
+  s.paired = 2;
+  s.slots = 3;
+  return s;
+}
+
+}  // namespace
+
+TEST("phone: the menu row opens its own screen, not a flash back to the menu") {
+  Snapshot snap;
+  std::snprintf(snap.device, sizeof snap.device, "Hermes-1a2b");
+  ScreenApp app;
+  app.begin(snap);
+
+  const Outcome open = open_phone_row(app);
+  CHECK(open.effect == Effect::OpenPhoneWindow);
+  CHECK(open.refresh == Refresh::Full);
+  CHECK(app.screen() == Screen::Phone);
+  const ScreenDraw first = app.frame();
+  CHECK(first.screen == Screen::Phone);
+  // Nothing from the port yet: the screen says ADVERTISING and no table.
+  CHECK(std::string(first.phone.name) == "Hermes-1a2b");
+  CHECK(std::string(first.phone.state) == phone::kAdvertising);
+  CHECK(first.phone.countdown[0] == '\0');
+}
+
+TEST("phone: the port's answer draws the countdown and the pairing table") {
+  Snapshot snap;
+  std::snprintf(snap.device, sizeof snap.device, "Hermes-1a2b");
+  ScreenApp app;
+  app.begin(snap);
+  open_phone_row(app);
+
+  const Outcome waiting = app.set_phone(phone_status(PhonePhase::Waiting, 295000), 1000);
+  CHECK(waiting.draw);
+  const PhoneView view = app.frame().phone;
+  CHECK(std::string(view.state) == phone::kWaiting);
+  CHECK(std::string(view.countdown) == "4:55");
+  CHECK(std::string(view.table) == "2 OF 3 PAIRED");
+
+  // A phone connects: the word changes, the clock goes away (the window is
+  // held open), and both are one full frame.
+  PhoneStatus connected = phone_status(PhonePhase::Connected, 60000);
+  connected.connected = true;
+  const Outcome on_link = app.set_phone(connected, 2000);
+  CHECK(on_link.draw);
+  CHECK(on_link.refresh == Refresh::Full);
+  CHECK(std::string(app.frame().phone.state) == phone::kConnected);
+  CHECK(app.frame().phone.countdown[0] == '\0');
+  CHECK(std::string(app.frame().phone.note) == phone::kHolding);
+}
+
+TEST("phone: the countdown repaints on the five second beat, not at 1 Hz") {
+  ScreenApp app;
+  app.begin(Snapshot{});
+  open_phone_row(app);
+  PhoneStatus st = phone_status(PhonePhase::Waiting, 296000);  // 4:56
+  CHECK(app.set_phone(st, 0).draw);  // the first answer draws the clock
+  st.left_ms = 294000;               // 4:54: the beat moved
+  CHECK(app.set_phone(st, 1000).draw);
+  st.left_ms = 292000;  // within the same beat
+  CHECK(!app.set_phone(st, 2000).draw);
+  st.left_ms = 290000;
+  CHECK(!app.set_phone(st, 3000).draw);
+  st.left_ms = 289000;  // 4:49: one beat on
+  const Outcome moved = app.set_phone(st, 4000);
+  CHECK(moved.draw);
+  CHECK(moved.refresh == Refresh::Partial);
+}
+
+TEST("phone: every refusal is a word on the glass, with no clock") {
+  const PhoneRefusal refusals[] = {PhoneRefusal::TableFull, PhoneRefusal::RadioBusy, PhoneRefusal::BleOff};
+  const char* words[] = {phone::kTableFull, phone::kBusy, phone::kBleOff};
+  for (int i = 0; i < 3; ++i) {
+    ScreenApp app;
+    app.begin(Snapshot{});
+    open_phone_row(app);
+    PhoneStatus st;
+    st.phase = PhonePhase::Refused;
+    st.refusal = refusals[i];
+    const Outcome out = app.set_phone(st, 0);
+    CHECK(out.draw);
+    CHECK(out.refresh == Refresh::Full);
+    const PhoneView view = app.frame().phone;
+    CHECK(std::string(view.state) == words[i]);
+    CHECK(view.countdown[0] == '\0');
+    CHECK(view.note == nullptr);
+    // The screen is still the row's own: no flash back to the menu.
+    CHECK(app.screen() == Screen::Phone);
+  }
+}
+
+TEST("phone: the window closes by itself and the screen says so") {
+  ScreenApp app;
+  app.begin(Snapshot{});
+  open_phone_row(app);
+  CHECK(app.set_phone(phone_status(PhonePhase::Waiting, 1000), 0).draw);
+  const Outcome closed = app.set_phone(phone_status(PhonePhase::Closed, 0), 1000);
+  CHECK(closed.draw);
+  CHECK(closed.refresh == Refresh::Full);  // the word changed
+  CHECK(std::string(app.frame().phone.state) == phone::kClosed);
+  CHECK(std::string(app.frame().phone.note) == phone::kOff);
+  CHECK(app.frame().phone.countdown[0] == '\0');
+  CHECK(app.screen() == Screen::Phone);  // it stays on the glass, honestly closed
+}
+
+TEST("phone: closing the screen ends the window and returns to the menu") {
+  ScreenApp app;
+  app.begin(Snapshot{});
+  open_phone_row(app);
+  app.set_phone(phone_status(PhonePhase::Waiting, 200000), 0);
+
+  const Outcome by_power = app.press(Key::Power, 1000);
+  CHECK(by_power.effect == Effect::ClosePhoneWindow);
+  CHECK(by_power.refresh == Refresh::Full);
+  CHECK(app.screen() == Screen::Menu);
+
+  // The row is still selected: PWR opens it again, and a hold closes the window
+  // the same way a PWR tap does.
+  CHECK(app.state().menu == static_cast<uint8_t>(MenuItem::Phone));
+  CHECK(app.press(Key::Power, 1500).effect == Effect::OpenPhoneWindow);
+  CHECK(app.screen() == Screen::Phone);
+  const Outcome by_hold = app.press(Key::BootHold, 2000);
+  CHECK(by_hold.effect == Effect::ClosePhoneWindow);
+  CHECK(app.screen() == Screen::Menu);
 }

@@ -69,6 +69,9 @@ class UiState {
   Outcome pairing_ask(uint32_t passkey);
   Outcome pairing_answer(bool allow);
   Outcome playback_finished();
+  // The Phone screen's window, straight from the port: no card work, so it is
+  // the screens' own answer and nothing here has to re-read anything.
+  Outcome set_phone(const PhoneStatus& status, uint32_t now_ms);
 
   // Upload progress and the player's position belong to their owners; they hand
   // them over here so the next frame draws them.

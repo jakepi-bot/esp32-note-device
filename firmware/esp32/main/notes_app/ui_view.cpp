@@ -264,6 +264,46 @@ bool build_confirm(const Snapshot& snap, uint16_t index, ConfirmView& out) {
   return true;
 }
 
+// The Phone screen: the port's phase as one word, the window's clock, and the
+// pairing table. A refusal is a word too - "PAIRING FULL" is the reason, in the
+// same slot the state goes in, so the screen never says nothing (t_9972e2a1).
+PhoneView build_phone(const Snapshot& snap, const PhoneStatus& status) {
+  PhoneView view;
+  copy_out(snap.device, view.name, sizeof view.name);
+  switch (status.phase) {
+    case PhonePhase::Advertising:
+      view.state = phone::kAdvertising;
+      break;
+    case PhonePhase::Waiting:
+      view.state = phone::kWaiting;
+      break;
+    case PhonePhase::Connected:
+      view.state = phone::kConnected;
+      break;
+    case PhonePhase::Closed:
+      view.state = phone::kClosed;
+      break;
+    case PhonePhase::Refused:
+      view.state = status.refusal == PhoneRefusal::TableFull ? phone::kTableFull
+                   : status.refusal == PhoneRefusal::RadioBusy ? phone::kBusy
+                                                              : phone::kBleOff;
+      break;
+  }
+  // The countdown is a real deadline, so it is drawn only while one is running:
+  // a connected phone holds the window open and a refusal has no clock at all.
+  // Rounded up, so a fresh window reads 5:00 rather than 4:59.
+  if (status.left_ms != 0 && status.phase != PhonePhase::Connected) {
+    format_duration((status.left_ms + 999) / 1000, view.countdown);
+  }
+  if (status.slots != 0) {
+    std::snprintf(view.table, sizeof view.table, phone::kTable, static_cast<unsigned>(status.paired),
+                  static_cast<unsigned>(status.slots));
+  }
+  if (status.phase == PhonePhase::Connected) view.note = phone::kHolding;
+  else if (status.phase == PhonePhase::Closed) view.note = phone::kOff;
+  return view;
+}
+
 AboutView build_about(const Snapshot& snap) {
   AboutView view;
   view.label[0] = about::kBattery;

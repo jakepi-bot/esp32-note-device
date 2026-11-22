@@ -190,6 +190,21 @@ void pairing_face(hg::Canvas& c, const ScreenDraw& d) {
   draw_footer(c, key::kHoldNothing);
 }
 
+// The Phone screen: what the Bluetooth window is doing, the device's name (what
+// the phone's chooser lists), the countdown, and the pairing table. A window
+// that could not open says why in the state slot - never a blank page.
+void phone_face(hg::Canvas& c, const ScreenDraw& d) {
+  const PhoneView& v = d.phone;
+  text_at(c, grid::kLeft, grid::kBandY, phone::kTitle, grid::kScale, kInk);
+  rule(c, grid::kRuleY);
+  draw_centred(c, 36, v.name[0] != '\0' ? v.name : nullptr, grid::kScale);
+  draw_centred(c, 54, v.state, grid::kScale);
+  draw_centred(c, 74, v.countdown[0] != '\0' ? v.countdown : nullptr, grid::kHero);
+  draw_centred(c, 104, v.table[0] != '\0' ? v.table : nullptr, grid::kScale);
+  draw_centred(c, 124, v.note, grid::kScale);
+  draw_footer(c, key::kPwrClose, key::kHoldBack);
+}
+
 void about_face(hg::Canvas& c, const ScreenDraw& d) {
   text_at(c, grid::kLeft, grid::kBandY, about::kTitle, grid::kScale, kInk);
   rule(c, grid::kRuleY);
@@ -247,6 +262,7 @@ void draw(hg::Canvas& c, const ScreenDraw& d) {
     case Screen::ConfirmDelete: confirm_face(c, d); break;
     case Screen::Playing: playing_face(c, d); break;
     case Screen::Pairing: pairing_face(c, d); break;
+    case Screen::Phone: phone_face(c, d); break;
     case Screen::About: about_face(c, d); break;
     case Screen::Back: home_face(c, d); break;
   }

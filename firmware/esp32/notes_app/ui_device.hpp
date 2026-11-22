@@ -121,6 +121,10 @@ class NotesUi {
   // and the card's free space on the slow poll.
   notesui::Facts read_facts() const;
   void poll_facts(uint32_t now_ms, bool slow);
+  // The Phone screen's window: the port's phase, clock and table, asked on its
+  // own cadence while that screen is up (and never from the draw path).
+  notesui::PhoneStatus read_phone() const;
+  void poll_phone(uint32_t now_ms);
   void render(notesui::Refresh refresh);
   void apply(const notesui::Outcome& outcome, uint32_t now_ms);
   // Draws the frame an effect left behind - or, when the effect moved the card,
@@ -153,6 +157,9 @@ class NotesUi {
   uint16_t pending_dirty_ = notesui::DirtyNone;
   uint32_t last_facts_ms_ = 0;
   uint32_t last_slow_facts_ms_ = 0;
+  // The Phone screen polls the port on its own clock: the window's deadline and
+  // a phone connecting are not facts the other screens' 1 s poll would carry.
+  uint32_t last_phone_ms_ = 0;
   std::atomic<Play> play_state_{Play::Idle};
 
   notes::WavReader reader_;

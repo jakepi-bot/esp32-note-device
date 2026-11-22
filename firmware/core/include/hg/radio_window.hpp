@@ -28,11 +28,13 @@ class RadioWindow {
     uint32_t retry_ms = 300000;      // notes still waiting: try this often
     uint32_t retry_hold_ms = 30000;  // how long each retry listens
     uint32_t trigger_ms = 60000;     // an explicit wake (console `phone wake`)
+    uint32_t phone_ms = 300000;      // Menu -> Phone: five minutes to pair or sync
+    uint32_t phone_link_ms = 60000;  // a connected phone holds the deadline this far out
     uint32_t grace_ms = 20000;       // stay up this long after a window closes
   };
 
   // Why the radio is up, for the console and the log line.
-  enum class Reason : uint8_t { Rest, Boot, Pairing, Note, Pending, Link, Wake };
+  enum class Reason : uint8_t { Rest, Boot, Pairing, Note, Pending, Link, Wake, Phone };
 
   RadioWindow() = default;
   explicit RadioWindow(const Timing& timing) : timing_(timing) {}
@@ -46,6 +48,17 @@ class RadioWindow {
   void note_saved(uint32_t now_ms);
   // Someone asked for the radio by hand.
   void trigger(uint32_t now_ms);
+  // Menu -> Phone: the five-minute window a person asked for, so a phone has
+  // time to pair and take the notes waiting on the card.
+  void phone(uint32_t now_ms);
+  // The phone window was closed by the person (the screen's back): no deadline
+  // and no grace after it, so the controller can rest on the next pass.
+  void phone_closed(uint32_t now_ms);
+  // Whether the pairing exchange may go ahead right now: the `phone pair`
+  // window, or the Phone screen's own window.
+  bool pairing_open(uint32_t now_ms) const {
+    return before(now_ms, pair_until_) || before(now_ms, phone_until_);
+  }
   // A link went up (keeps the radio warm) or down (a short grace, then rest).
   void connected(bool up, uint32_t now_ms);
   // How many notes are waiting for a phone. A count that stays above zero
@@ -60,6 +73,11 @@ class RadioWindow {
   Reason why(uint32_t now_ms) const;
   static const char* name(Reason reason);
 
+  // The phone window's own clock: how long it has left, 0 when none is open.
+  // The screen's countdown reads this, and it stops at zero rather than
+  // counting through the grace the controller stays up for.
+  uint32_t phone_left_ms(uint32_t now_ms) const;
+
   const Timing& timing() const { return timing_; }
 
  private:
@@ -69,12 +87,17 @@ class RadioWindow {
   // Each reason sets its own deadline and pulls the grace deadline with it, so
   // the radio does not flap at the edge of a window.
   void open(uint32_t& until, uint32_t now_ms, uint32_t duration_ms, Reason reason);
+  // The same, for a deadline that is only ever pushed further out: a connected
+  // phone holds the phone window open without shortening anybody's timer.
+  void extend(uint32_t& until, uint32_t now_ms, uint32_t duration_ms, Reason reason);
 
   Timing timing_{};
   uint32_t boot_until_ = 0;
   uint32_t pair_until_ = 0;
   uint32_t note_until_ = 0;
   uint32_t trigger_until_ = 0;
+  uint32_t phone_until_ = 0;
+  bool phone_wanted_ = false;  // the person opened the screen's window and has not closed it
   uint32_t grace_until_ = 0;
   uint32_t retry_until_ = 0;
   uint32_t next_retry_ms_ = 0;

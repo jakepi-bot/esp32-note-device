@@ -15,6 +15,7 @@
 //   Confirm    keep the note      keep the note         delete the note
 //   Playing    power off          stop                  stop
 //   Pairing    refuse the phone   allow the phone       (nothing)
+//   Phone      close the window   (nothing)             back to the menu
 //   About      power off          (nothing)             back to menu
 //
 // Nothing here decides what "select" means for a menu row: the caller maps
@@ -35,6 +36,7 @@ enum class Screen : uint8_t {
   ConfirmDelete,
   Playing,
   Pairing,
+  Phone,  // the Bluetooth window a person opened from the menu
   About,
   Back,  // internal: "leave this screen", resolved by the caller
 };
@@ -68,6 +70,7 @@ enum class Action : uint8_t {
   StopPlay,
   AllowPhone,
   RefusePhone,
+  ClosePhone,  // leave the Phone screen: the window ends with it
   Back,
 };
 

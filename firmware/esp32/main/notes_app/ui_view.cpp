@@ -15,6 +15,12 @@ void copy_out(const char* text, char* out, size_t size) {
   std::snprintf(out, size, "%s", text ? text : "");
 }
 
+// Every duration these formatters read is held to the contract's 24 h ceiling
+// (its own duration_seconds range), so the hour field is one or two columns and
+// the compiler can bound each conversion - and nothing on the glass can print a
+// number no note can have.
+uint32_t held_to_ceiling(uint32_t seconds) { return seconds > notes::kMaxDurationS ? notes::kMaxDurationS : seconds; }
+
 }  // namespace
 
 const char* month_name(unsigned month) {
@@ -46,31 +52,76 @@ void format_clock(const Stamp& stamp, char out[6]) {
   std::snprintf(out, 6, "%02u:%02u", hour, minute);
 }
 
-void format_duration(uint32_t seconds, char out[8]) {
-  // 99:59 is the ceiling the slot takes, and a note may now run for hours, so a
-  // longer time is clamped here for the glass only (the note keeps its real
-  // length; the cap line, format_of, does show hours).
-  const uint32_t shown = seconds > 99u * 60u + 59u ? 99u * 60u + 59u : seconds;
-  std::snprintf(out, 8, "%u:%02u", static_cast<unsigned>(shown / 60),
-                static_cast<unsigned>(shown % 60));
+void format_duration(uint32_t seconds, char out[10]) {
+  seconds = held_to_ceiling(seconds);
+  // A note runs for hours now, so a duration past the old 99:59 ceiling keeps
+  // its real value: "1:40:05", not a clamp the person would read as the length.
+  if (seconds >= 3600u) {
+    std::snprintf(out, 10, "%u:%02u:%02u", static_cast<unsigned>(seconds / 3600u),
+                  static_cast<unsigned>((seconds / 60u) % 60u), static_cast<unsigned>(seconds % 60u));
+    return;
+  }
+  std::snprintf(out, 10, "%u:%02u", static_cast<unsigned>(seconds / 60u),
+                static_cast<unsigned>(seconds % 60u));
 }
 
-void format_of(uint32_t seconds, char out[11]) {
-  // The cap slot takes "OF 99:59", and a note's cap is now the whole card
-  // (DeviceConfig::note_max_s defaults to 86400 s), so anything longer is shown
-  // in hours and minutes: "OF 24:00" reads as "as long as the card lasts", where
-  // a clamped "OF 99:59" would be a lie.
-  if (seconds > 99u * 60u + 59u) {
-    // Clamped to what the slot can hold (999 h), so the compiler can bound the
-    // conversion instead of refusing it: nothing the firmware records is close.
-    uint32_t hours = seconds / 3600u;
-    if (hours > 999u) hours = 999u;
-    std::snprintf(out, 11, "OF %u:%02u", static_cast<unsigned>(hours),
+void format_duration_short(uint32_t seconds, char out[6]) {
+  seconds = held_to_ceiling(seconds);
+  // Five columns, for the line that also carries the note's clock. An hour or
+  // more becomes "1h40": the note screen's slot is 14 columns at the body size
+  // and "14:02 · 1:40:05" is one column past it.
+  if (seconds >= 3600u) {
+    std::snprintf(out, 6, "%uh%02u", static_cast<unsigned>(seconds / 3600u),
                   static_cast<unsigned>((seconds / 60u) % 60u));
     return;
   }
-  std::snprintf(out, 11, "OF %u:%02u", static_cast<unsigned>(seconds / 60u),
+  std::snprintf(out, 6, "%u:%02u", static_cast<unsigned>(seconds / 60u),
                 static_cast<unsigned>(seconds % 60u));
+}
+
+void format_of(uint32_t seconds, char out[13]) {
+  seconds = held_to_ceiling(seconds);
+  // The cap of a recording or a playing note, in the same shape as the counter
+  // beside it: "OF 5:00" below an hour, "OF 1:40:05" past it. Never a clamp.
+  if (seconds >= 3600u) {
+    std::snprintf(out, 13, "OF %u:%02u:%02u", static_cast<unsigned>(seconds / 3600u),
+                  static_cast<unsigned>((seconds / 60u) % 60u), static_cast<unsigned>(seconds % 60u));
+    return;
+  }
+  std::snprintf(out, 13, "OF %u:%02u", static_cast<unsigned>(seconds / 60u),
+                static_cast<unsigned>(seconds % 60u));
+}
+
+void format_cap(uint32_t seconds, uint64_t bytes, char out[24]) {
+  seconds = held_to_ceiling(seconds);
+  // The recording face's cap: how long this note can still run, and the room
+  // that length is made of. The size is the capture's own budget (free space
+  // less the reserve, never past the per-note ceiling), so the line answers
+  // "what will this note hold" in the same breath as "how long is that".
+  //
+  // The time is to the minute once past an hour - the cap is an estimate and its
+  // slot is 14 columns at the body size - while the counter beside it stays
+  // exact to the second. No spaces around the dot: "OF 12:26·2.0G" is the widest
+  // line this can be, and it fits where "OF 12:26 · 2.0G" would not.
+  char time_left[13];
+  if (seconds >= 3600u) {
+    std::snprintf(time_left, sizeof time_left, "OF %u:%02u", static_cast<unsigned>(seconds / 3600u),
+                  static_cast<unsigned>((seconds / 60u) % 60u));
+  } else {
+    std::snprintf(time_left, sizeof time_left, "OF %u:%02u", static_cast<unsigned>(seconds / 60u),
+                  static_cast<unsigned>(seconds % 60u));
+  }
+  if (bytes == 0) {
+    copy_out(time_left, out, 24);
+    return;
+  }
+  char size[10];
+  if (bytes >= 1024ull * 1024ull * 1024ull) {
+    format_capacity(bytes, size);  // "2.0G"
+  } else {
+    std::snprintf(size, sizeof size, "%uM", static_cast<unsigned>(bytes / (1024ull * 1024ull)));
+  }
+  std::snprintf(out, 24, "%s·%s", time_left, size);
 }
 
 Stamp stamp_from_unix(int64_t unix_s) {
@@ -253,9 +304,18 @@ bool build_note(const Snapshot& snap, uint16_t index, uint8_t selected, NoteView
   if (note == nullptr) return false;
   out = NoteView{};
   copy_out(note->day, out.day, sizeof out.day);
-  char duration[8];
+  // The clock and the length on one line, 14 columns at the body size. A note of
+  // more than 100 minutes cannot fit "14:02 · 1:40:05" there, so it takes the
+  // short form ("14:02 · 1h40"): the real length, never the old 99:59 clamp.
+  char duration[10];
   format_duration(note->duration_s, duration);
-  std::snprintf(out.when, sizeof out.when, "%s · %.5s", note->clock, duration);
+  if (std::strlen(note->clock) + 3 + std::strlen(duration) > 14) {
+    char short_duration[6];
+    format_duration_short(note->duration_s, short_duration);
+    std::snprintf(out.when, sizeof out.when, "%s · %s", note->clock, short_duration);
+  } else {
+    std::snprintf(out.when, sizeof out.when, "%s · %s", note->clock, duration);
+  }
   out.state = note->mark == NoteMark::Pending ? note::kPending
               : note->mark == NoteMark::Failed ? note::kFailed
                                               : note::kSent;

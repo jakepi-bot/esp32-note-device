@@ -7,9 +7,12 @@
 #include "check.hpp"
 
 #include <dirent.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cerrno>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -446,6 +449,165 @@ TEST("the per-note ceiling and the duration ceiling are the hub's numbers too") 
   // The 24 h time cap never binds before the byte cap does (12.4 h at 48 KB/s),
   // so the ceiling a user meets is the file size, not a stopwatch.
   CHECK(uint64_t(kMaxDurationS) * kSampleRate * kChannels * 2u > uint64_t(kMaxNoteBytes));
+  // A note's file stops short of the ceiling by the multipart head and tail: the
+  // device HTTP stack declares the body length as a signed int, so a 2 GiB body
+  // would go out as a negative Content-Length.
+  CHECK(kMaxNoteFileBytes < kMaxNoteBytes);
+  CHECK(kMaxNoteFileBytes + 64ull * 1024ull == kMaxNoteBytes);
+  CHECK(kMaxNoteFileBytes < 2147483647ull);  // INT32_MAX, with room for the framing
+}
+
+TEST("a note's budget is the card's free space less the reserve, capped at the ceiling") {
+  // 256 MB is the room a note may not spend: a card with that much free (or
+  // less) has no room for a recording at all.
+  CHECK_EQ(note_budget_bytes(0), uint64_t(0));
+  CHECK_EQ(note_budget_bytes(kNoteReserveBytes), uint64_t(0));
+  CHECK_EQ(note_budget_bytes(kNoteReserveBytes + 1), uint64_t(0));  // not a whole sample
+  // 300 MB free is 44 MB of note: about fifteen minutes of 16-bit mono.
+  CHECK_EQ(note_budget_bytes(300ull * 1024ull * 1024ull), uint64_t(44ull * 1024ull * 1024ull));
+  // A roomy card is held to the per-note ceiling, and never past what one upload
+  // can declare.
+  CHECK_EQ(note_budget_bytes(64ull * 1024ull * 1024ull * 1024ull), kMaxNoteFileBytes);
+  // The reserve is spent first: 2 GiB free is a 1.75 GiB note, and only a card
+  // with the ceiling plus the reserve free is held to kMaxNoteFileBytes.
+  CHECK_EQ(note_budget_bytes(kMaxNoteBytes), uint64_t(kMaxNoteBytes - kNoteReserveBytes));
+  CHECK_EQ(note_budget_bytes(4ull * 1024ull * 1024ull * 1024ull), kMaxNoteFileBytes);
+  // Always a whole sample, so the file the count describes is a WAV.
+  CHECK_EQ(note_budget_bytes(300ull * 1024ull * 1024ull + 1) % 2, uint64_t(0));
+}
+
+TEST("a note started on a nearly full card is capped by the card, and commits what it holds") {
+  // The card decision, without a card: 300 MB free is a 44 MB note, and the
+  // capture says so before the first sample.
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  Meta m = sample_meta();
+  m.note_id = make_note_id(m.device_id, 1795140312, 21);
+  Capture capture;
+  std::string error;
+  CHECK(capture.start(store, m.note_id, kMaxDurationS, 300ull * 1024ull * 1024ull, error));
+  CHECK_EQ(capture.budget_bytes(), uint64_t(44ull * 1024ull * 1024ull));
+  CHECK_EQ(capture.cap_seconds(), 961u);  // 44 MiB at 48 KB/s
+  // Feed past the budget: the capture lands exactly on it and says it is full.
+  std::vector<int16_t> second(kSampleRate, 300);  // one second at 24 kHz
+  for (int i = 0; i < 1000; ++i) capture.feed(second.data(), second.size());
+  CHECK(capture.full());
+  CHECK_EQ(capture.budget_bytes(), uint64_t(44ull * 1024ull * 1024ull));
+  CHECK_EQ(capture.bytes(), uint32_t(44ull * 1024ull * 1024ull));
+  CHECK(capture.finish(m, error));
+  CHECK_EQ(m.bytes, uint32_t(44ull * 1024ull * 1024ull));
+  CHECK_EQ(m.duration_s, 961u);  // the real length, not the setting's 24 h
+  // The header agrees with the file: the note is whole, and playable.
+  const std::string wav = read_file(store.audio_path(NoteState::Pending, m.note_id));
+  CHECK_EQ(wav.size(), size_t(44 + 44ull * 1024ull * 1024ull));
+  CHECK(wav.compare(0, 4, "RIFF") == 0);
+  CHECK_EQ(uint32_t(uint8_t(wav[40])) | (uint32_t(uint8_t(wav[41])) << 8) |
+               (uint32_t(uint8_t(wav[42])) << 16) | (uint32_t(uint8_t(wav[43])) << 24),
+           uint32_t(44ull * 1024ull * 1024ull));
+  struct stat st{};
+  CHECK(stat((store.audio_path(NoteState::Pending, m.note_id) + ".part").c_str(), &st) != 0);
+  CHECK(store.discard(NoteState::Pending, m.note_id));
+}
+
+TEST("a volume that will not answer is not read as a full card") {
+  // The bug this pins: ESP-IDF's FAT VFS has no statvfs, so asking it returned
+  // "0 bytes free" and a note on a card with 62 GB free was refused as full.
+  // `free_bytes` now answers both "how much" and "did the volume say", and a
+  // volume that says nothing must not be mistaken for a full one.
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  uint64_t free_now = 1;
+  CHECK(store.free_bytes(free_now));
+  CHECK(free_now > 0);
+
+  Store no_root("");  // no tree, so nothing to ask
+  free_now = 1;
+  CHECK(!no_root.free_bytes(free_now));
+  CHECK_EQ(free_now, uint64_t(0));
+
+  Store unmounted("/nonexistent-volume-hg-test");
+  CHECK(!unmounted.free_bytes(free_now));
+
+  // A start whose volume cannot answer is not the reserve's refusal: it goes on
+  // to create the note, and it is the card that has the last word.
+  Meta m = sample_meta();
+  m.note_id = make_note_id(m.device_id, 1795140312, 27);
+  Capture capture;
+  std::string error;
+  CHECK(!capture.start(no_root, m.note_id, kMaxDurationS, 0, error));
+  CHECK(error.find("almost full") == std::string::npos);
+  CHECK_EQ(capture.budget_bytes(), uint64_t(0));
+}
+
+TEST("a card with no room past the reserve starts no note at all") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  Meta m = sample_meta();
+  m.note_id = make_note_id(m.device_id, 1795140312, 22);
+  Capture capture;
+  std::string error;
+  CHECK(!capture.start(store, m.note_id, kMaxDurationS, kNoteReserveBytes, error));
+  CHECK(!error.empty());
+  CHECK(!capture.active());
+  // Nothing was created: a refused note leaves no folder to clean up.
+  struct stat st{};
+  CHECK(stat(store.note_dir(NoteState::Pending, m.note_id).c_str(), &st) != 0);
+}
+
+TEST("a card that fills mid-note commits what it holds instead of failing the note") {
+  // The volume fills under the write: every byte past the limit is refused the
+  // way FAT refuses one. RLIMIT_FSIZE is the host's equivalent of a volume
+  // without space (EFBIG), and the capture must keep the audio it got.
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  Meta m = sample_meta();
+  m.note_id = make_note_id(m.device_id, 1795140312, 23);
+  Capture capture;
+  std::string error;
+  CHECK(capture.start(store, m.note_id, kMaxDurationS, 4ull * 1024ull * 1024ull * 1024ull, error));  // roomy
+
+  struct rlimit old_limit{};
+  CHECK(getrlimit(RLIMIT_FSIZE, &old_limit) == 0);
+  struct sigaction old_action{};
+  struct sigaction ignore{};
+  ignore.sa_handler = SIG_IGN;
+  sigemptyset(&ignore.sa_mask);
+  CHECK(sigaction(SIGXFSZ, &ignore, &old_action) == 0);
+  struct rlimit limit = old_limit;
+  limit.rlim_cur = 44 + 96000;  // the header and two seconds of audio
+  CHECK(setrlimit(RLIMIT_FSIZE, &limit) == 0);
+
+  std::vector<int16_t> second(kSampleRate, 400);
+  for (int i = 0; i < 30; ++i) capture.feed(second.data(), second.size());
+  // The capture stopped on its own, and says why.
+  CHECK(capture.full());
+  CHECK(capture.space_out());
+  const bool committed = capture.finish(m, error);
+  const int saved_errno = errno;
+
+  CHECK(setrlimit(RLIMIT_FSIZE, &old_limit) == 0);
+  sigaction(SIGXFSZ, &old_action, nullptr);
+
+  CHECK(committed);  // the note exists: the point of the card filling
+  CHECK(error.empty());
+  CHECK(m.bytes > 0);
+  CHECK(m.bytes <= 96000 + 2);
+  CHECK(m.bytes < uint32_t(30u * kSampleRate * 2u));  // short, and honest about it
+  CHECK_EQ(m.duration_s, 2u);
+  const std::string wav = read_file(store.audio_path(NoteState::Pending, m.note_id));
+  CHECK_EQ(wav.size(), size_t(44 + m.bytes));
+  // The header names the bytes the file really holds, so the note plays.
+  CHECK_EQ(uint32_t(uint8_t(wav[40])) | (uint32_t(uint8_t(wav[41])) << 8) |
+               (uint32_t(uint8_t(wav[42])) << 16) | (uint32_t(uint8_t(wav[43])) << 24),
+           m.bytes);
+  struct stat part{};
+  CHECK(stat((store.audio_path(NoteState::Pending, m.note_id) + ".part").c_str(), &part) != 0);
+  (void)saved_errno;
+  CHECK(store.discard(NoteState::Pending, m.note_id));
 }
 
 namespace {
@@ -642,6 +804,7 @@ TEST("a read that stops short of the card's size is a read failure, not the end 
   CHECK(!audio_read_short(45, 45));            // the smallest note the uploader takes
 }
 
+
 // --- retention (notes_retention.hpp): the card's own rule -------------------
 
 namespace {
@@ -668,11 +831,74 @@ std::string put_note(Store& store, NoteState state, int64_t unix_s, unsigned seq
   return m.note_id;
 }
 
+
+// The same, with a sparse audio file of `bytes`: the retention rule reads the
+// size stat() reports and nothing else, so a 1.5 GiB note costs one directory
+// entry and no disk. (`put_note` writes its zeros, which is fine at 45 bytes and
+// not at a gigabyte.)
+std::string put_sparse_note(Store& store, NoteState state, int64_t unix_s, unsigned seq, uint64_t bytes) {
+  Meta m = sample_meta();
+  m.note_id = make_note_id(m.device_id, unix_s, seq);
+  m.idempotency_key = m.note_id;
+  m.created_ms = unix_s * 1000;
+  m.recorded_at = iso8601_utc(unix_s);
+  m.bytes = static_cast<uint32_t>(bytes);
+  m.duration_s = static_cast<uint32_t>(bytes / (kSampleRate * kChannels * 2u));
+  std::string error;
+  if (!store.create_note(m.note_id, error)) return {};
+  const std::string path = store.audio_path(NoteState::Pending, m.note_id);
+  FILE* f = std::fopen(path.c_str(), "wb");  // create it, then give it a size
+  if (!f) return {};
+  std::fclose(f);
+  if (::truncate(path.c_str(), static_cast<off_t>(bytes)) != 0) return {};
+  if (!store.write_meta(m.note_id, m, error)) return {};
+  if (state != NoteState::Pending && !store.move(m.note_id, NoteState::Pending, state)) return {};
+  return m.note_id;
+}
+
 // 2027-01-15T08:00:00Z: the device's clock for these cases.
 constexpr int64_t kNow = 1800000000;
 constexpr int64_t kDays = 24 * 60 * 60;
 
 }  // namespace
+
+TEST("retention never prunes a 1.5 GiB note the hub has not got, however tight the card") {
+  // The rule a person would write by hand - "the card is full, delete the biggest
+  // thing" - reaches for the 1.5 GiB note first. It is the one thing that must
+  // never go: it exists nowhere else. Sizes are real (the rule reads stat());
+  // the files are sparse, so the case costs no disk.
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  const uint64_t kBig = 1536ull * 1024ull * 1024ull;  // 1.5 GiB, 9.3 h of audio
+  // Recorded a month ago and still not synced: old *and* big, which is the pair
+  // the two rules would each delete it for if `pending/` were a candidate.
+  const std::string unsynced = put_sparse_note(store, NoteState::Pending, kNow - 30 * kDays, 31, kBig);
+  CHECK(!unsynced.empty());
+  // A small note the hub has, recorded after it: newest-first would keep it.
+  const std::string synced = put_sparse_note(store, NoteState::Sent, kNow - 1 * kDays, 32, 96000);
+  CHECK(!synced.empty());
+  // A 32 GB card with 1 GiB free: under 10 %, so the space rule runs.
+  const CardSpace tight{32ull * 1024ull * 1024ull * 1024ull, 1ull * 1024ull * 1024ull * 1024ull};
+  const RetentionResult r = enforce(store, tight, kNow, RetentionPolicy{});
+
+  CHECK_EQ(r.deleted, uint32_t(1));             // the synced note went
+  CHECK_EQ(r.deleted_for_space, uint32_t(1));
+  CHECK_EQ(r.deleted_bytes, uint64_t(96000));   // and only its bytes were freed
+  CHECK_EQ(r.unsynced_left, uint32_t(1));
+  // The 1.5 GiB note is still there, whole, in the folder the rule never reads.
+  CHECK(path_exists(store.note_dir(NoteState::Pending, unsynced)));
+  CHECK_EQ(store.audio_bytes(NoteState::Pending, unsynced), kBig);
+  Meta kept;
+  CHECK(store.read_meta(unsynced, kept));
+  CHECK_EQ(kept.duration_s, uint32_t(33554));   // 1.5 GiB at 48 KB/s
+  // And the card is still under the threshold: the rule says so rather than
+  // pretending it freed what it could not.
+  CHECK(r.low_space);
+}
+
+// --- the recording face's cap (t_5adbd726) ---------------------------------
+
 
 TEST("an ISO-8601 stamp is a second, and only the shape this firmware writes is") {
   int64_t t = 0;

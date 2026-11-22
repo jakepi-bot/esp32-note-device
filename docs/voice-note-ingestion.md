@@ -111,6 +111,21 @@ Sniffed from magic bytes; the declared part type is ignored.
   place both halves name.
 - `duration_seconds` ∈ `1..86400` — 24 h, the firmware's `kMaxDurationS`. The
   byte cap stops a 24 kHz note at 12.4 h first, so this is a sanity bound.
+- **A large body is allowed to take its time, on both sides.** The request has
+  no deadline: the endpoint spools the body to `notes/.staging/` as it arrives
+  (`plugin/notes_ingest.py`) and uvicorn imposes no read timeout, so a
+  multi-hundred-megabyte note is limited by the link, not by a clock. The
+  device's client applies its timeout **per write**, not to the whole body:
+  `esp_http_client` uses `timeout_ms = 20 s` for the connect and the head, then
+  `120 s` for each 64 KiB write once the body streams (`notes_uploader.cpp`),
+  which is above every stall measured on this board (66–81 s on the first write
+  of a body that follows a recording) and far above a healthy transfer. A 90
+  minute note is 259 MB and about three minutes at the 1.3–1.6 MB/s this board
+  sustains. The declared body length is a **signed** 32-bit int in the device's
+  HTTP stack, so the firmware caps a note's file at `kMaxNoteFileBytes`
+  (2 GiB − 64 KiB, the head and tail inside the same 2 GiB request cap) and
+  refuses — terminal, not a retry loop — a note an older image recorded at the
+  bare 2 GiB.
 - `recorded_at` has no lower bound (a late upload of an old recording is
   legal), so the server cannot tell a real date from a dead clock: **the sender
   owns the clock**. A board with no RTC boots at 1970, and the reference

@@ -111,9 +111,9 @@ void recording_face(hg::Canvas& c, const ScreenDraw& d) {
     draw_footer(c, key::kBootCancel, key::kHoldCancel);
     return;
   }
-  char elapsed[8], cap[11];
+  char elapsed[10], cap[24];
   format_duration(d.recording.elapsed_s, elapsed);
-  format_of(d.recording.cap_s, cap);
+  format_cap(d.recording.cap_s, d.recording.cap_bytes, cap);
   draw_centred(c, 62, elapsed, grid::kHero);
   draw_centred(c, 94, cap, grid::kScale);
   const uint32_t pct = d.recording.cap_s == 0
@@ -182,7 +182,7 @@ void playing_face(hg::Canvas& c, const ScreenDraw& d) {
   draw_band(c, band.band, band.clock, band.wifi_up, band.bt, band.battery_pct, band.external);
   rule(c, grid::kRuleY);
   text_at(c, grid::kLeft, 40, d.playing.when, grid::kScale, kInk);
-  char elapsed[8], total[11];
+  char elapsed[10], total[13];
   format_duration(d.playing.elapsed_s, elapsed);
   format_of(d.playing.total_s, total);
   draw_centred(c, 60, elapsed, grid::kHero);

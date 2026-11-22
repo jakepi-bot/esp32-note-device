@@ -66,7 +66,12 @@ class UiState {
   // The screens follow it (ScreenApp::follow_capture): a capture that ended
   // without a key leaves the recording face, one no key started enters it, and a
   // tap the runtime kept for an upload in flight draws the queued face.
-  Outcome set_capture(bool recording, uint32_t elapsed_s, bool queued, uint32_t now_ms);
+  // `cap_s` and `cap_bytes` are what the capture actually started with (the
+  // setting, the contract ceiling and the card's room, whichever is smallest):
+  // the face's cap line and the point the screen stops the capture at. 0 leaves
+  // the snapshot's own cap in place.
+  Outcome set_capture(bool recording, uint32_t elapsed_s, bool queued, uint32_t now_ms,
+                      uint32_t cap_s = 0, uint64_t cap_bytes = 0);
   // The runtime declined an effect the screens had acted on: put back the move
   // it was for (ScreenApp::decline) and keep the snapshot honest.
   Outcome decline(Effect effect);

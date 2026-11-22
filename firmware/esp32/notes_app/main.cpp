@@ -577,7 +577,8 @@ extern "C" void app_main(void) {
   // so a recording stopped from the console leaves the recording face, and one
   // started there reaches it.
   g_ui.set_capture_probe({[] { return g_runtime.recording(); }, [] { return g_runtime.record_elapsed_s(); },
-                          [] { return g_runtime.recording_queued(); }});
+                          [] { return g_runtime.recording_queued(); }, [] { return g_runtime.record_cap_s(); },
+                          [] { return g_runtime.record_cap_bytes(); }});
   g_ui.begin(ui_ports);
 
   // The runtime's other half reaches the glass through these (QA D1): a note

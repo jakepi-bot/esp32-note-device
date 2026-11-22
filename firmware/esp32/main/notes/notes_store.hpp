@@ -60,6 +60,13 @@ class Store {
   // Bytes of one note's `recording.wav`, 0 when the file is missing or empty.
   // `plan_upload()` decides what that means for the queue.
   uint64_t audio_bytes(NoteState state, std::string_view id) const;
+  // Free bytes on the volume the note tree lives on. False when the volume will
+  // not say (no card, an unmounted tree, a call the platform does not have), in
+  // which case the caller must not read the 0 as "the card is full". On the host
+  // this is POSIX `statvfs`; on the device it is `esp_vfs_fat_info`, because the
+  // ESP-IDF FAT VFS implements no statvfs. Both answer the volume's own count,
+  // which is what keeps the recording's budget testable on the host.
+  bool free_bytes(uint64_t& out) const;
 
   bool move(std::string_view id, NoteState from, NoteState to);
   // Removes a note's files and folder (a commit that failed halfway).

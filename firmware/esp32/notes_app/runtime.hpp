@@ -154,6 +154,14 @@ class Runtime {
   // the capture (`notes record`), so the counter on the glass is the length of
   // the file and not the time since the glass noticed.
   uint32_t record_elapsed_s() const { return capture_.seconds(); }
+  // The cap this note will actually hit - the setting's seconds, the contract
+  // ceiling and what the card had room for when it started, whichever is
+  // smallest - so the recording face says what the note can hold instead of a
+  // fixed `OF 24:00`. 0 when no capture is running.
+  uint32_t record_cap_s() const { return capture_.active() ? capture_.cap_seconds() : 0; }
+  // The bytes behind that cap (free space less the reserve, never past the
+  // per-note ceiling), for the face's size. 0 when no capture is running.
+  uint64_t record_cap_bytes() const { return capture_.budget_bytes(); }
 
  private:
   enum class Mode : uint8_t { Idle, Recording, Syncing };
@@ -224,7 +232,16 @@ class Runtime {
   uint32_t sd_probe_ms_ = 0;
   uint8_t sd_probes_ = 0;  // attempts since boot: the first ones retry quickly
   uint32_t next_scan_ms_ = 0, next_retention_ms_ = 0, next_battery_ms_ = 0;
+  // The card's free space while a capture runs, re-read on the same 30 s the
+  // counter repaints at (no second timer): a note started on a card that had
+  // room can still be the one that finds the volume full (another writer, a
+  // mount that over-reported).
+  uint32_t next_space_ms_ = 0;
   bool low_space_ = false;
+  // The retention rule's own "the card is under min_free_pct" answer, so the
+  // warning about a tight card with nothing left to delete fires once per
+  // transition and not once per pass.
+  bool retention_tight_ = false;
 
   int battery_pct_ = -1;
   uint16_t battery_mv_ = 0;

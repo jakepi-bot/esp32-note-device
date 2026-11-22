@@ -40,6 +40,9 @@ constexpr uint8_t kSdFastProbes = 12;
 constexpr uint32_t kRetentionMs = 300000;
 constexpr uint32_t kRetentionLowMs = 60000;
 constexpr uint32_t kBatteryMs = 30000;
+// A recording re-reads the card's free space on the counter's own cadence (the
+// glass repaints at 30 s): one number, one clock, and no second timer for it.
+constexpr uint32_t kSpaceCheckMs = 30000;
 // How long a Wi-Fi window stays open unless it finishes early (plan section 4:
 // boot with work, a note just recorded, `Sync now`, an unset clock).
 constexpr uint32_t kWindowMs = 120000;
@@ -368,7 +371,30 @@ void Runtime::tick(uint32_t now, bool wifi_link) {
   step_ble(now);
 
   if (mode_ == Mode::Recording) {
-    if (capture_.full()) finish_note(now, "cap");
+    // The note's own cap: the byte budget it started with, spent. A capture the
+    // card cut short says so (`space_out`) and is committed the same way - the
+    // note exists, with the audio it has.
+    if (capture_.full()) {
+      finish_note(now, capture_.space_out() ? "the card filled" : "cap");
+      step_window(now);
+      return;
+    }
+    // The card's free space, on the counter's own 30 s cadence: no second timer,
+    // and the same clock the glass repaints the counter on. The budget read at
+    // the start keeps a note off the reserve by arithmetic; this catches the
+    // card that fills for a reason the start could not see, and stops the note
+    // cleanly instead of letting the next write fail.
+    if (next_space_ms_ == 0) next_space_ms_ = now + kSpaceCheckMs;
+    if (static_cast<int32_t>(now - next_space_ms_) >= 0) {
+      next_space_ms_ = now + kSpaceCheckMs;
+      uint64_t total = 0, free_now = 0;
+      if (sd_mount::space(&total, &free_now) && free_now <= notes::kNoteReserveBytes) {
+        ESP_LOGW(TAG, "note %s: the card is down to %s free (the reserve is %s): stopping it and keeping what it holds",
+                 meta_.note_id.c_str(), notes::human_bytes(free_now).c_str(),
+                 notes::human_bytes(notes::kNoteReserveBytes).c_str());
+        finish_note(now, "the card filled");
+      }
+    }
     // A recording does not defer the window's clock, its close or the retry that
     // follows it (QA D4): only the upload planner waits for the microphone. The
     // station itself already powers down at the deadline through wants_network().
@@ -582,12 +608,14 @@ void Runtime::finish_note(uint32_t now, const char* why) {
   if (mode_ != Mode::Recording) return;
   if (io_.mic) io_.mic->stop();
   mode_ = Mode::Idle;
+  next_space_ms_ = 0;
   // The microphone is stopped, so nothing new is pushed: wait for the writer to
   // have the rest on the card before the file is finished.
   if (writer_ready_ && !writer_.drain(30000))
     ESP_LOGW(TAG, "note %s: the card did not take the rest of the audio in 30 s", meta_.note_id.c_str());
   std::string error;
   const bool capped = capture_.full();
+  const bool space_out = capture_.space_out();
   if (!capture_.finish(meta_, error)) {
     ESP_LOGW(TAG, "note not saved (%s): %s", why, error.c_str());
     stop_error_ = error.empty() ? "the recording was not usable" : error;
@@ -611,7 +639,10 @@ void Runtime::finish_note(uint32_t now, const char* why) {
   }
   error_.clear();
   ESP_LOGI(TAG, "note %s stored: %s, %u s%s", meta_.note_id.c_str(), notes::human_bytes(meta_.bytes).c_str(),
-           static_cast<unsigned>(meta_.duration_s), capped ? " (cap reached)" : "");
+           static_cast<unsigned>(meta_.duration_s),
+           space_out ? " (the card filled: kept what it holds)"
+                     : capped ? " (the note's budget reached: kept what it holds)"
+                              : "");
   // A phone in range can take it in the port's short advertising window; a
   // network window can upload it.
   if (io_.ble) io_.ble->note_saved();
@@ -629,6 +660,7 @@ void Runtime::abort_note(const char* why) {
   writer_.discard();
   if (capture_.active()) capture_.abort();
   mode_ = Mode::Idle;
+  next_space_ms_ = 0;
   ESP_LOGW(TAG, "recording dropped: %s", why);
   notify_ui();
 }
@@ -873,18 +905,32 @@ void Runtime::run_retention(uint32_t now, bool force) {
     refresh_counts();
   }
   int pct = retention_last_.free_pct_after;
-  bool low = retention_last_.low_space;
+  bool tight = retention_last_.low_space;
   uint64_t total_now = 0, free_now = 0;
+  bool known = false;
   if (sd_mount::space(&total_now, &free_now) && total_now) {
     pct = static_cast<int>(free_now * 100ull / total_now);
-    low = pct < retention_.min_free_pct;
+    tight = pct < retention_.min_free_pct;
+    known = true;
   }
   retention_last_.free_pct_after = pct;
-  retention_last_.low_space = low;
-  if (low && !low_space_) ESP_LOGW(TAG, "card %d%% free and no synced notes left to delete", pct);
-  low_space_ = low;
-  error_ = low ? kLowSpaceError : (error_ == kLowSpaceError ? std::string() : error_);
-  if (low) next_retention_ms_ = now + kRetentionLowMs;
+  // The percentage is the retention rule's own trigger (below it, synced notes
+  // go oldest first) and what `notes retention` prints.
+  retention_last_.low_space = tight;
+  if (tight && !retention_tight_ && retention_last_.deleted == 0)
+    ESP_LOGW(TAG, "card %d%% free and no synced notes left to delete", pct);
+  retention_tight_ = tight;
+  // Whether a *note may start* is a different question, and it is the reserve,
+  // not a percentage: a 32 GB card at 9 % free has 2.9 GB in front of it, which
+  // is an hour of audio, and the old shared threshold refused it. A card that
+  // cannot spare kNoteReserveBytes is the one with no room for a recording.
+  const bool no_room = known && free_now <= notes::kNoteReserveBytes;
+  if (no_room && !low_space_)
+    ESP_LOGW(TAG, "card has %s free, less than the %s a note may not spend", notes::human_bytes(free_now).c_str(),
+             notes::human_bytes(notes::kNoteReserveBytes).c_str());
+  low_space_ = no_room;
+  error_ = no_room ? kLowSpaceError : (error_ == kLowSpaceError ? std::string() : error_);
+  if (tight) next_retention_ms_ = now + kRetentionLowMs;
 }
 
 // ---------------------------------------------------------------------------
@@ -982,12 +1028,25 @@ std::string Runtime::console(std::string_view args) {
     return "@ok url " + rest;
   }
   if (cmd == "list") {
+    // Each id carries its duration in seconds (`<id>=<seconds>`), so a note past
+    // 100 minutes reads its real length instead of a clamped `99:59`: the number
+    // is the contract's own `duration_seconds`, never a formatted one.
     std::string out = "@notes";
     for (notes::NoteState s : {notes::NoteState::Pending, notes::NoteState::Sent, notes::NoteState::Failed}) {
       out += std::string(" ") + notes::state_name(s) + "=";
       const auto ids = store_.list(s);
       out += std::to_string(ids.size());
-      for (size_t i = 0; i < ids.size() && i < 8; ++i) out += " " + ids[i];
+      // The newest ids, not the first eight: the list is capped at 8 to keep the
+      // line readable, and taking them from the front of an ascending queue hid
+      // the note a person had just made - the one whose length they are asking
+      // about. Counts above still say how many there are.
+      const size_t shown = ids.size() < 8 ? ids.size() : 8;
+      for (size_t i = ids.size(); i > ids.size() - shown; --i) {
+        const std::string& id = ids[i - 1];
+        notes::Meta meta;
+        out += " " + id;
+        if (store_.read_meta(id, meta)) out += "=" + std::to_string(meta.duration_s);
+      }
     }
     return out;
   }

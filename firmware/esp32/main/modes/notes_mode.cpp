@@ -852,12 +852,23 @@ std::string NotesModeImpl::console(std::string_view args) {
     return mode_ == Mode::Syncing ? "@ok uploading " + sync_id_ : "@ok nothing pending";
   }
   if (cmd == "list") {
+    // `<id>=<seconds>`: each note's own duration_seconds, so a note past 100
+    // minutes reads its real length and never a formatted clamp.
     std::string out = "@notes";
     for (notes::NoteState s : {notes::NoteState::Pending, notes::NoteState::Sent, notes::NoteState::Failed}) {
       out += std::string(" ") + notes::state_name(s) + "=";
       const auto ids = store_.list(s);
       out += std::to_string(ids.size());
-      for (size_t i = 0; i < ids.size() && i < 8; ++i) out += " " + ids[i];
+      // The newest ids: the 8-item cap exists to keep one console line readable,
+      // and taking them from the front of an ascending queue hid the note just
+      // recorded. The counts above still say how many there are in total.
+      const size_t shown = ids.size() < 8 ? ids.size() : 8;
+      for (size_t i = ids.size(); i > ids.size() - shown; --i) {
+        const std::string& id = ids[i - 1];
+        notes::Meta meta;
+        out += " " + id;
+        if (store_.read_meta(id, meta)) out += "=" + std::to_string(meta.duration_s);
+      }
     }
     return out;
   }

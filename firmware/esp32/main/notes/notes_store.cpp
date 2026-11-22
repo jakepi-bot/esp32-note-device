@@ -6,7 +6,12 @@
 #include <cstring>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
+
+#if defined(ESP_PLATFORM)
+#include <esp_vfs_fat.h>  // esp_vfs_fat_info: the FAT's own count (no statvfs here)
+#endif
 
 namespace hgp::notes {
 namespace {
@@ -196,6 +201,33 @@ uint64_t Store::audio_bytes(NoteState state, std::string_view id) const {
   struct stat st{};
   if (stat(audio_path(state, id).c_str(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0) return 0;
   return static_cast<uint64_t>(st.st_size);
+}
+
+bool Store::free_bytes(uint64_t& out) const {
+  out = 0;
+  if (root_.empty()) return false;
+#if defined(ESP_PLATFORM)
+  // ESP-IDF's FAT VFS does not implement statvfs (the POSIX call answers
+  // -1, which would read as "no room" and refuse every note on a card with
+  // 62 GB free), and `esp_vfs_fat_info` matches the mount point by exact
+  // string. So the tree's own mount is asked: the first component of the root,
+  // which is `/sdcard` on this board. That is the same call `sd` and
+  // `sd_mount::space()` make, and the answer is the FAT's own free count - kept
+  // current by the mount, so it does not rescan the table.
+  const size_t slash = root_.find('/', 1);
+  const std::string mount = slash == std::string::npos ? root_ : root_.substr(0, slash);
+  uint64_t total = 0, free_now = 0;
+  if (esp_vfs_fat_info(mount.c_str(), &total, &free_now) != ESP_OK) return false;
+  out = free_now;
+  return true;
+#else
+  struct statvfs vfs{};
+  if (::statvfs(root_.c_str(), &vfs) != 0) return false;
+  // f_bavail is what an unprivileged writer may use, which is the number the
+  // recording may spend; f_frsize is the block the count is in (FAT: clusters).
+  out = static_cast<uint64_t>(vfs.f_bavail) * static_cast<uint64_t>(vfs.f_frsize);
+  return true;
+#endif
 }
 
 bool Store::move(std::string_view id, NoteState from, NoteState to) {

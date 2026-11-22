@@ -185,10 +185,18 @@ Outcome UiState::tick(uint32_t now_ms) {
   return out;
 }
 
-Outcome UiState::set_capture(bool recording, uint32_t elapsed_s, bool queued, uint32_t now_ms) {
+Outcome UiState::set_capture(bool recording, uint32_t elapsed_s, bool queued, uint32_t now_ms,
+                            uint32_t cap_s, uint64_t cap_bytes) {
   capture_recording_ = recording;
   capture_queued_ = queued;
   capture_elapsed_s_ = elapsed_s;
+  // The capture's own cap, not the setting's: the face says `OF 1:30·2.1G` when
+  // the card is what limits the note, and the screen's cap stop lands on the
+  // same second the runtime stops the file. Written before the app is asked, so
+  // the frame this returns already carries it.
+  if (cap_s != 0) snap_.note_max_s = cap_s;
+  snap_.record_cap_bytes = cap_bytes;
+  app_.set_capture_cap(cap_s, cap_bytes);
   adopt_app_facts();
   Outcome out = app_.follow_capture(recording, elapsed_s, now_ms, queued);
   adopt_app_facts();

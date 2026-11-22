@@ -178,6 +178,13 @@ Outcome UiState::press(Key key, uint32_t now_ms) {
   merge(out, synced);  // a hero that moved under the press still needs its frame
   adopt_app_facts();
   load_window();
+  // The machine acted on the snapshot sync_app() pushed before it moved, and
+  // load_counts() had just zeroed that snapshot's window. Fill the window for
+  // the screen the press landed on and hand it back: otherwise the frame this
+  // press draws reads no rows - the list shows its title and footer over an
+  // empty body (t_8c3e4900). sync_app() asks for no frame of its own; the press's
+  // Outcome is the only one this path returns.
+  sync_app();
   return out;
 }
 

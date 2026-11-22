@@ -151,6 +151,39 @@ TEST("refresh: a key press reads the card before the screen machine acts (QA D1)
   CHECK(std::string(list.row[0].when) == "21 Nov 14:02");
 }
 
+TEST("refresh: the list the press draws has its rows, not just its title (t_8c3e4900)") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(make_note(store, "hg-69ffb4e9-20261121T140203-0003", "2026-11-21T14:02:03Z", 2, NoteState::Pending));
+  CHECK(make_note(store, "hg-69ffb4e9-20261121T140501-0003", "2026-11-21T14:05:01Z", 3, NoteState::Failed));
+  CHECK(make_note(store, "hg-69ffb4e9-20261121T140804-0003", "2026-11-21T14:08:04Z", 4, NoteState::Sent));
+  UiState ui;
+  ui.begin(seed_for(), &store);
+
+  // No publish between the notes landing and the press: the frame this press
+  // draws is the only chance the rows have to reach the glass.
+  const Outcome into_menu = ui.press(Key::BootHold, 2000);  // Home -> menu
+  CHECK(into_menu.draw);
+  const Outcome into_list = ui.press(Key::Power, 3000);  // the Notes row: PWR selects
+  CHECK(into_list.draw);
+  CHECK(ui.screen() == Screen::NoteList);
+
+  // What the panel is handed, not what the adapter cached: the machine was
+  // published the snapshot before it acted, and that one's window was zeroed by
+  // load_counts(), so the list drew its title line over an empty body.
+  const ScreenDraw drawn = ui.app().frame();
+  CHECK(drawn.screen == Screen::NoteList);
+  CHECK(drawn.list.count == 3);
+  CHECK(drawn.list.rows == 3);
+  CHECK(std::string(drawn.list.row[0].when) == "21 Nov 14:08");  // newest first
+  CHECK(drawn.list.row[0].mark == ' ');
+  CHECK(std::string(drawn.list.row[1].when) == "21 Nov 14:05");
+  CHECK(drawn.list.row[1].mark == '!');
+  CHECK(std::string(drawn.list.row[2].when) == "21 Nov 14:02");
+  CHECK(drawn.list.row[2].mark == '*');
+  CHECK(std::string(drawn.list.key_line) == list::kFailed);
+}
+
 TEST("refresh: an upload's progress and its failure reach the glass") {
   TempDir dir;
   Store store(dir.path);

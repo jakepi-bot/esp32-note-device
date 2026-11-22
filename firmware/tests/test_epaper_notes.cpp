@@ -732,6 +732,33 @@ TEST("a capture under a quarter second is discarded: no file, no note.json, no p
   silent.abort();
 }
 
+TEST("a capture one sample under the stop line is discarded, never committed") {
+  // The rule is `data_bytes < kMinNoteDataBytes`, so the boundary has two
+  // sides and both are load-bearing: 11,998 bytes (one PCM16 sample short) is
+  // not a note, and 12,000 exactly is (the test above keeps that one). This
+  // side catches the line being lowered, the kept side catches it raised.
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  Meta m = sample_meta();
+  m.note_id = make_note_id(m.device_id, 1795140312, 34);
+
+  Capture capture;
+  std::string error;
+  CHECK(capture.start(store, m.note_id, 300, error));
+  std::vector<int16_t> short_by_one(kMinNoteDataBytes / 2 - 1, 800);  // 11,998 B
+  capture.feed(short_by_one.data(), short_by_one.size());
+  CHECK_EQ(capture.bytes(), kMinNoteDataBytes - 2);
+  CHECK(!capture.finish(m, error));
+  CHECK(capture.discarded());
+  CHECK_EQ(error, std::string("no audio"));
+  CHECK_EQ(store.count(NoteState::Pending), uint32_t(0));
+  CHECK_EQ(store.count(NoteState::Failed), uint32_t(0));
+  CHECK_EQ(store.pending_ids().size(), size_t(0));
+  struct stat st{};
+  CHECK(stat(store.note_dir(NoteState::Pending, m.note_id).c_str(), &st) != 0);
+}
+
 TEST("the shortest note finish() keeps is past the uploader's no-audio line, so its sweep never fires") {
   // The two lines that meet here: a capture under kMinNoteDataBytes is discarded
   // at stop, and kMinAudioBytes is the uploader's own "no recording" line whose

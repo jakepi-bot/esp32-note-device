@@ -1232,7 +1232,7 @@ TEST("keys: only a PWR hold from Home reaches PowerOff") {
   CHECK(again.effect == Effect::PowerOff);  // one per hold, never two
 
   // A tap on Home is not one; a hold in the player is not one.
-  CHECK(app.press(Key::Power, 0).effect != Effect::PowerOff);
+  CHECK(app.press(Key::Power, 0).effect == Effect::None);
   CHECK(app.screen() == Screen::Home);
   ScreenApp playing;
   playing.begin(one_note_card());

@@ -20,7 +20,9 @@
 
 namespace hgp::notesui {
 
-enum class Key : uint8_t { Power, BootTap, BootHold };
+// Power is a tap (never a power-off, see ui_keys.hpp) and a hold (the one power
+// gesture, and only on Home).
+enum class Key : uint8_t { Power, PowerHold, BootTap, BootHold };
 
 // What the caller has to do. Exactly one per press, so a press cannot half-work.
 enum class Effect : uint8_t {

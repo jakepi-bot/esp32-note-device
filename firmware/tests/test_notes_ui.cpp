@@ -19,24 +19,26 @@ State at(Screen screen) {
 
 }  // namespace
 
-TEST("home: a BOOT tap records, a hold opens the menu, PWR powers off") {
+TEST("home: a BOOT tap records, a hold opens the menu, a PWR tap does nothing") {
   State s;
   CHECK(press_boot(s) == Action::StartRecording);
-  CHECK(press_power(s) == Action::PowerOff);  // PWR is power everywhere but the menu
+  CHECK(press_power(s) == Action::None);  // a tap is never a power-off
+  CHECK(hold_power(s) == Action::PowerOff);  // the hold is, and Home is its screen
 
   CHECK(hold_boot(s) == Action::OpenMenu);
   CHECK(s.screen == Screen::Menu);
   CHECK(s.menu == 0);  // always opens on Notes
 }
 
-TEST("recording: BOOT stops and keeps, a hold throws it away, PWR powers off") {
+TEST("recording: BOOT stops and keeps, a hold throws it away, PWR touches nothing") {
   State s = at(Screen::Recording);
   CHECK(press_boot(s) == Action::StopKeep);
   CHECK(hold_boot(s) == Action::Discard);
-  CHECK(press_power(s) == Action::PowerOff);
+  CHECK(press_power(s) == Action::None);
+  CHECK(hold_power(s) == Action::None);  // a hold in a submenu is not a shutdown
 }
 
-TEST("the menu is the one screen where PWR selects instead of powering off") {
+TEST("the menu is the one screen where PWR works on a row instead of leaving") {
   State s = at(Screen::Menu);
   CHECK(press_power(s) == Action::MenuSelect);
   // BOOT walks the rows and wraps, so one key reaches every item.
@@ -83,7 +85,7 @@ TEST("a note's own screen offers play, delete and back, and delete asks first") 
   CHECK(confirm.screen == Screen::NoteList);
 }
 
-TEST("playing stops on a BOOT tap or hold, and PWR still powers off") {
+TEST("playing stops on a BOOT tap or hold, and a PWR tap stops and leaves for the list") {
   State s = at(Screen::Playing);
   s.playing = true;
   CHECK(press_boot(s) == Action::StopPlay);
@@ -91,7 +93,9 @@ TEST("playing stops on a BOOT tap or hold, and PWR still powers off") {
   s.playing = true;
   CHECK(hold_boot(s) == Action::StopPlay);
   s.playing = true;
-  CHECK(press_power(s) == Action::PowerOff);
+  CHECK(press_power(s) == Action::StopPlayToList);  // stop, and never power off
+  CHECK(!s.playing);
+  CHECK(hold_power(s) == Action::None);
 }
 
 TEST("a pairing ask owns both keys and lands back where it interrupted") {

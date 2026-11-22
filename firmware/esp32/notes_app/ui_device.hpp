@@ -94,8 +94,10 @@ class NotesUi {
   };
   void set_capture_probe(CaptureProbe probe) { capture_probe_ = std::move(probe); }
 
-  // One key, one screen change (§13.2).
-  void press(notesui::Key key);
+  // One key, one screen change (§13.2). The outcome is returned so the caller
+  // can tell a press the screens took from one they left alone - the PWR hold is
+  // the case: Home asks for the power-off, every other screen declines it.
+  notesui::Outcome press(notesui::Key key);
 
   // The app loop's heartbeat: the counters, the recording cap, playback
   // position, the band's facts, and the panel's redraw request.

@@ -21,7 +21,7 @@ Action press_power(State& state) {
       // The question is answered on the keys: PWR refuses (the ask's own rule).
       return Action::RefusePhone;
     case Screen::Menu:
-      return Action::MenuSelect;  // the menu is the one screen PWR does not power off
+      return Action::MenuSelect;  // the menu's row, not the device's power
     case Screen::Phone:
       // PWR is the way out of the Phone screen, and taking it closes the window:
       // a device that keeps advertising with nothing on the glass is a radio
@@ -34,14 +34,30 @@ Action press_power(State& state) {
     case Screen::ConfirmDelete:
       return Action::KeepNote;
     case Screen::Playing:
-      return Action::PowerOff;  // stopping is BOOT's; PWR is still power
+      // Stop the audio and leave the player, and never the device: this tap used
+      // to power off, so browsing notes switched the board off with one key and
+      // did it mid-playback (t_dec6f9ef). BOOT's stop stays on the note's own
+      // screen; PWR is the way out, which is the list it came from.
+      state.playing = false;
+      return Action::StopPlayToList;
     case Screen::Home:
     case Screen::Recording:
     case Screen::About:
     case Screen::Back:
-      return Action::PowerOff;
+      // A tap is not the power gesture anywhere. Powering off is the hold's, and
+      // only from Home (hold_power), so a pocket, a bump or a glance at About
+      // cannot end a session.
+      return Action::None;
   }
   return Action::None;
+}
+
+Action hold_power(State& state) {
+  // The one power gesture the screens own. On this board a 2.5 s press also
+  // releases the battery latch in hardware whatever the firmware says; what this
+  // adds is the time to flush the card, close the radio and drop the latch in
+  // order, so a deliberate hold is never a dirty power cut.
+  return state.screen == Screen::Home ? Action::PowerOff : Action::None;
 }
 
 Action press_boot(State& state) {

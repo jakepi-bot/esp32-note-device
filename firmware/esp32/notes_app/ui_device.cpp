@@ -420,12 +420,13 @@ void NotesUi::apply(const notesui::Outcome& outcome, uint32_t now_ms) {
 
 const char* NotesUi::screen_word() const { return screen_name(state_.screen()); }
 
-void NotesUi::press(notesui::Key key) {
+notesui::Outcome NotesUi::press(notesui::Key key) {
   const uint32_t now = ports_.system != nullptr ? ports_.system->now_ms() : esp_timer_get_time() / 1000;
   poll_facts(now, false);  // the band is a fact, not a tick
   const notesui::Outcome out = state_.press(key, now);
   apply(out, now);
   ESP_LOGI(TAG, "key %u -> screen %s", static_cast<unsigned>(key), screen_name(state_.screen()));
+  return out;
 }
 
 void NotesUi::tick(uint32_t now_ms) {

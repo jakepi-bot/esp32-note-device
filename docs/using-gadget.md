@@ -1,8 +1,9 @@
 # Talk, type, and interrupt
 
 > **The e-paper device this repository ships does not talk.** Its firmware is
-> notes-only: PWR is power, BOOT records, and there is no turn, no reply and no
-> speech on the device at all. Controls, screens and the menu are in
+> notes-only: a PWR tap never powers it off (only a hold does), BOOT records, and
+> there is no turn, no reply and no speech on the device at all. Controls, screens
+> and the menu are in
 > [Using the notes device](notes-device.md). The rest of this page describes the
 > Hermes Gadget SDK's other boards, whose core is still in the tree and still
 > builds (`-e waveshare-epaper-154`).

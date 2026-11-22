@@ -1,22 +1,25 @@
 // The notes device's screens and keys, as pure state: no GPIO, no panel, no
 // clock. The port's app loop feeds it presses and draws whatever it says.
 //
-// Two keys, one job each. PWR is power everywhere except inside the menu, where
-// it selects (it is also the "no" on a delete). BOOT is the work key: a tap
-// records, stops, or moves to the next row; a two-second hold opens the menu,
-// selects, or deletes, depending on the screen.
+// Two keys, one job each. PWR is the way out and the way on: a tap never powers
+// the device off (a person browsing notes switched it off with one key, and the
+// player did it while audio was playing - t_dec6f9ef). Inside the menu it
+// selects, on the player it stops and goes back to the list, and it is the "no"
+// on a delete. Only a PWR *hold* from Home powers off. BOOT is the work key: a
+// tap records, stops, or moves to the next row; a two-second hold opens the
+// menu, selects, or deletes, depending on the screen.
 //
-//   Screen     PWR tap            BOOT tap              BOOT hold
-//   Home       power off          start recording       open menu
-//   Recording  power off          stop and keep         discard
-//   Menu       select the row     next row              back home
-//   NoteList   open the note      next note             back to menu
-//   NoteAction select the action  next action           back to the list
-//   Confirm    keep the note      keep the note         delete the note
-//   Playing    power off          stop                  stop
-//   Pairing    refuse the phone   allow the phone       (nothing)
-//   Phone      close the window   (nothing)             back to the menu
-//   About      power off          (nothing)             back to menu
+//   Screen     PWR tap            PWR hold     BOOT tap           BOOT hold
+//   Home       (nothing)          power off    start recording    open menu
+//   Recording  (nothing)          (nothing)    stop and keep      discard
+//   Menu       select the row     (nothing)    next row           back home
+//   NoteList   open the note      (nothing)    next note          back to menu
+//   NoteAction select the action  (nothing)    next action        back to the list
+//   Confirm    keep the note      (nothing)    keep the note      delete the note
+//   Playing    stop, to the list  (nothing)    stop               stop
+//   Pairing    refuse the phone   (nothing)    allow the phone    (nothing)
+//   Phone      close the window   (nothing)    (nothing)          back to the menu
+//   About      (nothing)          (nothing)    (nothing)          back to menu
 //
 // Nothing here decides what "select" means for a menu row: the caller maps
 // State::menu through MenuItem and runs it, so this stays testable and the
@@ -67,7 +70,8 @@ enum class Action : uint8_t {
   DeleteNote,
   KeepNote,
   Play,
-  StopPlay,
+  StopPlay,         // BOOT: stop and stay on the note's own screen
+  StopPlayToList,   // PWR: stop and leave the player for the list
   AllowPhone,
   RefusePhone,
   ClosePhone,  // leave the Phone screen: the window ends with it
@@ -90,7 +94,12 @@ struct State {
 void show_pairing_ask(State& state, Screen previous);
 void answer_pairing(State& state);
 
+// A tap: the way out of a screen, never a power-off.
 Action press_power(State& state);
+// The hold: the only power gesture the screens own, and only from Home. From
+// any other screen it is None - the latch's own 2.5 s cutoff still applies in
+// hardware, but the firmware does not turn a hold in a submenu into a shutdown.
+Action hold_power(State& state);
 Action press_boot(State& state);
 Action hold_boot(State& state);
 

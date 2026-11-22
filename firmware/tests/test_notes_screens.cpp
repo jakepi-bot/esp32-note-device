@@ -434,8 +434,8 @@ TEST("the key map reaches every screen, and every screen has a way back") {
   const Outcome about = app.press(Key::Power, 0);
   CHECK(about.refresh == Refresh::Full);
   CHECK(app.screen() == Screen::About);
-  CHECK(app.press(Key::Power, 0).effect == Effect::PowerOff);  // PWR is power, not select
-  CHECK(app.screen() == Screen::About);  // the effect happens; the page stays put
+  CHECK(app.press(Key::Power, 0).effect == Effect::None);  // a tap is not power, anywhere
+  CHECK(app.screen() == Screen::About);  // the page stays put
   CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Full);  // hold: back to Menu
   CHECK(app.screen() == Screen::Menu);
 
@@ -463,11 +463,11 @@ TEST("the key map reaches every screen, and every screen has a way back") {
   CHECK(app.screen() == Screen::NoteList);
 }
 
-TEST("about: a hold goes back to the menu, a tap does nothing, PWR is power") {
+TEST("about: a hold goes back to the menu, a tap does nothing, and a tap is not power") {
   State s;
   s.screen = Screen::About;
   CHECK(press_boot(s) == Action::None);
-  CHECK(press_power(s) == Action::PowerOff);  // PWR is power here, as outside the menu
+  CHECK(press_power(s) == Action::None);  // PWR is not power here, or anywhere
   CHECK(hold_boot(s) == Action::Back);
   CHECK(s.screen == Screen::Menu);
 }
@@ -1111,4 +1111,122 @@ TEST("band: a level is drawn from the reading, '?' only without one") {
   from_port.external = false;
   CHECK(from_port.battery_pct == 90);
   CHECK(home_band_hash(from_port, 156, 8, 190, 25) != at_unknown);
+}
+
+// ---------------------------------------------------------------------------
+// PWR in the player (t_dec6f9ef). The unit powered off mid-playback: from Home,
+// hold -> menu, PWR -> the list, PWR -> the player, PWR again logged "power off
+// asked" and the board went down. Two keys now separate: a tap is never a
+// power-off on any screen, and only a hold from Home is.
+
+namespace {
+
+// A one-note card, with the stub the list and the player read.
+Snapshot one_note_card() {
+  Snapshot snap;
+  snap.card = true;
+  snap.note_count = 1;
+  snap.stub_first = 0;
+  snap.stub_rows = 1;
+  snap.count_pending = 1;
+  snap.notes[0].duration_s = 14;
+  snap.notes[0].mark = NoteMark::Pending;
+  std::snprintf(snap.notes[0].day, sizeof snap.notes[0].day, "21 Nov");
+  std::snprintf(snap.notes[0].clock, sizeof snap.notes[0].clock, "14:02");
+  return snap;
+}
+
+// Home -> menu -> list -> note -> player, the way a finger does it: a hold opens
+// the menu, BOOT walks to the Notes row, PWR selects it, opens the note and runs
+// Play (row 0).
+Outcome enter_player(ScreenApp& app) {
+  app.press(Key::BootHold, 0);
+  while (static_cast<MenuItem>(app.state().menu) != MenuItem::Notes) app.press(Key::BootTap, 0);
+  app.press(Key::Power, 0);         // Notes -> the list
+  app.press(Key::Power, 0);         // the list -> the note
+  return app.press(Key::Power, 0);  // the note -> Play
+}
+
+}  // namespace
+
+TEST("player: a PWR tap stops playback and stays on, it never powers off") {
+  ScreenApp app;
+  app.begin(one_note_card());
+  const Outcome play = enter_player(app);
+  CHECK(play.effect == Effect::StartPlayback);
+  CHECK(app.screen() == Screen::Playing);
+  CHECK(app.snapshot().playing);
+
+  // The tap the unit died on.
+  const Outcome tap = app.press(Key::Power, 0);
+  CHECK(tap.effect == Effect::StopPlayback);
+  CHECK(tap.effect != Effect::PowerOff);
+  CHECK(!app.snapshot().playing);
+  CHECK(app.screen() == Screen::NoteList);  // back where the player was opened
+  CHECK(tap.refresh == Refresh::Full);
+  CHECK(tap.draw);
+}
+
+TEST("keys: only a PWR hold from Home reaches PowerOff") {
+  // The whole screen table, as ui_keys sees it: no tap is a power-off, and no
+  // hold outside Home is one either.
+  const Screen screens[] = {Screen::Home,     Screen::Recording,    Screen::Menu,
+                            Screen::NoteList, Screen::NoteAction,   Screen::ConfirmDelete,
+                            Screen::Playing,  Screen::Pairing,      Screen::Phone,
+                            Screen::About,    Screen::Back};
+  for (Screen screen : screens) {
+    State s;
+    s.screen = screen;
+    s.note_count = 1;
+    s.playing = true;
+    CHECK(press_power(s) != Action::PowerOff);
+    if (screen != Screen::Home) CHECK(hold_power(s) != Action::PowerOff);
+  }
+  State home;
+  CHECK(hold_power(home) == Action::PowerOff);
+
+  // And through the machine, where the action becomes the effect the runtime
+  // takes: one hold on Home is one PowerOff, with nothing to draw.
+  ScreenApp app;
+  app.begin(one_note_card());
+  const Outcome first = app.press(Key::PowerHold, 0);
+  CHECK(first.effect == Effect::PowerOff);
+  CHECK(first.effect != Effect::StopPlayback);
+  CHECK(!first.draw);
+  const Outcome again = app.press(Key::PowerHold, 0);
+  CHECK(again.effect == Effect::PowerOff);  // one per hold, never two
+
+  // A tap on Home is not one; a hold in the player is not one.
+  CHECK(app.press(Key::Power, 0).effect != Effect::PowerOff);
+  CHECK(app.screen() == Screen::Home);
+  ScreenApp playing;
+  playing.begin(one_note_card());
+  enter_player(playing);
+  CHECK(playing.press(Key::PowerHold, 0).effect == Effect::None);
+  CHECK(playing.screen() == Screen::Playing);
+  CHECK(playing.snapshot().playing);  // a hold does not stop a playback either
+}
+
+TEST("keys: two PWR taps in the player leave the device running") {
+  // The exact sequence that shut the unit down, asserted on the effects: the
+  // screen alone cannot tell "stopped" from "switched off".
+  ScreenApp app;
+  app.begin(one_note_card());
+  CHECK(enter_player(app).effect == Effect::StartPlayback);
+  CHECK(app.screen() == Screen::Playing);
+
+  const Outcome first = app.press(Key::Power, 0);
+  const Outcome second = app.press(Key::Power, 0);
+  CHECK(first.effect == Effect::StopPlayback);
+  CHECK(second.effect == Effect::None);  // the list's top note opens: no effect
+  CHECK(first.effect != Effect::PowerOff);
+  CHECK(second.effect != Effect::PowerOff);
+  CHECK(first.refresh == Refresh::Full);
+  CHECK(app.snapshot().playing == false);
+  CHECK(app.screen() == Screen::NoteAction);  // the second tap opened it again
+
+  // Still answering keys. The machine has no "off" state to land in, so the
+  // proof is a live screen that keeps taking presses.
+  CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Full);
+  CHECK(app.screen() == Screen::NoteList);
 }

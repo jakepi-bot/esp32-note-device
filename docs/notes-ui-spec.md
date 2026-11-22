@@ -213,16 +213,18 @@ user stuck if they guessed wrong:
 |---|---|---|
 | Home | `BOOT: record` | without it the device has no discoverable verb |
 | Recording | `BOOT: stop` / `HOLD: discard` | two lines: the hold is destructive and invisible |
-| Menu | `BOOT: next` / `PWR: select` | two lines: PWR is *not* power here, which nothing else says |
+| Menu | `BOOT: next` / `PWR: select` | two lines: the row select is the one verb the glass cannot show |
 | NoteList | `BOOT: next` / `PWR: open` | same reason |
 | NoteAction | `BOOT: next` / `PWR: select` | same reason |
 | ConfirmDelete | *(none)* | the body *is* the legend (`HOLD: delete` / `TAP: keep`) |
-| Playing | `BOOT: stop` | the only verb that does not end the session |
+| Playing | `BOOT: stop` | the stop that stays on the note; PWR stops too but leaves the player |
 | Pairing | `HOLD: nothing` | the question is answered on the keys; a hold is not consent |
 | About | `HOLD: back` | the only way out |
 
-`HOLD:` always means **BOOT** held. PWR's hold is the hardware latch and never
-reaches the UI, so the word is unambiguous.
+`HOLD:` always means **BOOT** held. **PWR is never a power gesture on a tap**:
+a tap opens, selects, refuses, stops or leaves, and the only power-off is a PWR
+*hold from Home*. The footer never has to warn that a key the user is about to
+press will switch the device off.
 
 **The footer yields to a warning.** One slot, precedence: an active warning
 (`NO CARD`, `LOW POWER`, upload failure) beats the key legend. A warning that the
@@ -254,7 +256,7 @@ risk — §15.3 bounds it.
 
 ## 4. Home — the status face
 
-**Keys** (`ui_keys.cpp`): BOOT tap `StartRecording` · BOOT hold `OpenMenu` · PWR tap `PowerOff`.
+**Keys** (`ui_keys.cpp`): BOOT tap `StartRecording` · BOOT hold `OpenMenu` · PWR tap `None` · PWR hold `PowerOff` (Home only).
 **Job:** answer, in one glance and without a key press — *will it record, did my
 last note go, is it charged, is it connected.*
 **This is the only centred screen.** Every other screen is left-aligned, so the
@@ -730,7 +732,7 @@ where a partial refresh never happens, which also means it never ghosts.
 
 ## 9. Playing
 
-**Keys:** BOOT tap `StopPlay` · BOOT hold `StopPlay` · PWR tap `PowerOff`.
+**Keys:** BOOT tap `StopPlay` · BOOT hold `StopPlay` · PWR tap `StopPlayToList` · PWR hold `None`.
 **Job:** show that audio is coming out, of what, and how far in.
 
 ### 9.1 Layout
@@ -780,11 +782,17 @@ if (millis() - last_draw < 5000 && !state_changed) return;   // no flush at all
 
 End of audio and `StopPlay` are state changes and draw immediately.
 
-### 9.3 PWR powers off mid-playback
+### 9.3 A PWR tap stops the audio and goes back to the list
 
-`press_power()` on `Screen::Playing` returns `Action::PowerOff` — stopping is
-BOOT's job. That is the landed rule and this spec does not soften it, but the
-footer says `BOOT: stop` precisely so the safe verb is the visible one.
+`press_power()` on `Screen::Playing` returns `Action::StopPlayToList`: the codec
+stops, the file closes, and the list the player was opened from is the screen
+after the tap. It used to return `Action::PowerOff`, so a person browsing notes
+switched the device off mid-playback with one key (t_dec6f9ef). Stopping is BOOT's
+job too, and BOOT's stop stays on the note's own screen; PWR is the way out. The
+footer says `BOOT: stop` because that is the verb that keeps the note open, not
+because PWR is dangerous.
+
+A PWR *hold* on the player is not a power-off either: only Home is (13.2 row 4b).
 
 ### 9.4 What changes on partial vs full
 
@@ -802,7 +810,7 @@ region on this screen that can leave residue, bounded by `kFullEvery` and by the
 
 ## 10. Recording
 
-**Keys:** BOOT tap `StopKeep` · BOOT hold `Discard` · PWR tap `PowerOff`.
+**Keys:** BOOT tap `StopKeep` · BOOT hold `Discard` · PWR tap `None` · PWR hold `None`.
 **Job:** prove it is recording, show how long, and show how to keep or throw it away.
 
 ### 10.1 Layout
@@ -946,7 +954,7 @@ must read aloud should be the plainest thing on the screen.
 
 ### 11.2 About
 
-**Keys:** BOOT hold `Back` to Menu · BOOT tap does nothing · PWR tap `PowerOff`.
+**Keys:** BOOT hold `Back` to Menu · BOOT tap does nothing · PWR tap `None`.
 **Job:** the four facts the plan asks for — battery, firmware, device id, card free
 — plus the note count.
 
@@ -986,9 +994,9 @@ already follows (`hold_boot` = back):
 // ui_keys.hpp, in enum class Screen, after Pairing:
   About,
 
-// ui_keys.cpp, press_power():  mark About with Home, Recording and Back
+// ui_keys.cpp, press_power():  About is one of the taps that does nothing
     case Screen::About:
-      return Action::PowerOff;      // PWR is power, as outside the menu
+      return Action::None;          // a tap is never a power-off (t_dec6f9ef)
 
 // ui_keys.cpp, hold_boot():
     case Screen::About:
@@ -1001,12 +1009,12 @@ screen and there is nothing to advance to. Add one host case to
 `firmware/tests/test_notes_ui.cpp`:
 
 ```cpp
-TEST("about: a hold goes back to the menu, a tap does nothing, PWR is power") {
+TEST("about: a hold goes back to the menu, a tap does nothing, and a tap is not power") {
   State s = at(Screen::About);
   CHECK(press_boot(s) == Action::None);
   CHECK(hold_boot(s) == Action::Back);
   CHECK(s.screen == Screen::Menu);
-  CHECK(press_power(s) == Action::PowerOff);
+  CHECK(press_power(s) == Action::None);
 }
 ```
 
@@ -1065,10 +1073,10 @@ covered by eight host cases.
    │  substates: IDLE · SYNCING · NO_CARD · LOW_POWER          │◄────────┐
    │             OFFLINE · NO_SYNC · NO_TIME                   │         │
    └───┬───────────┬───────────────┬───────────────────────────┘         │
-       │BOOT tap   │BOOT hold      │PWR tap                              │
+       │BOOT tap   │BOOT hold      │PWR hold                             │
        ▼           ▼               ▼                                     │
  ┌──────────┐  ┌────────┐      ┌───────┐                                 │
- │RECORDING │  │  MENU  │      │  OFF  │  graceful power off             │
+ │RECORDING │  │  MENU  │      │  OFF  │  graceful power off (Home only)  │
  └────┬─────┘  └─┬──┬──┬┘      └───────┘                                 │
       │          │  │  └──────────────► PHONE_WINDOW ──► (port) ─────────┤
  BOOT │          │  └───────────────► WIFI_SETUP ─────► (port) ─────────┤
@@ -1100,7 +1108,7 @@ covered by eight host cases.
                    ▼                                                     │
               ┌──────────┐  BOOT tap/hold = stop, end of audio           │
               │ PLAYING  │──────────────────────────────────────────────┘
-              └──────────┘
+              └──────────┘  PWR tap = stop, back to LIST ──► LIST
 
   PAIRING is an overlay: it can arrive from any screen, owns both keys, and
   returns to State::after_pairing when answered.
@@ -1116,12 +1124,13 @@ driver's partial path handle it. `—` = no flush at all.
 | 1 | — | power on | — | `EpdDisplay::begin()`, `panel_init()`, mount SD, draw Home | `HOME` | `F` (unavoidable) |
 | 2 | `HOME` | BOOT tap | `StartRecording` | open a new `pending/<id>/`, start `port_codec` capture | `RECORDING` | `F` |
 | 3 | `HOME` | BOOT hold | `OpenMenu` | reset `state.menu = 0` | `MENU` | `F` |
-| 4 | `HOME` | PWR tap | `PowerOff` | flush, `LatchingPower::power_off()` | `OFF` | — |
+| 4a | `HOME` | PWR tap | `None` | nothing at all — a tap is never a power-off | `HOME` | — |
+| 4b | `HOME` | PWR hold | `PowerOff` | flush the card, close the radio, `LatchingPower::power_off()` | `OFF` | — |
 | 5 | `HOME` | *(auto)* pending > 0 and a link is up | — | connect, `notes::Queue::plan_upload()`, upload | `HOME`/SYNCING | `P` unless the hero word changes (`F`) |
 | 6 | `HOME` | *(auto)* upload batch fails | — | record the failure, no retry storm | `HOME`/NO_SYNC | `F` (hero changes) |
 | 7 | `RECORDING` | BOOT tap | `StopKeep` | stop capture, `write_meta()` (the commit marker), enqueue | `HOME` | `F` |
 | 8 | `RECORDING` | BOOT hold | `Discard` | stop capture, `Store::discard(pending, id)` | `HOME` | `F` |
-| 9 | `RECORDING` | PWR tap | `PowerOff` | discard the partial capture, power off | `OFF` | — |
+| 9 | `RECORDING` | PWR tap | `None` | nothing at all; the capture is BOOT's to stop or discard | `RECORDING` | — |
 | 10 | `RECORDING` | *(auto)* `note_max_s` reached | `StopKeep` | same as 7, then draw a one-line "cap reached" note | `HOME` | `F` |
 | 11 | `MENU` | BOOT tap | `MenuNext` | — | `MENU` | `P` (bar) |
 | 12 | `MENU` | PWR tap, row `Notes` | `MenuSelect` | read the store's three folders once | `LIST` | `F` |
@@ -1144,21 +1153,22 @@ driver's partial path handle it. `—` = no flush at all.
 | 29 | `CONFIRM` | PWR tap | `KeepNote` | — | `LIST` | `F` |
 | 30 | `PLAYING` | BOOT tap | `StopPlay` | stop the codec, close the file | `NOTE` | `F` |
 | 31 | `PLAYING` | BOOT hold | `StopPlay` | same as 30 | `NOTE` | `F` |
-| 32 | `PLAYING` | PWR tap | `PowerOff` | stop the codec, power off | `OFF` | — |
+| 32 | `PLAYING` | PWR tap | `StopPlayToList` | stop the codec, close the file, back where the player was opened | `LIST` | `F` |
 | 33 | `PLAYING` | *(auto)* end of audio | — | close the file | `NOTE` | `F` |
 | 34 | *any* | a phone asks to pair | `show_pairing_ask()` | remember `previous` | `PAIRING` | `F` |
 | 35 | `PAIRING` | BOOT tap | `AllowPhone` | `port_ble` accepts, then `answer_pairing()` | `after_pairing` | `F` |
 | 36 | `PAIRING` | PWR tap | `RefusePhone` | reject, then `answer_pairing()` | `after_pairing` | `F` |
 | 37 | `PAIRING` | BOOT hold | `None` | nothing at all — no redraw, no state change | `PAIRING` | `—` |
 | 38 | `ABOUT` | BOOT hold | `Back` | — | `MENU` | `F` |
-| 39 | `ABOUT` | PWR tap | `PowerOff` | power off | `OFF` | — |
+| 39 | `ABOUT` | PWR tap | `None` | nothing at all | `ABOUT` | — |
 | 40 | `ABOUT` | BOOT tap | `None` | nothing | `ABOUT` | `—` |
 | 41 | `WIFI_SETUP` / `PHONE_WINDOW` | the port returns | — | — | `MENU` | `F` |
 | 42 | *any* | a display transfer fails (`take_redraw_request()`) | — | rebuild the view model and redraw | same | `F` (driver already forced it) |
 
-**Rows 37 and 40 are the only gestures in the whole UI that produce no panel
-activity at all.** They matter: a hold at a pairing prompt is a common panic
-response, and answering it with a refresh would look like the hold did something.
+**Rows 4a, 9, 37, 39 and 40 are the gestures in the whole UI that produce no panel
+activity at all**, and a PWR hold outside Home adds to them. They matter: a hold
+at a pairing prompt is a common panic response, and a tap on Home or About must
+not look like it did something — least of all switch the device off.
 
 ### 13.3 Upload progress is not a screen
 

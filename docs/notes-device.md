@@ -14,13 +14,17 @@ turns, or speak replies - see [the README](../README.md#what-it-does-not-do).
 
 | Gesture | Home | Recording | Menu | Note list | A note | Delete? | Playing | Pairing ask | About |
 |---|---|---|---|---|---|---|---|---|---|
-| **PWR** tap | power off | power off | select | open | select | keep | power off | refuse | power off |
+| **PWR** tap | nothing | nothing | select | open | select | keep | stop, back to the list | refuse | nothing |
 | **BOOT** tap | record | stop and keep | next | next | next | keep | stop | allow | nothing |
 | **BOOT** hold 2 s | menu | discard | back | back | back | **delete** | stop | nothing | back |
 
-**PWR** held for 2.5 s is the battery latch itself and works on every screen: it
-cuts the power. A PWR tap is the graceful path, which commits a recording in
-progress and flushes the card first.
+A **PWR** tap is never a power-off (it used to be on Home, Recording, About and in
+the player, so one press switched the device off - t_dec6f9ef). **PWR** held for
+2.5 s is the battery latch itself and works on every screen: it cuts the power.
+The firmware takes a hold at 1.5 s, half a second before the latch, to flush the
+card, close the radio and commit a recording in progress; that is the screens'
+own `PowerOff` action on Home, and on every other screen it still flushes before
+the latch drops.
 
 ## Home
 
@@ -232,10 +236,10 @@ notes/
   second window memsets through a freed pointer and the device panics and
   reboots - seen at 152 s on `phone wake` after the boot window closed, and after
   a note was saved, fixed in `port_ble.cpp`'s `stop_radio()`.
-- A PWR tap powers off gracefully: the recording is committed, the upload in
+- A PWR hold powers off gracefully: the recording is committed, the upload in
   flight is cancelled, the card is flushed and released, the station is stopped,
   and the battery latch drops. On USB the card is mounted again, because the
-  board stays up.
+  board stays up. A tap never powers off.
 - This board has no hardware power switch: the battery latch (GPIO 17) is what
   keeps the cell connected, so press and hold PWR for about two seconds to start
   it on battery. The firmware drives the latch high as soon as it runs, keeps it

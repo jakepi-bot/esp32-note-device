@@ -266,6 +266,16 @@ Outcome ScreenApp::run(Action action, uint32_t now_ms) {
       out.draw = true;
       return out;
 
+    case Action::StopPlayToList:
+      // The same stop, one screen further out: PWR is the player's way back to
+      // the list it came from, the way its BOOT stop goes back to the note.
+      snap_.playing = false;
+      out.effect = Effect::StopPlayback;
+      state_.go(Screen::NoteList);
+      out.refresh = Refresh::Full;
+      out.draw = true;
+      return out;
+
     case Action::AllowPhone:
       out.effect = Effect::PairingAllow;
       return out;
@@ -297,6 +307,7 @@ Outcome ScreenApp::press(Key key, uint32_t now_ms) {
   Action action = Action::None;
   switch (key) {
     case Key::Power: action = press_power(state_); break;
+    case Key::PowerHold: action = hold_power(state_); break;
     case Key::BootTap: action = press_boot(state_); break;
     case Key::BootHold: action = hold_boot(state_); break;
   }

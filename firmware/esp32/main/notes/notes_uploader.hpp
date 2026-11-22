@@ -41,6 +41,17 @@ namespace hgp::notes {
 // is. Inline so the host tests can hold the rule without the device HTTP stack.
 inline bool audio_read_short(uint32_t read_bytes, uint32_t file_bytes) { return read_bytes != file_bytes; }
 
+// Where a resumed upload starts. A retry after part N failed must send part N
+// and nothing before it — replaying 0..N-1 costs the hub nothing (each is a
+// `200 duplicate`) but costs the card the whole note again. A start past the
+// plan (a different note, a shorter recording, a part count that changed) is
+// not a resume at all: it starts from the beginning rather than sending
+// nothing. Inline, like `audio_read_short`, because `Uploader` links
+// `esp_http_client` and only the device image can hold the class.
+inline size_t resume_index(uint32_t start_part, size_t part_count) {
+  return start_part > 0 && start_part < part_count ? static_cast<size_t>(start_part) : size_t(0);
+}
+
 // Base64 HMAC-SHA256 of the canonical string with the device key (the core
 // keeps the key; see hg::App::sign).
 using Signer = std::function<std::string(std::string_view)>;

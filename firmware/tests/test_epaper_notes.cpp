@@ -1398,6 +1398,27 @@ TEST("parts: the request carries the note identity, where the part sits and its 
                          "|2|3|600") != std::string::npos);
 }
 
+TEST("parts: a retry after part 1 failed starts at part 1, not at the note again") {
+  // The device's half of "a failed part retries alone": `Runtime` remembers the
+  // part that failed and calls `begin(..., start_part)`, which starts the plan
+  // at that part. Parts 0 and 1 are already on the hub; sending them again
+  // would cost the card a second full transfer for a `200 duplicate` each.
+  const WavLayout info = header_for(12 * 60);
+  const std::vector<Part> parts = plan_parts(info);
+  CHECK_EQ(parts.size(), size_t(3));
+  CHECK_EQ(resume_index(1, parts.size()), size_t(1));
+  CHECK_EQ(parts[resume_index(1, parts.size())].index, uint32_t(1));
+  CHECK_EQ(parts[resume_index(1, parts.size())].offset_s, uint32_t(300));
+  CHECK_EQ(resume_index(2, parts.size()), size_t(2));
+  // Nothing to resume, or a start this plan does not have (a different note, a
+  // shorter recording): the note goes from the beginning rather than nowhere.
+  CHECK_EQ(resume_index(0, parts.size()), size_t(0));
+  CHECK_EQ(resume_index(3, parts.size()), size_t(0));
+  CHECK_EQ(resume_index(99, parts.size()), size_t(0));
+  // A single-part note has no part 1 to resume to.
+  CHECK_EQ(resume_index(1, size_t(1)), size_t(0));
+}
+
 TEST("parts: a note at or under five minutes sends exactly the v1 request") {
   Meta wire = sample_meta();
   wire.sha256 = std::string(64, 'c');

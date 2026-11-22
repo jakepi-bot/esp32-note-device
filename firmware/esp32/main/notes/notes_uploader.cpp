@@ -124,8 +124,7 @@ bool Uploader::begin(const Meta& meta, std::string_view audio_path, std::string_
     close();
     return false;
   }
-  part_at_ = 0;
-  if (start_part > 0 && start_part < parts_.size()) part_at_ = start_part;
+  part_at_ = resume_index(start_part, parts_.size());
   if (!begin_part()) {
     error = "cannot read recording.wav";
     close();

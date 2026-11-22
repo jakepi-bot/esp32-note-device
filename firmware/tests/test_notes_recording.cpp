@@ -20,7 +20,7 @@ Snapshot recording_snapshot() {
 
 }  // namespace
 
-TEST("recording: the entry frame is 0:00 and the counter moves every 30 s") {
+TEST("recording: the entry frame is 0:00 and the counter moves every 5 s") {
   ScreenApp app;
   app.begin(recording_snapshot());
 
@@ -33,24 +33,24 @@ TEST("recording: the entry frame is 0:00 and the counter moves every 30 s") {
   // any tick runs.
   CHECK(app.frame().recording.elapsed_s == 0);
 
-  // One second in, nine, twenty-nine: no frame. The glass keeps 0:00.
-  for (uint32_t elapsed = 1; elapsed < 30; ++elapsed) {
+  // One second in, four: no frame. The glass keeps 0:00.
+  for (uint32_t elapsed = 1; elapsed < 5; ++elapsed) {
     const Outcome out = app.tick(1000 + elapsed * 1000);
     CHECK(!out.draw);
     CHECK(app.frame().recording.elapsed_s == 0);
   }
 
-  // Thirty seconds: one partial, and the counter reads the half minute.
-  const Outcome at30 = app.tick(1000 + 30 * 1000);
-  CHECK(at30.draw);
-  CHECK(at30.refresh == Refresh::Partial);
-  CHECK(app.frame().recording.elapsed_s == 30);
+  // Five seconds: one partial, and the counter reads five.
+  const Outcome at5 = app.tick(1000 + 5 * 1000);
+  CHECK(at5.draw);
+  CHECK(at5.refresh == Refresh::Partial);
+  CHECK(app.frame().recording.elapsed_s == 5);
 
-  // Under the next half minute nothing moves again; at one minute it does.
-  for (uint32_t elapsed = 31; elapsed < 60; ++elapsed) CHECK(!app.tick(1000 + elapsed * 1000).draw);
-  const Outcome at60 = app.tick(1000 + 60 * 1000);
-  CHECK(at60.draw);
-  CHECK(app.frame().recording.elapsed_s == 60);
+  // Under the next five seconds nothing moves again; at ten it does.
+  for (uint32_t elapsed = 6; elapsed < 10; ++elapsed) CHECK(!app.tick(1000 + elapsed * 1000).draw);
+  const Outcome at10 = app.tick(1000 + 10 * 1000);
+  CHECK(at10.draw);
+  CHECK(app.frame().recording.elapsed_s == 10);
 
   // A tap still commits: the counter's cadence is not the capture's boundary.
   const Outcome stop = app.press(Key::BootTap, 1000 + 61 * 1000);

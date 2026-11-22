@@ -349,10 +349,11 @@ Outcome ScreenApp::tick(uint32_t now_ms) {
       // The cap reached: the same commit a tap does (§13.2 row 10).
       return run(Action::StopKeep, now_ms);
     }
-    // 30 s cadence, driven by a tick count - never a delay in the draw path.
+    // 5 s cadence, driven by a tick count - never a delay in the draw path.
     // The entry frame already says 0:00 (run() draws it full), so the first
-    // counter the glass sees is the one at half a minute.
-    if (elapsed != record_draw_s_ && elapsed / 30 != record_draw_s_ / 30) {
+    // counter the glass sees is the one at five seconds. A minute at a time was
+    // too coarse to tell a live capture from a stopped one (Jake, 2026-11-22).
+    if (elapsed != record_draw_s_ && elapsed / 5 != record_draw_s_ / 5) {
       record_draw_s_ = elapsed;
       snap_.record_elapsed_s = elapsed;
       out.refresh = Refresh::Partial;

@@ -243,9 +243,23 @@ void poll_keys(uint32_t now) {
 // holds no association at all (plan section 4).
 void poll_network(uint32_t now) {
   const bool want = g_runtime.wants_network(now);
-  if (want && g_link == Link::Closed) {
-    g_net.radio_on();
-    g_link = Link::Down;
+  // A start that did not take is not a station that is joining. `g_link` used to
+  // be set Down unconditionally after radio_on(), so a refused start (esp_wifi
+  // out of memory at boot, a chip that never came back from a failed join) left
+  // the state machine convinced the link was on its way: `want` stayed true,
+  // `g_link` was never Closed again, radio_on() was never called again, and the
+  // station stayed off until a reboot — 11 notes stranded, "wifi on" a no-op
+  // (Jake, 2026-11-22). Ask again, on a slow clock so a dead radio cannot spin.
+  static uint32_t last_try = 0;
+  const bool radio_dead = want && !g_net.radio_running();
+  if (want && (g_link == Link::Closed || radio_dead)) {
+    if (g_link == Link::Closed || static_cast<int32_t>(now - last_try) > 20000) {
+      last_try = now;
+      g_net.radio_on();
+      // `radio_on()` is the only thing that knows whether the chip started; ask
+      // it rather than assuming.
+      g_link = g_net.radio_running() ? Link::Down : Link::Closed;
+    }
   } else if (!want && g_link != Link::Closed) {
     if (g_net.setup_open()) return;  // a phone is on the setup page: its window
     g_net.radio_off();
@@ -358,6 +372,23 @@ std::string console_line(std::string_view line) {
     if (g_net.setup_open()) return std::string("@error the setup page is already open");
     const std::string answer = g_net.start_setup();
     return answer.empty() ? std::string("@error the setup page did not start (see log)") : "@ok " + answer;
+  }
+  if (line == "phone") {
+    // What the pairing table holds: three slots on this build, and a full table
+    // refuses every new phone until one is removed.
+    const auto window = g_radio.phone_window();
+    char out[128];
+    std::snprintf(out, sizeof out, "@phone %u of %u paired%s, radio %s", static_cast<unsigned>(window.paired),
+                  static_cast<unsigned>(window.slots), window.connected ? ", one connected" : "",
+                  g_radio.radio_up() ? "up" : "down");
+    return out;
+  }
+  if (line == "phone forget" || line == "phone clear") {
+    // Every saved phone goes: the bond store in NVS is emptied, so the next phone
+    // that asks is new again. This is the way out of a full table (3 of 3) on a
+    // device whose three phones are gone, lost or replaced.
+    g_radio.forget();
+    return "@ok every paired phone removed; the table is empty";
   }
   if (line == "phone pair") return g_radio.open_pairing() ? "@ok pairing open, two minutes" : "@error no radio";
   // The two answers the pairing ask takes from a key (BOOT allows, PWR refuses),

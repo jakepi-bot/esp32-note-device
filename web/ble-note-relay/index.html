@@ -54,6 +54,7 @@
 
 <div class="row" style="margin-bottom:14px">
   <button id="connect" class="primary">Connect to the gadget</button>
+  <button id="forget" title="Empty the gadget's pairing table (all saved phones)">Forget the gadget's phones</button>
   <button id="refresh" disabled>List notes</button>
   <button id="drain" disabled>Fetch every note</button>
 </div>
@@ -117,6 +118,26 @@ class Session {
     }
   }
 
+  /** Fail every waiter: the link is gone, so nothing will answer them. */
+  abort(reason) {
+    this.onPacket = null;
+    const waiters = this.waiters;
+    this.waiters = [];
+    for (const waiter of waiters) {
+      clearTimeout(waiter.timer);
+      waiter.reject(new Error(reason));
+    }
+  }
+
+  /** Writes one command and returns the next line the device answers. */
+  async ask(cmd, timeoutMs = 8000) {
+    const waiting = this.next(['text', 'error'], timeoutMs);
+    await this.write(cmd);
+    await waiting;
+    const error = this.assembler.errors.at(-1);
+    return error ? `! ${error}` : this.assembler.lines.at(-1) ?? '';
+  }
+
   /** Resolves on the next packet of one of `kinds`, or rejects on timeout. */
   next(kinds, timeoutMs = 15000) {
     return new Promise((resolve, reject) => {
@@ -176,6 +197,10 @@ async function connect() {
   device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
   device.addEventListener('gattserverdisconnected', () => {
     log('disconnected');
+    // Anything waiting on this link will never hear from it: fail it now, so a
+    // transfer in flight ends as "the link dropped" instead of a 20 s timeout
+    // per packet, and so nothing below reads through a null session.
+    if (session) session.abort('the link dropped');
     session = null;
     toggle(false);
   });
@@ -201,7 +226,7 @@ async function connect() {
 }
 
 function toggle(connected) {
-  for (const id of ['refresh', 'drain']) $(id).disabled = !connected;
+  for (const id of ['refresh', 'drain', 'forget']) $(id).disabled = !connected;
   $('connect').textContent = connected ? 'Reconnect' : 'Connect to the gadget';
 }
 
@@ -260,10 +285,17 @@ async function send(note, state, button) {
   button.disabled = true;
   const { url, deviceId, keyBase64, accessToken } = settings();
   let offset = 0;
+  let link = null;
   try {
     for (let attempt = 0; attempt < 3; attempt++) {
+      // Hold the link this attempt runs on. `session` is nulled the moment the
+      // device drops, so reading that global mid-transfer is how every packet
+      // after a disconnect threw "null is not an object (evaluating
+      // 'session.assembler = assembler')" (Jake's phone, 2026-11-22 15:30).
+      link = session;
+      if (!link) throw new Error('the link dropped');
       const assembler = new Assembler();
-      session.assembler = assembler;
+      link.assembler = assembler;
       let ackedAt = 0;
       let sinceAck = 0;
       let flushTimer = null;
@@ -275,16 +307,16 @@ async function send(note, state, button) {
         if (assembler.received <= ackedAt) return;
         ackedAt = assembler.received;
         state.textContent = `${Math.round((ackedAt / note.bytes) * 100)}%`;
-        await session.write(`ack ${ackedAt}`);
+        await link.write(`ack ${ackedAt}`);
       };
-      session.onPacket = () => {
+      link.onPacket = () => {
         clearTimeout(flushTimer);
         flushTimer = setTimeout(() => void flush().catch((e) => log(String(e.message))), 250);
       };
       try {
-        await session.write(offset > 0 ? `resume ${note.id} ${offset}` : `get ${note.id}`);
+        await link.write(offset > 0 ? `resume ${note.id} ${offset}` : `get ${note.id}`);
         for (;;) {
-          const kind = await session.next(['block', 'end', 'error'], 20000);
+          const kind = await link.next(['block', 'end', 'error'], 20000);
           if (kind === 'error') throw new Error(assembler.errors.at(-1) || 'the device refused the note');
           if (kind === 'end') break;
           if (++sinceAck >= 8) {
@@ -294,7 +326,9 @@ async function send(note, state, button) {
         }
       } finally {
         clearTimeout(flushTimer);
-        session.onPacket = null;
+        // The link may be gone: the session object still exists here, so clear
+        // its handler rather than the global's.
+        if (link) link.onPacket = null;
       }
 
       const audio = assembler.bytes();
@@ -315,16 +349,19 @@ async function send(note, state, button) {
       log(`POST ${url} -> ${result.status} ${String(result.body).slice(0, 120)}`);
       if (!result.ok) throw new Error(`Hermes said ${result.status}`);
       // Only now does the device let the note go (pending/ -> sent/).
-      await session.write(`done ${note.id}`);
+      await link.write(`done ${note.id}`);
       state.textContent = 'sent';
       log(`${note.id} is in Hermes`);
       return;
     }
   } catch (error) {
-    offset = session?.assembler?.received ?? 0;
-    state.textContent = offset ? 'stopped, retry' : 'failed';
+    offset = link?.assembler?.received ?? 0;
+    // A dropped link is not a note that failed: say so, keep the button off, and
+    // do not queue three retries into a session that no longer exists.
+    const gone = session === null || !session;
+    state.textContent = gone ? 'disconnected' : offset ? 'stopped, retry' : 'failed';
     log(`${note.id}: ${error.message}${offset ? ` (${offset} bytes kept)` : ''}`);
-    button.disabled = false;
+    button.disabled = gone;
   }
 }
 
@@ -343,6 +380,26 @@ async function drainAll() {
 }
 
 $('connect').onclick = () => connect().catch((error) => log(pairingFailure(error)));
+
+/** Empties the gadget's pairing table: every saved phone, not just this one.
+ *  The device answers and then drops the link, because the keys it would need
+ *  to keep talking are the ones it just deleted. */
+$('forget').onclick = async () => {
+  if (!session) {
+    log('connect first: forgetting goes over the same link');
+    return;
+  }
+  if (!confirm('Remove every phone saved on the gadget? Each one has to pair again.')) return;
+  try {
+    const answer = await session.ask('phone forget', 5000);
+    log(`gadget: ${answer}`);
+  } catch (error) {
+    log(`forget: ${error.message}`);
+  }
+  if (device?.gatt?.connected) {
+    try { device.gatt.disconnect(); } catch { /* already gone */ }
+  }
+};
 $('refresh').onclick = () => refresh().catch((error) => log(String(error.message)));
 $('drain').onclick = () => drainAll().catch((error) => log(String(error.message)));
 </script>

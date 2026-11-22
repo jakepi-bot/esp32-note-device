@@ -355,7 +355,7 @@ TEST("facts: a capture silences the band, and the band catches up after it") {
   ui.begin(battery_seed(84), &store);
   CHECK(ui.set_facts(facts_at(84, 14, 2), 1000).draw);  // the clock, before recording
 
-  // Recording: every fact is dropped, so the 30 s counter stays the only thing
+  // Recording: every fact is dropped, so the 5 s counter stays the only thing
   // that repaints the panel.
   CHECK(ui.set_capture(true, 0, false, 2000).draw);  // the screen hand-over is full
   Facts noisy = facts_at(40, 15, 30);
@@ -365,7 +365,7 @@ TEST("facts: a capture silences the band, and the band catches up after it") {
   CHECK(!ui.set_facts(noisy, 13000).draw);
   CHECK(ui.snapshot().battery_pct == 84);      // nothing was adopted mid-note
   CHECK(ui.snapshot().bt == BtState::Off);
-  CHECK(!ui.tick(14000).draw);                 // and the counter has not reached 30 s
+  CHECK(!ui.tick(6000).draw);                  // and four seconds in is before the first mark
 
   // The capture ends: the next poll is the one that brings the band up to date.
   CHECK(ui.set_capture(false, 0, false, 15000).draw);

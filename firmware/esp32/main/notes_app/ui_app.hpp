@@ -87,7 +87,7 @@ class ScreenApp {
   Outcome press(Key key, uint32_t now_ms);
 
   // The loop's heartbeat: the recording counter, the playback position, and the
-  // recording cap. The counter moves every 30 s and the position every 5 s,
+  // recording cap. The counter moves every 5 s and the position every 5 s,
   // never at 1 Hz (§9.2).
   Outcome tick(uint32_t now_ms);
   // The runtime's own capture, taken as the truth: a capture that ended without

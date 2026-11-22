@@ -1286,3 +1286,148 @@ TEST("retention's thresholds are exact: exactly 14 days and exactly 10% are stil
   CHECK_EQ(under.deleted_for_space, uint32_t(1));
 }
 
+
+
+// -- parts (§2.5) ------------------------------------------------------------------
+//
+// A note longer than five minutes is uploaded as several POSTs, each a complete
+// WAV of at most 300 s with the note's id and its place in it. The device plans
+// those parts; the hub only validates and reassembles (plugin/notes_parts.py
+// pins the same numbers on the Python side).
+
+namespace {
+
+// A synthetic WAV header that describes `seconds` of PCM16 mono, with only a
+// few bytes behind it: the plan is made from the header, never from reading the
+// whole recording, which is what lets these cases run on the host.
+WavLayout header_for(uint32_t seconds, uint32_t rate = kSampleRate) {
+  const uint32_t data = seconds * rate * 2;
+  std::vector<uint8_t> buffer(44 + 64, 0);
+  wav_header(buffer.data(), data, rate);
+  WavLayout info;
+  CHECK(probe_wav_header(buffer.data(), buffer.size(), info));
+  return info;
+}
+
+}  // namespace
+
+TEST("parts: a twelve-minute note is three parts of five, five and two") {
+  const WavLayout info = header_for(12 * 60);
+  const std::vector<Part> parts = plan_parts(info);
+  CHECK_EQ(parts.size(), size_t(3));
+  CHECK_EQ(parts[0].duration_s, uint32_t(300));
+  CHECK_EQ(parts[1].duration_s, uint32_t(300));
+  CHECK_EQ(parts[2].duration_s, uint32_t(120));
+  CHECK_EQ(parts[0].offset_s, uint32_t(0));
+  CHECK_EQ(parts[1].offset_s, uint32_t(300));
+  CHECK_EQ(parts[2].offset_s, uint32_t(600));
+  CHECK_EQ(parts[0].index, uint32_t(0));
+  CHECK_EQ(parts[2].index, uint32_t(2));
+  CHECK_EQ(parts[0].count, uint32_t(3));
+  CHECK_EQ(parts[2].count, uint32_t(3));
+  // The parts are the recording, end to end, with no gap and no overlap.
+  CHECK_EQ(parts[0].audio_offset, info.data_offset);
+  CHECK_EQ(parts[1].audio_offset, parts[0].audio_offset + parts[0].audio_bytes);
+  CHECK_EQ(parts[2].audio_offset, parts[1].audio_offset + parts[1].audio_bytes);
+  CHECK_EQ(parts[0].audio_bytes + parts[1].audio_bytes + parts[2].audio_bytes, info.data_bytes);
+}
+
+TEST("parts: four fifty-nine and five minutes exactly are one part each") {
+  for (const uint32_t seconds : {uint32_t(299), uint32_t(300)}) {
+    const WavLayout info = header_for(seconds);
+    const std::vector<Part> parts = plan_parts(info);
+    CHECK_EQ(parts.size(), size_t(1));
+    CHECK_EQ(parts[0].count, uint32_t(1));
+    CHECK_EQ(parts[0].duration_s, seconds);
+    CHECK_EQ(parts[0].audio_bytes, info.data_bytes);
+    CHECK_EQ(parts[0].offset_s, uint32_t(0));
+  }
+}
+
+TEST("parts: one second over five minutes is two parts, the second one second") {
+  const WavLayout info = header_for(5 * 60 + 1);
+  const std::vector<Part> parts = plan_parts(info);
+  CHECK_EQ(parts.size(), size_t(2));
+  CHECK_EQ(parts[0].duration_s, uint32_t(300));
+  CHECK_EQ(parts[1].duration_s, uint32_t(1));
+  CHECK_EQ(parts[1].offset_s, uint32_t(300));
+  CHECK_EQ(parts[1].audio_bytes, uint32_t(kSampleRate * 2));
+}
+
+TEST("parts: a part's own header is a complete WAV the hub accepts") {
+  const WavLayout info = header_for(12 * 60);
+  const std::vector<Part> parts = plan_parts(info);
+  const std::string header = part_wav_header(info, parts[1].audio_bytes);
+  CHECK_EQ(header.size(), size_t(44));
+  CHECK(std::memcmp(header.data(), "RIFF", 4) == 0);
+  CHECK(std::memcmp(header.data() + 8, "WAVE", 4) == 0);
+  CHECK(std::memcmp(header.data() + 36, "data", 4) == 0);
+  WavLayout probed;
+  CHECK(probe_wav_header(reinterpret_cast<const uint8_t*>(header.data()), header.size(), probed));
+  CHECK_EQ(probed.data_bytes, parts[1].audio_bytes);
+  CHECK_EQ(probed.duration_s, uint32_t(300));
+  CHECK_EQ(probed.sample_rate, info.sample_rate);
+}
+
+TEST("parts: the request carries the note identity, where the part sits and its own key") {
+  Meta wire = sample_meta();
+  wire.duration_s = 120;
+  wire.sha256 = std::string(64, 'b');
+  wire.idempotency_key = part_idempotency_key(wire.note_id, 2);
+  Part part;
+  part.index = 2;
+  part.count = 3;
+  part.offset_s = 600;
+  part.duration_s = 120;
+  Request request;
+  CHECK(build_request(wire, "recording.wav", request, &part));
+  CHECK(request.tail.find("name=\"note_id\"\r\n\r\n" + wire.note_id) != std::string::npos);
+  CHECK(request.tail.find("name=\"part_index\"\r\n\r\n2") != std::string::npos);
+  CHECK(request.tail.find("name=\"part_count\"\r\n\r\n3") != std::string::npos);
+  CHECK(request.tail.find("name=\"part_offset\"\r\n\r\n600") != std::string::npos);
+  CHECK(request.tail.find("name=\"duration_seconds\"\r\n\r\n120") != std::string::npos);
+  CHECK(request.tail.find("name=\"idempotency_key\"\r\n\r\n" + wire.note_id + ".2") !=
+        std::string::npos);
+
+  // The MAC covers the part: without the segment, the hub's canonical differs.
+  const std::string signed_with = canonical_string(wire, 1000, wire.sha256, &part);
+  const std::string signed_without = canonical_string(wire, 1000, wire.sha256, nullptr);
+  CHECK(signed_with != signed_without);
+  CHECK(signed_with.size() > signed_without.size());
+  CHECK(signed_with.find("|parts=" + std::to_string(kPartsSchemaVersion) + "|" + wire.note_id +
+                         "|2|3|600") != std::string::npos);
+}
+
+TEST("parts: a note at or under five minutes sends exactly the v1 request") {
+  Meta wire = sample_meta();
+  wire.sha256 = std::string(64, 'c');
+  Request request;
+  CHECK(build_request(wire, "recording.wav", request));
+  CHECK(request.tail.find("part_index") == std::string::npos);
+  CHECK(request.tail.find("note_id\"") == std::string::npos);
+  const std::string canonical = canonical_string(wire, 1000, wire.sha256);
+  CHECK(canonical.find("parts=") == std::string::npos);
+  CHECK_EQ(canonical,
+           "hermes-gadget/v1|note|" + wire.device_id + "|1000|" + wire.recorded_at +
+               "|8|" + wire.sha256 + "|" + wire.note_id);
+}
+
+TEST("parts: the per-part key stays in the contract's idempotency-key charset") {
+  const std::string key = part_idempotency_key("hg-0123456789abcdef-20261120T020512-0001", 12);
+  CHECK_EQ(key, std::string("hg-0123456789abcdef-20261120T020512-0001.12"));
+  for (const char c : key) {
+    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                    c == '.' || c == '_' || c == '-';
+    CHECK(ok);
+  }
+}
+
+TEST("parts: a WAV the contract would refuse makes no plan from its header") {
+  // Format tag 3 (IEEE float) is not PCM16: the hub answers 415 and the
+  // device must not slice it into parts either.
+  std::vector<uint8_t> buffer(44 + 64, 0);
+  wav_header(buffer.data(), 48000);
+  buffer[20] = 3;  // the fmt chunk's format tag
+  WavLayout info;
+  CHECK(!probe_wav_header(buffer.data(), buffer.size(), info));
+}

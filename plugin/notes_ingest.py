@@ -8,6 +8,16 @@ the audio (``device_id``, ``recorded_at``, ``duration_seconds``, and optionally
 ``X-Gadget-Token`` when configured) authorize the request; the MAC covers the
 field values exactly as transmitted plus the SHA-256 of the audio bytes.
 
+A note longer than five minutes is sent as several such requests (§2.5): each
+carries a complete WAV of at most 300 s plus ``note_id``, ``part_index``,
+``part_count`` and ``part_offset``. Parts are staged under
+``inbox/<job>/parts/`` and one ``recording.wav`` is assembled only when the
+whole set is present, so the pipeline, the vault note and ``duration_seconds``
+stay per-note. A part retried after a failure is a duplicate of itself (200,
+never a second copy of its audio); a part for a note already completed is a
+duplicate of that note. Notes at or under five minutes are a single part and
+are sent exactly as v1 — no part fields at all.
+
 The request is handled in the contract's fixed order (§4), and each answer is
 the *first* failing check::
 
@@ -57,7 +67,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
-from . import protocol
+from . import notes_parts, protocol
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +89,20 @@ MAX_SKEW_S = 300
 DURATION_MIN = protocol.NOTE_DURATION_MIN
 DURATION_MAX = protocol.NOTE_DURATION_MAX
 
+#: One part of a longer note carries at most this much audio (§2.5), the same
+#: number the firmware plans with (``kPartSeconds`` in notes_queue.hpp).
+PART_SECONDS = notes_parts.PART_SECONDS
+MAX_PARTS = notes_parts.MAX_PARTS
+PARTS_VERSION = notes_parts.PARTS_VERSION
+#: A note whose parts never complete is debris: a device that died mid-note, or
+#: one whose remaining parts were deleted off its card. Nothing could finish it,
+#: so the sweep removes the staged parts after a day and says so.
+PART_MAX_AGE_S = 24 * 3600
+#: Where the parts of an incomplete note live inside its inbox entry, and the
+#: manifest that records which of them arrived.
+PARTS_DIR = "parts"
+PART_MANIFEST = "manifest.json"
+
 #: Transient staging write errors are retried three times, 100 ms apart (§5.7),
 #: inside the request; anything else (notably ``ENOSPC``) answers 507 at once and
 #: lets the device's own backoff handle it.
@@ -98,12 +122,21 @@ _RECORDED_AT = "recorded_at"
 _DURATION = "duration_seconds"
 _IDEMPOTENCY = "idempotency_key"
 _CHECKSUM = "checksum"
+# §2.5: the four fields that make a request one part of one longer note. They
+# are sent together or not at all; a request without them is a v1 note.
+_NOTE_ID = "note_id"
+_PART_INDEX = "part_index"
+_PART_COUNT = "part_count"
+_PART_OFFSET = "part_offset"
+_PART_FIELDS = (_NOTE_ID, _PART_INDEX, _PART_COUNT, _PART_OFFSET)
 _REQUIRED = (_AUDIO, _DEVICE, _RECORDED_AT, _DURATION)
-_TEXT_PARTS = frozenset((_DEVICE, _RECORDED_AT, _DURATION, _IDEMPOTENCY, _CHECKSUM))
+_TEXT_PARTS = frozenset((_DEVICE, _RECORDED_AT, _DURATION, _IDEMPOTENCY, _CHECKSUM,
+                         _NOTE_ID, _PART_INDEX, _PART_COUNT, _PART_OFFSET))
 _KNOWN_PARTS = frozenset((_AUDIO,) + tuple(_TEXT_PARTS))
 
 _DEVICE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _IDEMPOTENCY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_NOTE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _DECIMAL = re.compile(r"^[0-9]+$")
 _TS = re.compile(r"^[0-9]+$")
@@ -322,6 +355,22 @@ def sniff_codec(audio: bytes | memoryview) -> Optional[str]:
 
 
 @dataclass(frozen=True)
+class _PartInfo:
+    """Where one request sits in a longer note (§2.5). Validated, never trusted."""
+
+    note_id: str
+    index: int
+    count: int
+    offset_s: int
+    version: int = PARTS_VERSION
+
+    def canonical(self) -> dict[str, Any]:
+        """The segment ``protocol.note_canonical`` appends to the MAC input."""
+        return {"version": self.version, "note_id": self.note_id, "index": self.index,
+                "count": self.count, "offset": self.offset_s}
+
+
+@dataclass(frozen=True)
 class _Request:
     """A parsed, field-validated upload — everything auth and storage need."""
 
@@ -335,6 +384,7 @@ class _Request:
     idempotency_key: Optional[str]
     checksum: Optional[str]
     audio_sha256: str
+    part: Optional[_PartInfo] = None
 
 
 # -- durable file helpers --------------------------------------------------------------
@@ -365,7 +415,7 @@ def _write_durable(path: Path, data: bytes | bytearray | memoryview) -> None:
     _retry_transient(lambda: _write_file(path, data))
 
 
-def _write_atomic(path: Path, data: bytes) -> None:
+def _write_atomic(path: Path, data: bytes | bytearray | memoryview) -> None:
     """Replace ``path`` with ``data`` through a sibling temp file (commit point)."""
     tmp = path.with_name(path.name + ".tmp")
     _write_durable(tmp, data)
@@ -535,6 +585,10 @@ class NotesServer:
     def _work(self) -> None:
         while not self._stop.is_set():
             delay: Optional[float] = None
+            try:  # a note whose parts never arrived is debris; the sweep is cheap
+                self.sweep_parts()
+            except Exception:  # noqa: BLE001 - a sweep must never kill the worker
+                logger.exception("voice-note partial sweep failed")
             try:
                 if self.pipeline is not None:
                     delay = self.pipeline.run_once()
@@ -702,16 +756,71 @@ class NotesServer:
                 raise _Rejected(*_fail(422, "invalid_field",
                                        "checksum must be 64 lowercase hex characters", field=_CHECKSUM))
 
+        part = None
+        if any(name in fields for name in _PART_FIELDS):
+            missing = next((name for name in _PART_FIELDS if name not in fields), None)
+            if missing is not None:
+                raise _Rejected(*_fail(422, "invalid_field",
+                                       f"{missing} is required with the other part fields",
+                                       field=missing))
+            note_id = text(_NOTE_ID)
+            if _NOTE_ID_RE.fullmatch(note_id) is None:
+                raise _Rejected(*_fail(422, "invalid_field",
+                                       "note_id must match [A-Za-z0-9][A-Za-z0-9._-]{0,127}",
+                                       field=_NOTE_ID))
+            numbers: dict[str, int] = {}
+            for name in (_PART_INDEX, _PART_COUNT, _PART_OFFSET):
+                raw = text(name)
+                if _DECIMAL.fullmatch(raw) is None:
+                    raise _Rejected(*_fail(422, "invalid_field",
+                                           f"{name} must be a decimal integer", field=name))
+                numbers[name] = int(raw)
+            index = numbers[_PART_INDEX]
+            count = numbers[_PART_COUNT]
+            offset = numbers[_PART_OFFSET]
+            if not 1 <= count <= MAX_PARTS:
+                raise _Rejected(*_fail(422, "invalid_field",
+                                       f"part_count must be an integer in 1..{MAX_PARTS}",
+                                       field=_PART_COUNT))
+            if count < 2:
+                raise _Rejected(*_fail(422, "invalid_field",
+                                       "a note at or under 300 s is one upload and carries no part fields",
+                                       field=_PART_COUNT))
+            if index >= count:
+                raise _Rejected(*_fail(422, "invalid_field",
+                                       "part_index must be below part_count", field=_PART_INDEX))
+            if offset != index * PART_SECONDS:
+                raise _Rejected(*_fail(422, "invalid_field",
+                                       f"part_offset must be part_index * {PART_SECONDS}",
+                                       field=_PART_OFFSET))
+            if int(duration_raw) > PART_SECONDS:
+                raise _Rejected(*_fail(422, "invalid_field",
+                                       f"a part carries at most {PART_SECONDS} s of audio",
+                                       field=_DURATION))
+            # The per-part key is what makes a retried part dedupe to itself; it
+            # is derived, so a mismatch is a sender bug rather than a new note.
+            expected_key = f"{note_id}.{index}"
+            if idempotency_key != expected_key:
+                raise _Rejected(*_fail(422, "invalid_field",
+                                       f"idempotency_key must be {expected_key!r} for this part",
+                                       field=_IDEMPOTENCY))
+            part = _PartInfo(note_id=note_id, index=index, count=count, offset_s=offset)
+
         codec = sniff_codec(audio_part.value)
         if codec is None:
             raise _Rejected(*_fail(415, "unsupported_codec",
                                    "audio must be WAV PCM16 mono (8-48 kHz) or Ogg Opus mono",
                                    field=_AUDIO))
+        if part is not None and codec != "wav":
+            # Parts are concatenated into one recording.wav; an Opus part has no
+            # PCM to concatenate, and the device never records one.
+            raise _Rejected(*_fail(422, "invalid_field",
+                                   "a part of a longer note must be WAV PCM16 mono", field=_AUDIO))
         return _Request(device_id=device_id, recorded_at_raw=recorded_at_raw,
                         recorded_at_utc=recorded_at_utc, duration_raw=duration_raw,
                         duration_seconds=int(duration_raw), audio=audio_part.value, codec=codec,
                         idempotency_key=idempotency_key, checksum=checksum,
-                        audio_sha256=hashlib.sha256(audio_part.value).hexdigest())
+                        audio_sha256=hashlib.sha256(audio_part.value).hexdigest(), part=part)
 
     def _authorize(self, headers: Mapping[str, str], request: _Request,
                    received_at: Optional[float] = None) -> Optional[tuple[int, dict]]:
@@ -743,7 +852,8 @@ class NotesServer:
             return _fail(401, "auth", f"device {request.device_id} is not enrolled")
         if not protocol.verify_note_mac(key, request.device_id, ts_raw, request.recorded_at_raw,
                                         request.duration_raw, request.audio_sha256,
-                                        request.idempotency_key, mac):
+                                        request.idempotency_key, mac,
+                                        request.part.canonical() if request.part else None):
             return _fail(401, "auth", "X-Gadget-Mac does not match the request")
         if self.access_token is not None:
             token = h.get(H_TOKEN, "")
@@ -756,6 +866,8 @@ class NotesServer:
         if request.checksum is not None and request.checksum != request.audio_sha256:
             return _fail(409, "checksum_mismatch",
                          "the checksum part does not match the received audio")
+        if request.part is not None:
+            return self._accept_part(request)
         job_id = self.job_id_for(request)
         lock = self._job_lock(job_id)
         try:
@@ -764,6 +876,16 @@ class NotesServer:
             except _Inconsistent as exc:
                 logger.error("voice-note job %s is unreadable: %s", job_id, exc)
                 return _fail(500, "internal", str(exc), retryable=True)
+            if existing is None:
+                # The same note half-sent as parts (§2.5): a whole-recording POST
+                # cannot join that set, and silently refusing it as storage
+                # trouble would retry forever.
+                partial = self.inbox / job_id
+                if partial.is_dir() and not (partial / "note.json").is_file() and \
+                        (self._parts_dir(partial) / PART_MANIFEST).is_file():
+                    return _fail(409, "idempotency_conflict",
+                                 "this note is being uploaded in parts; send the remaining parts, "
+                                 "not the whole recording")
             if existing is not None:
                 state, stored_sha = existing
                 if stored_sha != request.audio_sha256:
@@ -813,6 +935,281 @@ class NotesServer:
         logger.info("voice note %s was quarantined; reopened and requeued", job_id)
         return 202, {"status": "accepted", "job_id": job_id, "requeued": True}
 
+    # -- parts of one longer note (§2.5) ----------------------------------------------
+
+    @staticmethod
+    def note_job_id(device_id: str, note_id: str) -> str:
+        """One note, one job.
+
+        The derivation matches a single-part note's supplied key (which is the
+        note id), so the same note keeps the same entry whichever way it was
+        sent: parts are a transport detail, not a second note.
+        """
+        return hashlib.sha256(f"{device_id}|{note_id}".encode()).hexdigest()
+
+    def _accept_part(self, request: _Request) -> tuple[int, dict]:
+        """§2.5: stage one part, assemble the note when the set is complete.
+
+        A part is idempotent by (note, index): a retry after a failed transfer
+        rewrites nothing and answers 200 duplicate, and the parts that already
+        arrived are never sent again or stored twice.
+        """
+        part = request.part
+        assert part is not None
+        job_id = self.note_job_id(request.device_id, part.note_id)
+        lock = self._job_lock(job_id)
+        try:
+            for directory in (self.done, self.failed):
+                entry = directory / job_id
+                if entry.is_dir():  # the note is finished; a late part is a duplicate of it
+                    return self._finished_part_answer(entry, job_id, request)
+            entry = self.inbox / job_id
+            try:
+                manifest = self._read_manifest(entry)
+            except _Inconsistent as exc:
+                logger.error("voice note %s part manifest is unreadable: %s", job_id, exc)
+                return _fail(500, "internal", str(exc), retryable=True)
+            if manifest is None and (entry / "note.json").is_file():
+                return self._finished_part_answer(entry, job_id, request)
+            if manifest is None:
+                self._begin_part_entry(entry, job_id, request)
+                manifest = self._read_manifest(entry)
+                if manifest is None:
+                    return _fail(500, "internal", "the note's part manifest vanished", retryable=True)
+            else:
+                conflict = self._parts_disagree(manifest, request)
+                if conflict is not None:
+                    return conflict
+            recorded = next((p for p in manifest["parts"] if p["index"] == part.index), None)
+            if recorded is not None:
+                if recorded["sha256"] != request.audio_sha256:
+                    return _fail(409, "idempotency_conflict",
+                                 f"part {part.index} of this note was already stored with different audio")
+                logger.info("voice note %s part %d/%d already stored; answering duplicate",
+                            job_id, part.index, part.count)
+                return 200, {"status": "duplicate", "job_id": job_id, "part_index": part.index}
+            try:
+                self._store_part(entry, request)
+            except OSError as exc:
+                self.last_error = f"cannot store part {part.index} of {job_id}: {exc}"
+                logger.error("voice note %s part %d storage failed: %s", job_id, part.index, exc)
+                return _fail(507, "storage", f"the part could not be staged: {exc}", retryable=True)
+            manifest["parts"].append({
+                "index": part.index,
+                "offset_s": part.offset_s,
+                "duration_s": request.duration_seconds,
+                "bytes": len(request.audio),
+                "sha256": request.audio_sha256,
+                "received_unix": int(time.time()),
+            })
+            manifest["parts"].sort(key=lambda p: p["index"])
+            if len(manifest["parts"]) < part.count:
+                try:
+                    self._write_manifest(entry, manifest)
+                except OSError as exc:
+                    return _fail(507, "storage", f"the part manifest could not be written: {exc}",
+                                 retryable=True)
+                logger.info("voice note %s part %d/%d staged (%d of %d parts)",
+                            job_id, part.index, part.count, len(manifest["parts"]), part.count)
+                return 202, {"status": "accepted", "job_id": job_id, "part_index": part.index,
+                             "parts": len(manifest["parts"]), "part_count": part.count}
+            try:
+                duration = self._assemble(entry, job_id, manifest)
+            except OSError as exc:
+                self.last_error = f"cannot assemble {job_id}: {exc}"
+                logger.error("voice note %s assembly failed: %s", job_id, exc)
+                return _fail(507, "storage", f"the note could not be assembled: {exc}",
+                             retryable=True)
+            except ValueError as exc:
+                logger.error("voice note %s parts do not form one WAV: %s", job_id, exc)
+                return _fail(422, "invalid_field", f"the parts do not form one WAV: {exc}",
+                             field=_AUDIO)
+            self.notify()
+            logger.info("voice note %s assembled from %d parts (%d s)", job_id, part.count, duration)
+            return 202, {"status": "accepted", "job_id": job_id, "assembled": True,
+                         "part_count": part.count, "duration_seconds": duration}
+        finally:
+            self._release_job_lock(job_id, lock)
+
+    @staticmethod
+    def _parts_dir(entry: Path) -> Path:
+        return entry / PARTS_DIR
+
+    def _read_manifest(self, entry: Path) -> Optional[dict]:
+        """The entry's part manifest, None when it has none (no entry, or a v1 one)."""
+        path = self._parts_dir(entry) / PART_MANIFEST
+        if not path.is_file():
+            return None
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise _Inconsistent(f"{entry.name}/parts/{PART_MANIFEST} is unreadable: {exc}") from exc
+        if not isinstance(raw, dict) or not isinstance(raw.get("parts"), list):
+            raise _Inconsistent(f"{entry.name}/parts/{PART_MANIFEST} does not hold a manifest")
+        return raw
+
+    def _write_manifest(self, entry: Path, manifest: dict) -> None:
+        path = self._parts_dir(entry) / PART_MANIFEST
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _write_atomic(path, json.dumps(manifest, indent=2, sort_keys=True).encode())
+
+    def _begin_part_entry(self, entry: Path, job_id: str, request: _Request) -> None:
+        """Open the note's entry: its ``parts/`` directory and the note's identity.
+
+        ``note.json`` is written only when the last part arrives (see
+        ``_assemble``): the pipeline reads inbox entries, and a partial note must
+        not look like a note.
+        """
+        part = request.part
+        assert part is not None
+        self.inbox.mkdir(parents=True, exist_ok=True)
+        self._parts_dir(entry).mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "parts_version": PARTS_VERSION,
+            "note_id": part.note_id,
+            "device_id": request.device_id,
+            "recorded_at": request.recorded_at_raw,
+            "recorded_at_utc": request.recorded_at_utc,
+            "codec": request.codec,
+            "part_count": part.count,
+            "created_unix": int(time.time()),
+            "parts": [],
+        }
+        self._write_manifest(entry, manifest)
+        _fsync_dir(entry)
+
+    @staticmethod
+    def _parts_disagree(manifest: dict, request: _Request) -> Optional[tuple[int, dict]]:
+        """409 when this part claims a different note than the parts already held."""
+        part = request.part
+        assert part is not None
+        if int(manifest.get("part_count", 0)) != part.count:
+            return _fail(409, "idempotency_conflict",
+                         "the parts of one note must agree on part_count and part_index")
+        for key, mine in (("note_id", part.note_id), ("device_id", request.device_id),
+                          ("recorded_at", request.recorded_at_raw), ("codec", request.codec)):
+            if manifest.get(key) != mine:
+                return _fail(409, "idempotency_conflict",
+                             f"the parts of one note must agree on {key}")
+        return None
+
+    def _store_part(self, entry: Path, request: _Request) -> None:
+        part = request.part
+        assert part is not None
+        directory = self._parts_dir(entry)
+        directory.mkdir(parents=True, exist_ok=True)
+        _write_atomic(directory / f"{part.index:03d}.wav", request.audio)
+        _fsync_dir(directory)
+
+    def _finished_part_answer(self, entry: Path, job_id: str,
+                              request: _Request) -> tuple[int, dict]:
+        """A part for a note already stored: 200 duplicate, or 409 if it differs."""
+        part = request.part
+        assert part is not None
+        try:
+            raw = json.loads((entry / "note.json").read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise ValueError("note.json does not hold an object")
+        except (OSError, ValueError) as exc:
+            return _fail(500, "internal", f"the stored note is unreadable: {exc}", retryable=True)
+        parts = raw.get("parts")
+        if isinstance(parts, list):
+            recorded = next((p for p in parts if isinstance(p, dict) and p.get("index") == part.index), None)
+            if recorded is not None and recorded.get("sha256") not in (None, request.audio_sha256):
+                return _fail(409, "idempotency_conflict",
+                             f"part {part.index} of this note was already stored with different audio")
+        logger.info("voice note %s part %d/%d arrived for a note already stored; duplicate",
+                    job_id, part.index, part.count)
+        return 200, {"status": "duplicate", "job_id": job_id, "part_index": part.index}
+
+    def _assemble(self, entry: Path, job_id: str, manifest: dict) -> int:
+        """All parts present: publish the note's one ``recording.wav`` + ``note.json``.
+
+        Streamed rather than built in memory — a note may be 2 GiB — and the
+        ``note.json`` is written last, so the pipeline sees a complete entry or
+        no entry at all (§5.7). Returns ``duration_seconds``, the sum of the
+        parts' own durations.
+        """
+        directory = self._parts_dir(entry)
+        target = entry / "recording.wav"
+        tmp = target.with_name(target.name + ".tmp")
+        format_info: Optional[notes_parts.WavInfo] = None
+        duration = 0
+        total_pcm = 0
+        try:
+            with open(tmp, "wb") as out:
+                out.write(b"\x00" * 44)  # the header is rewritten when the size is known
+                for index in range(int(manifest["part_count"])):
+                    path = directory / f"{index:03d}.wav"
+                    with open(path, "rb") as handle:
+                        head = handle.read(64 * 1024)
+                        info = notes_parts.probe_wav(head, truncated_ok=True)
+                        if info is None:
+                            raise ValueError(f"part {index} is not a WAV this contract accepts")
+                        if format_info is None:
+                            format_info = info
+                        elif (info.rate, info.channels, info.bits) != \
+                                (format_info.rate, format_info.channels, format_info.bits):
+                            raise ValueError(f"part {index} is a different sample format")
+                        advertised = int(manifest["parts"][index].get("duration_s") or 0)
+                        if advertised and abs(advertised - info.duration_s) > 1:
+                            raise ValueError(
+                                f"part {index} says {advertised} s but holds {info.duration_s} s")
+                        duration += info.duration_s
+                        handle.seek(info.data_offset)
+                        remaining = info.data_bytes
+                        while remaining:
+                            block = handle.read(min(1 << 20, remaining))
+                            if not block:
+                                raise ValueError(f"part {index} is shorter than its header says")
+                            out.write(block)
+                            remaining -= len(block)
+                        total_pcm += info.data_bytes
+                out.flush()
+                os.fsync(out.fileno())
+            if format_info is None:
+                raise ValueError("the note has no parts")
+            with open(tmp, "r+b") as out:  # the real sizes in the header
+                out.seek(0)
+                out.write(notes_parts.wav_header(format_info, total_pcm))
+                out.flush()
+                os.fsync(out.fileno())
+            _retry_transient(lambda: os.replace(tmp, target))
+        except BaseException:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+        digest = hashlib.sha256()
+        with open(target, "rb") as handle:
+            for block in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(block)
+        note = {
+            "job_id": job_id,
+            "note_id": manifest["note_id"],
+            "device_id": manifest["device_id"],
+            "recorded_at": manifest["recorded_at"],
+            "recorded_at_utc": manifest["recorded_at_utc"],
+            "duration_seconds": duration,
+            "audio_sha256": digest.hexdigest(),
+            "codec": manifest["codec"],
+            "supplied_key": manifest["note_id"],
+            "attempts": 0,
+            "last_error": None,
+            "accepted_unix": int(time.time()),
+            "parts_version": PARTS_VERSION,
+            "part_count": int(manifest["part_count"]),
+            "parts": [{"index": p["index"], "offset_s": p["offset_s"],
+                       "duration_s": p["duration_s"], "bytes": p["bytes"],
+                       "sha256": p["sha256"]} for p in manifest["parts"]],
+        }
+        _write_atomic(entry / "note.json", json.dumps(note, indent=2, sort_keys=True).encode())
+        _fsync_dir(entry)
+        # The audio is in recording.wav now; the parts would only double the disk.
+        shutil.rmtree(directory, ignore_errors=True)
+        return duration
+
     # -- idempotency -----------------------------------------------------------------
 
     @staticmethod
@@ -845,6 +1242,9 @@ class NotesServer:
             entry = directory / job_id
             if not entry.is_dir():
                 continue
+            if not (entry / "note.json").is_file() and \
+                    (self._parts_dir(entry) / PART_MANIFEST).is_file():
+                continue  # still collecting its parts: not a stored note yet
             try:
                 raw = json.loads((entry / "note.json").read_text(encoding="utf-8"))
                 if not isinstance(raw, dict):
@@ -931,16 +1331,67 @@ class NotesServer:
         logger.info("voice-note endpoint %s", "paused" if paused else "resumed")
 
     def counts(self) -> dict[str, int]:
-        def count(directory: Path) -> int:
+        def count(directory: Path, *, partial: bool) -> int:
+            """Inbox entries that are notes, or (``partial=True``) notes still
+            collecting parts. A partial entry has a manifest and no note.json."""
+            total = 0
             try:
-                return sum(1 for p in directory.iterdir() if p.is_dir() and not p.name.startswith("."))
+                for p in directory.iterdir():
+                    if not p.is_dir() or p.name.startswith("."):
+                        continue
+                    collecting = (self._parts_dir(p) / PART_MANIFEST).is_file()
+                    if collecting == partial and (collecting or (p / "note.json").is_file()):
+                        total += 1
             except OSError:
                 return 0
-        return {"inbox": count(self.inbox), "done": count(self.done), "failed": count(self.failed)}
+            return total
+        return {"inbox": count(self.inbox, partial=False), "done": count(self.done, partial=False),
+                "failed": count(self.failed, partial=False), "partial": count(self.inbox, partial=True)}
+
+    def sweep_parts(self, max_age_s: float = PART_MAX_AGE_S, now: Optional[float] = None) -> int:
+        """Remove notes whose parts never completed (§2.5), and say how many.
+
+        A partial note is only useful while its device still has the rest; after
+        ``max_age_s`` nothing can finish it, so its parts are debris. The age is
+        the newest part's arrival (or the entry's creation), so a slow note that
+        is still progressing is never swept.
+        """
+        cutoff = (time.time() if now is None else now) - max_age_s
+        removed = 0
+        try:
+            entries = sorted(p for p in self.inbox.iterdir()
+                             if p.is_dir() and not p.name.startswith("."))
+        except OSError:
+            return 0
+        for entry in entries:
+            if (entry / "note.json").is_file():
+                continue
+            try:
+                manifest = self._read_manifest(entry)
+            except _Inconsistent as exc:
+                logger.error("partial voice note %s is unreadable and stays: %s", entry.name, exc)
+                continue
+            if manifest is None:
+                continue
+            newest = int(manifest.get("created_unix") or 0)
+            for part in manifest.get("parts", []):
+                newest = max(newest, int(part.get("received_unix") or 0))
+            if newest > cutoff:
+                continue
+            try:
+                shutil.rmtree(entry)
+            except OSError as exc:
+                logger.warning("partial voice note %s cannot be removed: %s", entry.name, exc)
+                continue
+            removed += 1
+            logger.info("partial voice note %s removed: %d of %s parts, nothing arrived for %d s",
+                        entry.name, len(manifest.get("parts", [])), manifest.get("part_count", "?"),
+                        int((time.time() if now is None else now) - newest))
+        return removed
 
     def health(self) -> dict[str, Any]:
         return {"status": "paused" if self.paused else "ok", "port": self.bound_port,
-                "last_error": self.last_error, **self.counts()}
+                "last_error": self.last_error, "note_parts": PARTS_VERSION, **self.counts()}
 
 
 # -- the ASGI app ----------------------------------------------------------------------

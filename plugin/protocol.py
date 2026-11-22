@@ -82,25 +82,43 @@ def ota_mac(key: bytes, device_id: str, nonce: str, sha256_hex: str, size: int) 
     return base64.b64encode(hmac.new(key, msg, hashlib.sha256).digest()).decode()
 
 
-def note_mac(key: bytes, device_id: str, ts: str, recorded_at: str, duration_seconds: str,
-             sha256_hex: str, idempotency_key: str | None = None) -> str:
-    """Authorizes one multipart voice-note upload (docs/voice-note-ingestion.md §2.2).
+def note_canonical(device_id: str, ts: str, recorded_at: str, duration_seconds: str,
+                   sha256_hex: str, idempotency_key: str | None = None,
+                   part: "dict | None" = None) -> str:
+    """The string one voice-note upload signs (docs/voice-note-ingestion.md §2.2).
 
-    The canonical string is built from the field values exactly as transmitted —
-    untrimmed and unnormalized — so the device can sign before it knows how the
-    server will normalize anything. The ``|idempotency_key`` segment exists only
-    when that part was sent.
+    Built from the field values exactly as transmitted — untrimmed and
+    unnormalized — so the device can sign before it knows how the server will
+    normalize anything. The ``|idempotency_key`` segment exists only when that
+    part was sent. A part of a longer note appends its own segment
+    (``|parts=1|<note_id>|<index>|<count>|<offset>``, §2.5), which an interface
+    without parts never produces: a v1 upload signs exactly the string it did
+    before parts existed.
     """
     canonical = f"{device_id}|{ts}|{recorded_at}|{duration_seconds}|{sha256_hex}"
     if idempotency_key is not None:
         canonical += f"|{idempotency_key}"
+    if part is not None:
+        canonical += (f"|parts={part['version']}|{part['note_id']}|"
+                      f"{part['index']}|{part['count']}|{part['offset']}")
+    return canonical
+
+
+def note_mac(key: bytes, device_id: str, ts: str, recorded_at: str, duration_seconds: str,
+             sha256_hex: str, idempotency_key: str | None = None,
+             part: "dict | None" = None) -> str:
+    """Authorizes one multipart voice-note upload (docs/voice-note-ingestion.md §2.2)."""
+    canonical = note_canonical(device_id, ts, recorded_at, duration_seconds, sha256_hex,
+                               idempotency_key, part)
     msg = NOTE_CONTEXT + canonical.encode()
     return base64.b64encode(hmac.new(key, msg, hashlib.sha256).digest()).decode()
 
 
 def verify_note_mac(key: bytes, device_id: str, ts: str, recorded_at: str, duration_seconds: str,
-                    sha256_hex: str, idempotency_key: str | None, mac: str) -> bool:
-    expected = note_mac(key, device_id, ts, recorded_at, duration_seconds, sha256_hex, idempotency_key)
+                    sha256_hex: str, idempotency_key: str | None, mac: str,
+                    part: "dict | None" = None) -> bool:
+    expected = note_mac(key, device_id, ts, recorded_at, duration_seconds, sha256_hex,
+                        idempotency_key, part)
     return hmac.compare_digest(expected, mac or "")
 
 

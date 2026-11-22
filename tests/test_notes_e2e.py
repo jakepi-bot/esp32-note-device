@@ -471,7 +471,7 @@ def test_the_same_upload_again_is_a_duplicate_not_a_second_note(server, transpor
     transport.pump(server)
     assert [p.name for p in notes_in(vault)] == [expected_note_name(JOB_ID)]
     assert notes_in(vault)[0].read_text(encoding="utf-8") == first
-    assert server.counts() == {"inbox": 0, "done": 1, "failed": 0}
+    assert server.counts() == {"inbox": 0, "done": 1, "failed": 0, "partial": 0}
 
 
 def test_the_same_key_with_different_audio_is_a_conflict(server, transport, sample, tmp_path):
@@ -485,7 +485,7 @@ def test_the_same_key_with_different_audio_is_a_conflict(server, transport, samp
     assert status == 409, payload
     error = payload["error"]
     assert error["code"] == "idempotency_conflict" and error["retryable"] is False
-    assert server.counts() == {"inbox": 0, "done": 1, "failed": 0}
+    assert server.counts() == {"inbox": 0, "done": 1, "failed": 0, "partial": 0}
 
 
 def test_one_recording_under_two_job_ids_still_makes_one_note(server, transport, sample, tmp_path):
@@ -502,7 +502,7 @@ def test_one_recording_under_two_job_ids_still_makes_one_note(server, transport,
     wait_for_job(server, transport, second_job)
 
     assert [p.name for p in notes_in(tmp_path / "vault" / "voice notes")] == [expected_note_name(JOB_ID)]
-    assert server.counts() == {"inbox": 0, "done": 2, "failed": 0}
+    assert server.counts() == {"inbox": 0, "done": 2, "failed": 0, "partial": 0}
 
 
 # -- validation and authorization failures (§3.2, §4, §8) ------------------------------
@@ -579,7 +579,7 @@ def test_every_rejection_answers_the_contract_error(server, doubles, codec):
         assert isinstance(error["message"], str) and error["message"], case.id
         if case.bad_field is not None:
             assert error.get("field") == case.bad_field, (case.id, error)
-        assert server.counts() == {"inbox": 0, "done": 0, "failed": 0}, case.id
+        assert server.counts() == {"inbox": 0, "done": 0, "failed": 0, "partial": 0}, case.id
         assert not notes_in(vault), case.id
         assert doubles.stt_calls == 0 and doubles.summarize_calls == 0, case.id
 
@@ -591,7 +591,7 @@ def test_a_paused_endpoint_answers_503_retryable(server):
     status, payload = upload(DirectTransport(server), audio, "wav")
     assert status == 503 and payload["error"]["code"] == "unavailable"
     assert payload["error"]["retryable"] is True
-    assert server.counts() == {"inbox": 0, "done": 0, "failed": 0}
+    assert server.counts() == {"inbox": 0, "done": 0, "failed": 0, "partial": 0}
 
 
 # -- a retryable processing failure: backoff, attempts, recovery -----------------------
@@ -634,7 +634,7 @@ def test_a_retryable_stt_failure_backs_off_then_recovers(server, doubles, clock,
     assert [p.name for p in notes_in(vault)] == [expected_note_name(JOB_ID)]
     assert TRANSCRIPT in notes_in(vault)[0].read_text(encoding="utf-8")
     assert doubles.summarize_calls == 1
-    assert server.counts() == {"inbox": 0, "done": 1, "failed": 0}
+    assert server.counts() == {"inbox": 0, "done": 1, "failed": 0, "partial": 0}
 
 
 def test_eight_failures_quarantine_the_job(server, doubles, clock):
@@ -669,7 +669,7 @@ def test_eight_failures_quarantine_the_job(server, doubles, clock):
     assert "model provider unreachable" in error["message"]
     assert doubles.stt_calls == MAX_ATTEMPTS
     assert not notes_in(server.pipeline.obsidian_dir)
-    assert server.counts() == {"inbox": 0, "done": 0, "failed": 1}
+    assert server.counts() == {"inbox": 0, "done": 0, "failed": 1, "partial": 0}
     assert server.health()["failed"] == 1
 
 

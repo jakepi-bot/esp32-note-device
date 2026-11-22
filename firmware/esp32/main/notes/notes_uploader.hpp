@@ -3,8 +3,17 @@
 //
 // The transfer is sliced: `step()` does at most one 64 KiB read/write and
 // returns, so the app loop keeps running its buttons, Wi-Fi and live mode while
-// a 14 MB note goes out. Phases: SHA-256 of the audio (the MAC and `checksum`
-// need it), then the multipart request, then the answer's classification.
+// a 14 MB note goes out. Phases: the hub's part capability (a note longer than
+// five minutes), then SHA-256 of this part (the MAC and `checksum` need it),
+// then the multipart request, then the answer's classification.
+//
+// A note at or under five minutes is one POST and its bytes are exactly the v1
+// upload. A longer one is sent as parts of at most `kPartSeconds` (§2.5): each
+// part is its own complete WAV plus `note_id`/`part_index`/`part_count`/
+// `part_offset` and its own idempotency key, and `Step::Done` comes only after
+// the last part was accepted. A part that fails stays the current part, so a
+// retry resumes at that part (`begin(..., start_part)`) instead of replaying
+// the ones the hub already stored.
 #pragma once
 
 #include <cstdint>
@@ -12,6 +21,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "hg/crypto.hpp"
 #include "notes_queue.hpp"
@@ -39,7 +49,7 @@ class Uploader {
  public:
   enum class Step : uint8_t {
     Running,   // work left: call again next pass
-    Done,      // 202 accepted or 200 duplicate: move the note to sent/
+    Done,      // 202 accepted or 200 duplicate for the last part: move the note to sent/
     Rejected,  // terminal 4xx: move to failed/
     Retry,     // no answer or a retryable status: stay pending
   };
@@ -49,24 +59,40 @@ class Uploader {
   // `meta` is copied; `audio_path` is the file to send. `url` is the full
   // endpoint. `now_s` is the request timestamp (X-Gadget-Ts). `access_token`
   // is the hub token, sent as X-Gadget-Token when the hub was provisioned with
-  // one (empty otherwise).
+  // one (empty otherwise). `start_part` resumes a note at one of its parts (a
+  // retry after a part failed); 0 is a note from the beginning.
   bool begin(const Meta& meta, std::string_view audio_path, std::string_view url, int64_t now_s,
-             std::string_view access_token, Signer sign, std::string& error);
-  // One bounded slice of work. Never blocks longer than one 64 KiB transfer.
+             std::string_view access_token, Signer sign, std::string& error,
+             uint32_t start_part = 0);
+  // One bounded slice of work. Never blocks longer than one 64 KiB transfer
+  // (the part-capability probe is one small GET, with its own timeout).
   Step step();
   void cancel();
 
   int http_status() const { return http_status_; }
   const std::string& error() const { return error_; }
-  uint32_t sent() const { return sent_; }        // body bytes written so far
-  uint32_t total() const { return total_; }      // head + audio + tail
+  uint32_t sent() const { return sent_; }        // body bytes written so far (this part)
+  uint32_t total() const { return total_; }      // head + audio + tail (this part)
   const Meta& meta() const { return meta_; }
+  // The part in flight: 0-based index, how many there are, and whether this
+  // note is segmented at all (false = the v1 single POST).
+  uint32_t part_index() const { return part_.index; }
+  uint32_t part_count() const { return part_.count; }
+  bool segmented() const { return parts_.size() > 1; }
 
  private:
   void close();
   bool write_all(const void* data, size_t len);
+  // The hub's answer to "do you take parts?" — asked once per boot, and only
+  // for a note that needs them. An old hub ignores unknown parts and would
+  // store part 0 as the whole note, so a note that needs parts is sent as one
+  // POST when the hub does not advertise `note_parts`.
+  bool probe_hub_parts();
+  // Positions the file at this part and seeds the hasher with its WAV header.
+  bool begin_part();
+  void degrade_to_single_part();
 
-  enum class Phase : uint8_t { Idle, Hashing, Sending, Reading, Finished };
+  enum class Phase : uint8_t { Idle, Probing, Hashing, Sending, Reading, Finished };
 
   Phase phase_ = Phase::Idle;
   Meta meta_;
@@ -88,6 +114,18 @@ class Uploader {
   int http_status_ = 0;
   std::string sha256_;
   std::string error_;
+
+  // Parts (§2.5). `parts_` has one element for a note at or under five
+  // minutes, and that one is the legacy whole-file upload.
+  WavLayout wav_;
+  std::vector<Part> parts_;
+  size_t part_at_ = 0;
+  Part part_;
+  std::string part_header_;   // this part's 44-byte WAV header
+  std::string part_sha256_;   // SHA-256 of header + PCM, as sent
+  uint32_t part_read_ = 0;    // PCM bytes read for this part
+  uint32_t part_sent_ = 0;    // PCM bytes written for this part
+  int hub_parts_ = -1;        // -1 unknown, 0 no parts, 1 parts
 };
 
 }  // namespace hgp::notes

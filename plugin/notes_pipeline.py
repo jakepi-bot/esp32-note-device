@@ -527,8 +527,13 @@ class NotesPipeline:
             logger.warning("voice-note directories cannot be created: %s", exc)
         self._sweep_stale_tmp()
         try:
-            entries = sorted(p for p in self.inbox.iterdir()
-                             if p.is_dir() and not p.name.startswith("."))
+            # A note still collecting its parts (§2.5) has a manifest and no
+            # note.json: it is not a note yet, so it is not the pipeline's to
+            # fail. Its completion writes note.json, and this pass picks it up.
+            entries = sorted(
+                p for p in self.inbox.iterdir()
+                if p.is_dir() and not p.name.startswith(".")
+                and ((p / "note.json").is_file() or not (p / "parts" / "manifest.json").is_file()))
         except OSError as exc:
             logger.warning("voice-note inbox unreadable: %s", exc)
             return None

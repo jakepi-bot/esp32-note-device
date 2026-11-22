@@ -30,7 +30,150 @@ void part_field(std::string& out, std::string_view boundary, const char* name, s
   out += "\r\n";
 }
 
+// -- parts (§2.5) -----------------------------------------------------------------
+
+uint16_t le16(const uint8_t* p) { return static_cast<uint16_t>(p[0] | (p[1] << 8)); }
+
+uint32_t le32(const uint8_t* p) {
+  return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
+         (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+}
+
+void put16(std::string& out, uint16_t v) {
+  out.push_back(static_cast<char>(v & 0xFF));
+  out.push_back(static_cast<char>((v >> 8) & 0xFF));
+}
+
+void put32(std::string& out, uint32_t v) {
+  put16(out, static_cast<uint16_t>(v & 0xFFFF));
+  put16(out, static_cast<uint16_t>((v >> 16) & 0xFFFF));
+}
+
+bool wav_format_ok(uint16_t tag, uint16_t channels, uint32_t rate, uint16_t bits) {
+  return tag == 1 && channels == 1 && bits == 16 && rate >= 8000 && rate <= 48000;
+}
+
 }  // namespace
+
+bool probe_wav_header(const uint8_t* data, size_t len, WavLayout& out) {
+  if (data == nullptr || len < 12) return false;
+  if (std::memcmp(data, "RIFF", 4) != 0 || std::memcmp(data + 8, "WAVE", 4) != 0) return false;
+  WavLayout info;
+  bool have_fmt = false;
+  size_t pos = 12;
+  while (pos + 8 <= len) {
+    const bool is_fmt = std::memcmp(data + pos, "fmt ", 4) == 0;
+    const bool is_data = std::memcmp(data + pos, "data", 4) == 0;
+    const uint32_t size = le32(data + pos + 4);
+    const size_t body = pos + 8;
+    if (is_data && have_fmt && static_cast<uint64_t>(body) + size > len) {
+      // A header-only read (a part's own header, or the first 64 KiB of a large
+      // recording): the data chunk is believed from its own size, which is what
+      // the hub does when it probes a staged part.
+      info.data_offset = static_cast<uint32_t>(body);
+      info.data_bytes = size;
+      const uint32_t align = info.block_align();
+      if (align == 0) return false;
+      const uint32_t frames = size / align;
+      info.duration_s = frames / info.sample_rate;
+      if (frames % info.sample_rate) info.duration_s += 1;
+      if (info.duration_s == 0) info.duration_s = 1;
+      out = info;
+      return true;
+    }
+    if (static_cast<uint64_t>(body) + size > len) return false;
+    if (is_fmt) {
+      if (size < 16) return false;
+      const uint16_t tag = le16(data + body);
+      const uint16_t channels = le16(data + body + 2);
+      const uint32_t rate = le32(data + body + 4);
+      const uint16_t bits = le16(data + body + 14);
+      if (!wav_format_ok(tag, channels, rate, bits)) return false;
+      info.sample_rate = rate;
+      info.channels = channels;
+      info.bits = bits;
+      have_fmt = true;
+    } else if (is_data) {
+      if (!have_fmt) return false;
+      info.data_offset = static_cast<uint32_t>(body);
+      info.data_bytes = size;
+      const uint32_t align = info.block_align();
+      if (align == 0) return false;
+      const uint32_t frames = size / align;
+      info.duration_s = frames / info.sample_rate;
+      if (frames % info.sample_rate) info.duration_s += 1;  // rounded up, like the hub
+      if (info.duration_s == 0) info.duration_s = 1;
+      out = info;
+      return true;
+    }
+    pos = body + size + (size & 1);  // chunks are word-aligned
+  }
+  return false;
+}
+
+std::vector<Part> plan_parts(const WavLayout& wav) {
+  std::vector<Part> parts;
+  const uint32_t align = wav.block_align();
+  if (wav.sample_rate == 0 || wav.data_bytes == 0 || align == 0) {
+    parts.push_back(Part{0, 1, 0, wav.duration_s, wav.data_offset, wav.data_bytes});
+    return parts;
+  }
+  const uint32_t per_part = kPartSeconds * wav.sample_rate * align;
+  uint32_t offset = 0;
+  while (offset < wav.data_bytes) {
+    uint32_t size = wav.data_bytes - offset;
+    if (size > per_part) size = per_part;
+    size -= size % align;  // a frame is never cut in half
+    if (size == 0) {       // a remainder smaller than one frame: keep it with the last part
+      if (parts.empty()) {
+        parts.push_back(Part{0, 1, 0, 1, wav.data_offset, wav.data_bytes});
+      } else {
+        parts.back().audio_bytes += wav.data_bytes - offset;
+      }
+      break;
+    }
+    Part part;
+    part.index = static_cast<uint32_t>(parts.size());
+    part.offset_s = part.index * kPartSeconds;
+    part.duration_s = size / align / wav.sample_rate;
+    if (size % (wav.sample_rate * align)) part.duration_s += 1;
+    if (part.duration_s == 0) part.duration_s = 1;
+    part.audio_offset = wav.data_offset + offset;
+    part.audio_bytes = size;
+    parts.push_back(part);
+    offset += size;
+  }
+  const uint32_t count = static_cast<uint32_t>(parts.size());
+  for (auto& part : parts) part.count = count;
+  return parts;
+}
+
+std::string part_wav_header(const WavLayout& wav, uint32_t audio_bytes) {
+  const uint32_t align = wav.block_align();
+  std::string header;
+  header.reserve(44);
+  header += "RIFF";
+  put32(header, 36 + audio_bytes);
+  header += "WAVE";
+  header += "fmt ";
+  put32(header, 16);
+  put16(header, 1);  // PCM
+  put16(header, static_cast<uint16_t>(wav.channels));
+  put32(header, wav.sample_rate);
+  put32(header, wav.sample_rate * align);
+  put16(header, static_cast<uint16_t>(align));
+  put16(header, static_cast<uint16_t>(wav.bits));
+  header += "data";
+  put32(header, audio_bytes);
+  return header;
+}
+
+std::string part_idempotency_key(std::string_view note_id, uint32_t index) {
+  std::string key(note_id);
+  key += '.';
+  key += std::to_string(index);
+  return key;
+}
 
 std::string Meta::json() const {
   hg::json::Value v = hg::json::Value::object();
@@ -258,8 +401,10 @@ std::string Request::content_type() const {
   return out;
 }
 
-std::string canonical_string(const Meta& meta, int64_t ts, std::string_view audio_sha256_hex) {
+std::string canonical_string(const Meta& meta, int64_t ts, std::string_view audio_sha256_hex,
+                             const Part* part) {
   // hermes-gadget/v1|note|<device_id>|<ts>|<recorded_at>|<duration>|<sha>[|<key>]
+  //   [|parts=<schema>|<note_id>|<index>|<count>|<offset>]
   std::string out = "hermes-gadget/v1|note|";
   out += meta.device_id;
   out += '|';
@@ -275,10 +420,23 @@ std::string canonical_string(const Meta& meta, int64_t ts, std::string_view audi
     out += '|';
     out += key;
   }
+  if (part != nullptr) {
+    out += "|parts=";
+    out += std::to_string(kPartsSchemaVersion);
+    out += '|';
+    out += meta.note_id;
+    out += '|';
+    out += std::to_string(part->index);
+    out += '|';
+    out += std::to_string(part->count);
+    out += '|';
+    out += std::to_string(part->offset_s);
+  }
   return out;
 }
 
-bool build_request(const Meta& meta, std::string_view audio_filename, Request& out) {
+bool build_request(const Meta& meta, std::string_view audio_filename, Request& out,
+                   const Part* part) {
   if (meta.device_id.empty() || meta.recorded_at.empty() || meta.duration_s < kMinDurationS) return false;
   Request r;
   // Deterministic per note: a retry may change only the boundary (contract
@@ -303,6 +461,16 @@ bool build_request(const Meta& meta, std::string_view audio_filename, Request& o
   const std::string& key = meta.idempotency_key.empty() ? meta.note_id : meta.idempotency_key;
   if (!key.empty()) part_field(tail, r.boundary, "idempotency_key", key);
   if (!meta.sha256.empty()) part_field(tail, r.boundary, "checksum", meta.sha256);
+  if (part != nullptr) {
+    // §2.5: the note's identity, where this part sits, and the per-part key.
+    // The idempotency_key above is already `<note_id>.<index>` (the uploader
+    // sets it on the wire copy of the meta), which the hub checks against
+    // these fields.
+    part_field(tail, r.boundary, "note_id", meta.note_id);
+    part_field(tail, r.boundary, "part_index", std::to_string(part->index));
+    part_field(tail, r.boundary, "part_count", std::to_string(part->count));
+    part_field(tail, r.boundary, "part_offset", std::to_string(part->offset_s));
+  }
   tail += "--";
   tail += r.boundary;
   tail += "--\r\n";

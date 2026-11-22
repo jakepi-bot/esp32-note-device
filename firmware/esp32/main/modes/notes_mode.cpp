@@ -395,10 +395,15 @@ void NotesModeImpl::begin_sync(uint32_t now) {
       if (!store_.write_meta(id, wire, error))
         ESP_LOGW(TAG, "note %s: cannot record the upload time: %s", id.c_str(), error.c_str());
     }
+    // Part progress belongs to one note: a different note starts at part 0.
+    if (sync_part_id_ != id) {
+      sync_part_id_ = id;
+      sync_part_ = 0;
+    }
     std::string error;
     if (!uploader_.begin(wire, store_.audio_path(notes::NoteState::Pending, id), notes_url(), std::time(nullptr),
                          app_->access_token(), [this](std::string_view canonical) { return app_->sign(canonical); },
-                         error)) {
+                         error, sync_part_)) {
       // Anything else that stops the upload from starting (no memory, a file
       // the card will not open) is waited out on the same backoff a failed
       // transfer gets: this pass runs every few tens of milliseconds, so an
@@ -448,6 +453,7 @@ void NotesModeImpl::step_sync(uint32_t now) {
   if (step == notes::Uploader::Step::Done) {
     // Acknowledged (202), or the server already had this key (200): exact-once
     // ends here and the folder moves out of pending/.
+    sync_part_ = 0;
     if (!store_.move(id, notes::NoteState::Pending, notes::NoteState::Sent))
       ESP_LOGW(TAG, "%s synced but could not be moved to sent/", id.c_str());
     store_.prune_sent();
@@ -461,6 +467,7 @@ void NotesModeImpl::step_sync(uint32_t now) {
   }
   if (step == notes::Uploader::Step::Rejected) {
     ESP_LOGW(TAG, "note %s rejected (HTTP %d): %s", id.c_str(), uploader_.http_status(), uploader_.error().c_str());
+    sync_part_ = 0;
     if (!store_.move(id, notes::NoteState::Pending, notes::NoteState::Failed))
       ESP_LOGW(TAG, "%s rejected but could not be moved to failed/", id.c_str());
     retry_waiting_ = false;
@@ -471,8 +478,11 @@ void NotesModeImpl::step_sync(uint32_t now) {
     return;
   }
 
-  // Retry: the note stays pending, the backoff doubles from 5 s to 5 min.
+  // Retry: the note stays pending, the backoff doubles from 5 s to 5 min. The
+  // part that failed is the one retried: the parts the hub already stored are
+  // not sent again (§2.5).
   retry_waiting_ = true;
+  sync_part_ = uploader_.part_index();
   retry_at_ms_ = now + notes::retry_delay_ms(attempt_ + 1);
   attempt_ += 1;
   notes::Meta meta = uploader_.meta();

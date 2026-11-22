@@ -133,18 +133,33 @@ def multipart(body_fields=None, audio=WAV, *, audio_name="note.wav",
     return b"".join(chunks)
 
 
-def mac_for(body_fields: dict, audio: bytes = WAV, *, key=KEY, ts=None) -> str:
+def part_canonical(body_fields: dict):
+    """The §2.5 segment the MAC covers, or None for a v1 note."""
+    if "part_count" not in body_fields:
+        return None
+    try:
+        return {"version": notes_ingest.PARTS_VERSION, "note_id": body_fields["note_id"],
+                "index": int(body_fields["part_index"]), "count": int(body_fields["part_count"]),
+                "offset": int(body_fields["part_offset"])}
+    except (KeyError, TypeError, ValueError):
+        return None  # malformed on purpose: the contract answers 422 before auth
+
+
+def mac_for(body_fields: dict, audio: bytes = WAV, *, key=KEY, ts=None, with_part=True) -> str:
     ts = str(int(time.time())) if ts is None else str(ts)
     return protocol.note_mac(key, body_fields.get("device_id", DEVICE), ts,
                              body_fields["recorded_at"], body_fields["duration_seconds"],
                              hashlib.sha256(audio).hexdigest(),
-                             body_fields.get("idempotency_key"))
+                             body_fields.get("idempotency_key"),
+                             part_canonical(body_fields) if with_part else None)
 
 
-def signed(body_fields: dict, audio: bytes = WAV, *, key=KEY, ts=None, mac=None) -> dict:
+def signed(body_fields: dict, audio: bytes = WAV, *, key=KEY, ts=None, mac=None,
+           with_part=True) -> dict:
     ts = str(int(time.time())) if ts is None else str(ts)
     headers = {"x-gadget-ts": ts,
-               "x-gadget-mac": mac if mac is not None else mac_for(body_fields, audio, key=key, ts=ts)}
+               "x-gadget-mac": mac if mac is not None
+               else mac_for(body_fields, audio, key=key, ts=ts, with_part=with_part)}
     return headers
 
 
@@ -707,7 +722,7 @@ def test_route_matches_the_contract(server):
     health = client.get("/health")
     assert health.status_code == 200
     assert health.json() == {"status": "ok", "port": None, "last_error": None,
-                             "inbox": 1, "done": 0, "failed": 0}
+                             "note_parts": 1, "inbox": 1, "done": 0, "failed": 0, "partial": 0}
 
 
 def test_unknown_path_is_404_and_a_wrong_method_is_405(server):

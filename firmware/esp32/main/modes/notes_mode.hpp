@@ -186,6 +186,11 @@ class NotesModeImpl final : public NotesMode {
   uint32_t attempt_ = 0;
   uint32_t retry_at_ms_ = 0;
   bool retry_waiting_ = false;  // the backoff stands until retry_at_ms_
+  // Which part of a note longer than five minutes the next attempt starts at
+  // (§2.5): a failed part retries alone, the stored ones are not sent again.
+  // Scoped to `sync_part_id_`, so a different note never starts mid-way.
+  uint32_t sync_part_ = 0;
+  std::string sync_part_id_;
 
   bool sd_ready_ = false;
   // The card's own answer to "how much is left", read with the counts scan and

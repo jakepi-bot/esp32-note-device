@@ -2,7 +2,10 @@
 //
 // One recording is one note: a `note.json` (the metadata the uploader resends
 // verbatim) beside a WAV file, in `pending/` until the server acknowledges it.
-// Everything here is plain C++ so the host tests
+// A note longer than five minutes goes out in parts (§2.5): the recording stays
+// one file on the card, and `plan_parts`/`part_wav_header` are what the uploader
+// slices it with at send time — one note id, several requests, each with its own
+// idempotency key. Everything here is plain C++ so the host tests
 // (`firmware/tests/test_epaper_notes.cpp`) and the `hg_notes_request` tool
 // exercise the same bytes the device sends. Contract:
 // docs/voice-note-ingestion.md (wire) and docs/waveshare-epaper-154-v2.md §7
@@ -13,6 +16,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace hgp::notes {
 
@@ -125,6 +129,63 @@ uint32_t retry_delay_ms(uint32_t attempts);
 // uploader so the queue and the sender cannot disagree about it.
 constexpr uint64_t kMinAudioBytes = 45;
 
+// -- parts of one longer note (contract §2.5) -----------------------------------
+//
+// A note longer than five minutes is uploaded as several POSTs of at most this
+// much audio each: one note id, one part after another, a per-part idempotency
+// key. A part that fails retries alone; the parts already stored are answered
+// `200 duplicate` and are never stored twice. Five minutes keeps one dropped
+// connection at five minutes of audio (a 12 min note is 3 requests, a 2 GiB
+// note 149). The hub plans nothing it is not told, but it validates every part
+// against the same numbers (plugin/notes_parts.py, pinned by tests both sides).
+constexpr uint32_t kPartSeconds = 300;
+constexpr uint32_t kPartsSchemaVersion = 1;
+//: 2 GiB at 24 kHz is 149 parts; 255 is the field's ceiling and leaves room for
+//: a card recorded at 8 kHz.
+constexpr uint32_t kMaxParts = 255;
+
+// Where the PCM lives in one WAV and what it says about itself, as probed from
+// its own header (the same walk the hub does in `sniff_codec`/`probe_wav`).
+struct WavLayout {
+  uint32_t sample_rate = 0;
+  uint32_t channels = 0;
+  uint32_t bits = 0;
+  uint32_t data_offset = 0;  // first PCM byte in the file
+  uint32_t data_bytes = 0;   // PCM bytes after that offset
+  uint32_t duration_s = 0;   // whole seconds, rounded up, at least 1
+
+  uint32_t block_align() const { return channels * (bits / 8); }
+};
+
+// Parses a WAV header out of `len` bytes that start at the file's first byte.
+// True only for what the contract accepts: PCM (format 1) 16-bit mono at
+// 8-48 kHz, with a `data` chunk whose size is consistent with the header.
+bool probe_wav_header(const uint8_t* data, size_t len, WavLayout& out);
+
+// One part of one note, and where it sits in the recording.
+struct Part {
+  uint32_t index = 0;
+  uint32_t count = 1;
+  uint32_t offset_s = 0;      // this part's start, seconds into the note
+  uint32_t duration_s = 0;    // this part's own audio, seconds (>= 1)
+  uint32_t audio_offset = 0;  // first PCM byte of this part in recording.wav
+  uint32_t audio_bytes = 0;   // PCM bytes this part carries
+};
+
+// The parts a recording is sent as: five minutes each, then the remainder,
+// boundaries on whole frames. One part when the note is at or under five
+// minutes, which is the v1 single-POST upload.
+std::vector<Part> plan_parts(const WavLayout& wav);
+
+// A 44-byte PCM16 mono RIFF header for `audio_bytes` of PCM, so one part is a
+// complete WAV the hub can probe on its own.
+std::string part_wav_header(const WavLayout& wav, uint32_t audio_bytes);
+
+// `<note_id>.<index>`: per-part, inside the contract's idempotency-key charset
+// (§2), so a retried part dedupes to itself and to nothing else.
+std::string part_idempotency_key(std::string_view note_id, uint32_t index);
+
+
 // What the queue does with one pending note before the uploader opens it.
 enum class QueueAction : uint8_t {
   Upload,      // the recording is on the card: hand it to the uploader
@@ -153,8 +214,12 @@ struct Request {
 
 // Builds the multipart framing for `meta`. The MAC input needs the request
 // timestamp, which the sender knows at send time, not here: `canonical_for`.
-bool build_request(const Meta& meta, std::string_view audio_filename, Request& out);
-std::string canonical_string(const Meta& meta, int64_t ts, std::string_view audio_sha256_hex);
+// `part` appends the four §2.5 fields (and signs them); nullptr is the v1
+// single-part upload, byte for byte what this firmware sent before parts.
+bool build_request(const Meta& meta, std::string_view audio_filename, Request& out,
+                   const Part* part = nullptr);
+std::string canonical_string(const Meta& meta, int64_t ts, std::string_view audio_sha256_hex,
+                             const Part* part = nullptr);
 
 // Lowercase hex SHA-256 of `data`.
 std::string sha256_hex(const uint8_t* data, size_t len);

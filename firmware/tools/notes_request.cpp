@@ -7,7 +7,14 @@
 //
 //   hg_notes_request --url http://127.0.0.1:8766/notes/v1 \
 //     --key <base64 device key> --device-id hg-… --audio recording.wav \
-//     --at 2026-11-20T02:05:12Z --duration 8 [--repeat] [--token T] [--upload-time]
+//     --at 2026-11-20T02:05:12Z --duration 8 [--repeat] [--token T] [--upload-time] \
+//     [--parts]
+//
+// `--parts` sends the recording the way the device sends a note longer than five
+// minutes (contract §2.5): it plans the parts from the file's own WAV header and
+// posts each as its own request — a complete WAV of that part, the part fields,
+// the per-part key, its own checksum and a MAC that covers them. It is the
+// whole device half of a segmented upload minus esp_http_client.
 //
 // `--upload-time` stamps the way the board does when it never had a clock: a
 // 1970 `--at` is replaced by the send time (notes::stamped_for_upload), so the
@@ -44,6 +51,7 @@ struct Args {
   int64_t ts = 0;
   bool repeat = false;
   bool upload_time = false;  // stamp the way the board does when it never had a clock
+  bool parts = false;        // send the note as its five-minute parts (§2.5)
 };
 
 bool parse(int argc, char** argv, Args& a) {
@@ -80,6 +88,8 @@ bool parse(int argc, char** argv, Args& a) {
       a.repeat = true;
     } else if (arg == "--upload-time") {
       a.upload_time = true;
+    } else if (arg == "--parts") {
+      a.parts = true;
     } else {
       std::fprintf(stderr, "unknown argument %s\n", arg.c_str());
       return false;
@@ -87,7 +97,8 @@ bool parse(int argc, char** argv, Args& a) {
   }
   if (a.url.empty() || a.key.empty() || a.audio.empty() || a.recorded_at.empty()) {
     std::fprintf(stderr, "usage: hg_notes_request --url URL --key B64 --audio FILE --at ISO [--device-id ID] "
-                         "[--note-id ID] [--duration N] [--ts UNIX] [--token T] [--repeat] [--upload-time]\n");
+                         "[--note-id ID] [--duration N] [--ts UNIX] [--token T] [--repeat] [--upload-time] "
+                         "[--parts]\n");
     return false;
   }
   if (a.ts == 0) a.ts = static_cast<int64_t>(std::time(nullptr));
@@ -218,6 +229,49 @@ int main(int argc, char** argv) {
       std::printf("recorded_at %s is not a time (the board had no clock yet): uploading it as %s\n",
                   a.recorded_at.c_str(), meta.recorded_at.c_str());
     }
+  }
+
+  if (a.parts) {
+    hgp::notes::WavLayout wav;
+    if (!hgp::notes::probe_wav_header(reinterpret_cast<const uint8_t*>(audio.data()), audio.size(), wav)) {
+      std::fprintf(stderr, "%s is not a WAV the contract accepts\n", a.audio.c_str());
+      return 2;
+    }
+    const std::vector<hgp::notes::Part> parts = hgp::notes::plan_parts(wav);
+    if (parts.size() < 2) {
+      std::fprintf(stderr, "this recording is one part; a single-part upload is the v1 request\n");
+      return 2;
+    }
+    std::printf("note %s: %zu audio bytes, %zu parts\n", meta.note_id.c_str(), audio.size(),
+                parts.size());
+    for (const auto& part : parts) {
+      const std::string header = hgp::notes::part_wav_header(wav, part.audio_bytes);
+      const std::string payload = header + audio.substr(part.audio_offset, part.audio_bytes);
+      hgp::notes::Meta wire = meta;
+      wire.duration_s = part.duration_s;
+      wire.idempotency_key = hgp::notes::part_idempotency_key(meta.note_id, part.index);
+      wire.sha256 = hgp::notes::sha256_hex(reinterpret_cast<const uint8_t*>(payload.data()), payload.size());
+      hgp::notes::Request request;
+      if (!hgp::notes::build_request(wire, "recording.wav", request, &part)) {
+        std::fprintf(stderr, "part %u is not uploadable\n", part.index);
+        return 2;
+      }
+      const std::string canonical = hgp::notes::canonical_string(wire, a.ts, wire.sha256, &part);
+      const auto mac = hg::crypto::hmac_sha256(key.data(), key.size(),
+                                               reinterpret_cast<const uint8_t*>(canonical.data()),
+                                               canonical.size());
+      std::vector<std::pair<std::string, std::string>> headers = {
+          {"Content-Type", request.content_type()},
+          {"X-Gadget-Ts", std::to_string(a.ts)},
+          {"X-Gadget-Mac", hg::crypto::base64_encode(mac.data(), mac.size())},
+      };
+      if (!a.token.empty()) headers.push_back({"X-Gadget-Token", a.token});
+      std::string body;
+      const int status = post(a.url, headers, request.head, payload, request.tail, body);
+      std::printf("part %u/%u -> HTTP %d %s\n", part.index + 1, part.count, status, body.c_str());
+      if (status != 202 && status != 200) return 1;
+    }
+    return 0;
   }
 
   hgp::notes::Request request;

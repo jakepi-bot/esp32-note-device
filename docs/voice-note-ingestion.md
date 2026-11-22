@@ -34,17 +34,22 @@ GET  http://<hermes-host>:8766/health
 - Unknown path → `404`; a method other than `POST` → `405` with
   `Allow: POST`.
 - `GET /health` →
-  `{"status":"ok"|"paused","port":N,"last_error":…|null,"inbox":N,"done":M,"failed":K}`.
+  `{"status":"ok"|"paused","port":N,"last_error":…|null,"note_parts":1,"inbox":N,"done":M,"failed":K,"partial":P}`.
+  `note_parts` is the parts schema the hub accepts ([§2.5](#25-parts-of-a-note-longer-than-five-minutes));
+  `partial` counts notes still collecting their parts, which `inbox` does not.
 - A bind failure is logged and the endpoint stays down; the rest of the
   gadget platform keeps running.
 
 ## 2. Request
 
-`Content-Type: multipart/form-data; boundary=…`. Six parts. Every non-file
-part is UTF-8 text, matched **exactly as transmitted** (no trimming); unknown
-parts are ignored; a repeated part is an error. The device persists these
-field values verbatim in its `note.json` next to the audio file, so every
-retry of one recording is byte-identical.
+`Content-Type: multipart/form-data; boundary=…`. Six parts for a v1 upload,
+which is every note at or under five minutes. Every non-file part is UTF-8
+text, matched **exactly as transmitted** (no trimming); unknown parts are
+ignored; a repeated part is an error. The device persists these field values
+verbatim in its `note.json` next to the audio file, so every retry of one
+recording is byte-identical. A note longer than five minutes sends **parts**
+([§2.5](#25-parts-of-a-note-longer-than-five-minutes)): the same six parts plus
+four more that place the request in the note.
 
 | Part | Required | Format and rules |
 |---|---|---|
@@ -74,7 +79,7 @@ string differs. A well-formed `device_id` with no key on file → `401`.
 ### 2.2 Canonical string
 
 ```
-hermes-gadget/v1|note|<device_id>|<X-Gadget-Ts>|<recorded_at>|<duration_seconds>|<audio_sha256_hex>[|<idempotency_key>]
+hermes-gadget/v1|note|<device_id>|<X-Gadget-Ts>|<recorded_at>|<duration_seconds>|<audio_sha256_hex>[|<idempotency_key>][|parts=1|<note_id>|<part_index>|<part_count>|<part_offset>]
 ```
 
 - Field values are the raw bytes as transmitted — untrimmed, unnormalized —
@@ -83,8 +88,10 @@ hermes-gadget/v1|note|<device_id>|<X-Gadget-Ts>|<recorded_at>|<duration_seconds>
 - `audio_sha256_hex` is the lowercase hex digest of the `audio` part: the
   device computes it over the bytes it sends, the server over the bytes it
   received.
-- The final `|<idempotency_key>` segment is present only when that part was
-  sent.
+- The `|<idempotency_key>` segment is present only when that part was sent.
+- The `|parts=…` segment is present only on a part of a longer note (§2.5): the
+  schema (1), the note's id, and where this part sits. A v1 upload signs exactly
+  the string it signed before parts existed, so an old hub keeps working.
 - A retry resends the same field strings and the same audio bytes; only the
   multipart boundary may change.
 
@@ -135,6 +142,47 @@ Sniffed from magic bytes; the declared part type is ignored.
   reorders nor rejects a note on an old stamp, so the sender is the only thing
   that can get this right.
 
+
+### 2.5 Parts of a note longer than five minutes
+
+A recording longer than **300 s** is uploaded as several requests that together
+are **one note**: one id, one entry, one vault note, one `duration_seconds`. The
+device splits it; the hub stores the parts and assembles them.
+
+| Part | Required with the others | Format and rules |
+|---|---|---|
+| `note_id` | yes | `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` — the note's own id (the same string a single-part note sends as its key). |
+| `part_index` | yes | Decimal integer, `0`-based, `< part_count`. |
+| `part_count` | yes | Decimal integer in `2..255`. A note at or under 300 s is one upload and must not send these fields. |
+| `part_offset` | yes | Decimal integer seconds; must be exactly `part_index × 300`. |
+
+Rules:
+
+- The four fields travel together or not at all: three of them is `422` with
+  `error.field` naming the missing one, and `part_count` of 1 is `422` too (a
+  single part is the v1 upload, and must stay byte-compatible).
+- `duration_seconds` on a part is **that part's own audio** (1..300 s) — the
+  field keeps the range rule of §2 and is what the MAC covers. The note's
+  duration is the sum, computed by the hub.
+- `idempotency_key` must be **`<note_id>.<part_index>`**: the derived key is
+  what makes a retried part dedupe to itself, so a different key is `422`.
+- The audio is a complete WAV (or Opus) of that part alone, ≤ 300 s. For WAV
+  that is a normal 44-byte header followed by the part's PCM.
+- `checksum`, when present, is the digest of the part's bytes as sent.
+- The hub's `job_id` is `sha256hex(device_id + "|" + note_id)` — the same value
+  a single-part note's supplied key derives — so parts and a one-part upload of
+  the same note land in the same entry.
+- **The device asks first.** A note that needs parts is sent only to a hub whose
+  `/health` advertises `"note_parts":1` (the device GETs it once per boot). An
+  older hub ignores unknown parts (§2) and would store part 0 as the whole note,
+  so without the advertisement the device sends its one POST as before.
+
+Staging and assembly are in [§5.2](#52-job-storage) and
+[§5.7](#57-atomicity). The device plans the parts with
+`firmware/esp32/main/notes/notes_queue.cpp` (`plan_parts`, `kPartSeconds = 300`);
+the hub pins the same numbers in `plugin/notes_parts.py`, and
+`tests/test_notes_parts.py` fails if the two ever disagree.
+
 ## 3. Responses
 
 ### 3.1 Success
@@ -149,6 +197,18 @@ HTTP `202` for both `accepted` shapes, `200` for `duplicate`. `job_id` is the
 server-normalized idempotency key ([§5.1](#51-idempotency-key-derivation),
 always 64 hex chars). `requeued: true` appears only when a quarantined job was
 reopened ([§5.3](#53-duplicate-handling)).
+
+A part's answers add where the set stands:
+
+```
+{"status": "accepted",  "job_id": "…", "part_index": 1, "parts": 2, "part_count": 3}
+{"status": "accepted",  "job_id": "…", "assembled": true, "part_count": 3, "duration_seconds": 720}
+{"status": "duplicate", "job_id": "…", "part_index": 1}
+```
+
+The last part's `202` means the note is now one `recording.wav` in `inbox/` and
+the pipeline has been woken. A part that was already stored is `200 duplicate`
+and stores nothing: a retried part never doubles its audio.
 
 **`202` is sent as soon as the audio is durably staged**, before any
 transcription. The device never waits on a model; everything after the store
@@ -197,7 +257,9 @@ The response is the **first** failing check, in this order:
 3. size pre-check → `413`
 4. parse: required parts present, no repeats, `audio` is a non-empty file
    part → `400`
-5. field formats and ranges → `422`
+5. field formats and ranges → `422` (including the part fields of §2.5: the
+   group present, `part_index < part_count`, `part_offset = 300 × index`,
+   `duration_seconds ≤ 300`, and the per-part key)
 6. auth (device key, ts skew, MAC, token) → `401`
 7. `checksum` verify → `409`
 8. idempotency lookup ([§5.3](#53-duplicate-handling)) → `200`/`409`/`202`
@@ -235,6 +297,11 @@ job_id = sha256hex(device_id + "|" + recorded_at_utc + "|" + audio_sha256)   # o
 - A supplied key deliberately excludes the content: if a device re-sends one
   key with *different* audio, that is a firmware bug and surfaces as `409`
   `idempotency_conflict` instead of silently creating a second note.
+- A **part** (§2.5) is keyed by its note, not by its own request:
+  `job_id = sha256hex(device_id + "|" + note_id)`. That is the same value as a
+  single-part note's `sha256hex(device_id + "|" + idempotency_key)`, because a
+  note's key *is* its id — parts of one note therefore share one entry, and a
+  note re-sent after a partial failure keeps the entry it already has.
 - The short id used in filenames is `job_id[:8]`.
 
 ### 5.2 Job storage
@@ -244,13 +311,25 @@ Accepted jobs live under `~/.hermes/plugin-data/gadget/notes/`:
 ```
 .staging/<job_id>-*/ transient: recording.<ext> + note.json, renamed away before 202
 inbox/<job_id>/      queued:    recording.wav | recording.opus + note.json
+                     partial:   parts/000.wav, 001.wav … + parts/manifest.json (no note.json)
 done/<job_id>/       processed
 failed/<job_id>/     quarantined; .error holds {"code","step","message","attempts"}
 ```
 
 `note.json` carries `job_id`, `device_id`, the raw and normalized
 `recorded_at`, `duration_seconds`, `audio_sha256`, `codec`, `supplied_key`
-(or `null`), `attempts`, `last_error`, `accepted_unix`.
+(or `null`), `attempts`, `last_error`, `accepted_unix`. An assembled note adds
+`note_id`, `parts_version`, `part_count` and `parts` (per part: `index`,
+`offset_s`, `duration_s`, `bytes`, `sha256`); `duration_seconds` is their sum
+and `audio_sha256` is the digest of the assembled `recording.wav`.
+
+A **partial** entry is how a note looks between its first part and its last:
+`parts/<index:03d>.wav` (each a complete WAV) and `parts/manifest.json`, which
+records the note's identity (`note_id`, `device_id`, `recorded_at`, `codec`,
+`part_count`) and the parts received (`index`, `offset_s`, `duration_s`,
+`bytes`, `sha256`, `received_unix`). It has **no `note.json`** on purpose: the
+pipeline reads an entry with a `note.json`, so a partial note is not something
+it can fail, and `/health` reports it as `partial` rather than `inbox`.
 
 ### 5.3 Duplicate handling
 
@@ -273,6 +352,21 @@ For a request whose `job_id` already exists:
 - A note deleted from the vault is restored by moving `done/<job_id>/` back
   to `inbox/<job_id>/` (attempts reset); the dedupe scan then finds nothing
   and rewrites it.
+
+Parts (§2.5) at the same job:
+
+| Entry | This part | Answer |
+|---|---|---|
+| none, or `parts/` without it | — | store the part; `202 accepted` with `parts`/`part_count`; the last one assembles |
+| `inbox/<job>/parts/` with it | same digest | `200 duplicate`, nothing written |
+| `inbox/<job>/parts/` with it | different digest | `409 idempotency_conflict` |
+| `inbox/` with `note.json` (assembled, not yet processed) | same digest | `200 duplicate` |
+| `done/` or `failed/` | same digest | `200 duplicate` — never a second note |
+| parts of one note that disagree on `recorded_at`/`codec`/`part_count` | — | `409 idempotency_conflict` |
+
+Parts of one note are staged under the job's lock, so two concurrent parts
+cannot both write the manifest; the part file is a sibling temp file replaced
+atomically (`os.replace`) before the manifest records it.
 
 ### 5.4 Obsidian destination
 
@@ -358,6 +452,15 @@ Upload:
    both files and the directory, then `rename()` the directory into
    `inbox/<job_id>/`. Staging and inbox share a volume, so the rename is
    atomic: an inbox entry is complete or absent, never partial.
+   A **part** (§2.5) is written as `inbox/<job_id>/parts/<index>.wav` (temp
+   file + `os.replace`, fsynced), then the part is added to
+   `parts/manifest.json` (also temp + replace). The manifest is the record that
+   a part exists, so a crash between the two costs one re-sent part, never a
+   half-counted one. When the last part arrives the hub streams all parts into
+   `recording.wav` (header first, then each part's PCM range — a 2 GiB note is
+   never held in memory), fsyncs it, then writes `note.json` (the commit point,
+   so the pipeline sees a complete entry or no entry), and only then removes
+   `parts/` to reclaim the disk.
 3. Transient write errors (`EINTR`, `EAGAIN`, `EBUSY`) are retried three
    times, 100 ms apart, inside the request before answering `507`. `ENOSPC`
    is not retried in-request — `507` and the device's backoff handle it.
@@ -418,6 +521,19 @@ is recorded and the pass continues — a worker never dies on a note.
 **Recovery** resets `attempts` to 0: the device re-uploads the same
 idempotency key ([§5.3](#53-duplicate-handling)), or an operator moves
 `failed/<job_id>/` back to `inbox/<job_id>/`.
+
+### 5.9 A set of parts that never completes
+
+A partial note is useful only while its device still has the rest of it. A
+sweep runs on the worker's pass (at most every 120 s) and removes an entry whose
+newest part (or the entry itself, when no part arrived) is older than
+`PART_MAX_AGE_S` (24 h), logging
+`partial voice note <job> removed: N of M parts, nothing arrived for S s`.
+`server.sweep_parts()` is the one implementation; the device never has to be
+told, because it cannot finish such a note either — its card was wiped, its
+remaining parts were deleted, or the box was reset past its retry budget.
+Nothing about a completed note is affected: the sweep only looks at entries
+with a manifest and no `note.json`.
 
 ## 6. Configuration
 

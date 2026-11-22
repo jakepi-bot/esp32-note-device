@@ -52,18 +52,26 @@ beside it in `<hermes home>/plugin-data/gadget/notes/`:
 ```
 .staging/<job_id>-*/  transient: recording.<ext> + note.json, renamed away before 202
 inbox/<job_id>/       queued:    recording.wav | recording.opus + note.json
+                      partial:   parts/000.wav, 001.wav … + parts/manifest.json (no note.json)
 done/<job_id>/        processed
 failed/<job_id>/      quarantined; .error holds {"code","step","message","attempts"}
 ```
 
 `GET /health` answers
-`{"status":"ok"|"paused","port":N,"last_error":…|null,"inbox":N,"done":M,"failed":K}`.
+`{"status":"ok"|"paused","port":N,"last_error":…|null,"note_parts":1,"inbox":N,"done":M,"failed":K,"partial":P}`.
+`note_parts` is the parts schema the endpoint accepts and `partial` counts notes
+still collecting their parts; a note longer than five minutes arrives as several
+requests keyed to one note (`note_id`, `part_index`, `part_count`, `part_offset`,
+`idempotency_key` = `<note_id>.<part_index>`), is assembled into one
+`recording.wav` when the set is complete, and a set nothing finishes is removed
+after 24 h. A note at or under five minutes is the plain six-part upload.
 
 ## Request
 
-`Content-Type: multipart/form-data` with six parts. Every non-file part is
-UTF-8 text, matched **exactly as transmitted** (no trimming); unknown parts
-are ignored; a repeated part is `400`.
+`Content-Type: multipart/form-data` with six parts (a part of a longer note adds
+four more, below the table). Every non-file part is UTF-8 text, matched
+**exactly as transmitted** (no trimming); unknown parts are ignored; a repeated
+part is `400`.
 
 | Part | Required | Format and rules |
 |---|---|---|
@@ -73,6 +81,24 @@ are ignored; a repeated part is `400`.
 | `duration_seconds` | yes | Decimal integer `1..86400` (24 h). Advisory: never verified against the audio, copied to the note. |
 | `idempotency_key` | no | `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`. Generated once per recording and resent unchanged on every retry; the device's `note_id` fits and is the natural value. |
 | `checksum` | no | 64 lowercase hex chars: SHA-256 of the `audio` bytes as sent. When present it must equal the digest the server computed, else `409`. |
+
+A request that is one part of a note longer than five minutes adds these four,
+together (a note at or under 300 s must not send them):
+
+| Part | Rules |
+|---|---|
+| `note_id` | `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` — the note's identity, the same string a single-part note sends as its key. |
+| `part_index` | 0-based decimal, `< part_count`. |
+| `part_count` | `2..255`. |
+| `part_offset` | seconds; exactly `part_index × 300`. |
+
+`duration_seconds` on a part is that part's own audio (1..300 s), the audio is a
+complete WAV of that part, and `idempotency_key` must be
+`<note_id>.<part_index>` — so a retried part is a `200 duplicate` of itself and
+never doubles its audio. The hub stages parts under `inbox/<job_id>/parts/`,
+assembles one `recording.wav` when the set is complete, and takes the note's
+`duration_seconds` as the sum. The MAC covers the part fields
+(`|parts=1|<note_id>|<index>|<count>|<offset>` appended to the canonical string).
 
 Auth headers:
 

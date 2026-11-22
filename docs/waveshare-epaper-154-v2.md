@@ -426,6 +426,23 @@ timeout or no answer at all keep it `pending/` under the uploader's backoff
 (5 s ×2, capped at 300 s — §3.3 of the contract). Reboot, battery pull, card
 yank and Wi-Fi flaps therefore converge to "uploaded exactly once".
 
+**A note longer than five minutes is uploaded in parts.** The card keeps one
+`recording.wav`; at upload time `Uploader` probes its WAV header, plans parts of
+at most 300 s (`kPartSeconds`, `plan_parts` in `notes_queue.cpp` — 12 min is
+5/5/2), and sends each as its own `POST /notes/v1` with a complete WAV of that
+part plus `note_id`, `part_index`, `part_count`, `part_offset`,
+`duration_seconds` = the part's own length, and `idempotency_key`
+`<note_id>.<index>`. The note is still one note: the hub assembles the parts into
+one `recording.wav` and sums the durations, and only then does the vault note
+exist. A part that fails stays the current part, so the retry starts there
+(`begin(..., start_part)` from the mode's `sync_part_`) and the parts the hub
+already stored are not sent again; after a reboot the note replays from part 0
+and the hub answers `200 duplicate` for each part it holds. A note at or under
+300 s sends exactly the v1 bytes — no part fields. Parts need a hub that
+advertises `"note_parts":1` on `/health` (the uploader asks once per boot): an
+older hub ignores unknown parts and would keep part 0 as the whole note, so the
+device falls back to its one POST when the hub does not say so.
+
 **A note with no clock.** This board has no RTC: it starts at 1970 and only
 learns the time from the network. Since `port_time.cpp` treats an unset clock as
 a demand of its own, SNTP starts as soon as Wi-Fi is up — with the clock face

@@ -217,6 +217,11 @@ class Runtime {
   // Set by `notes retry`: the one id the next upload pass may send.
   std::string forced_id_;
   uint32_t attempt_ = 0;
+  // Which part of a note longer than five minutes the next attempt starts at
+  // (§2.5): a failed part retries alone, the stored ones are not sent again.
+  // Scoped to `sync_part_id_`, so a different note never starts mid-way.
+  uint32_t sync_part_ = 0;
+  std::string sync_part_id_;
   bool retry_waiting_ = false;
   uint32_t retry_at_ms_ = 0;
   std::string stop_error_;

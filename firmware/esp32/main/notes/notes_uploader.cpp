@@ -3,6 +3,7 @@
 
 #include <sys/stat.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <ctime>
@@ -56,11 +57,19 @@ void Uploader::cancel() {
   sent_ = 0;
   tail_sent_ = false;
   http_status_ = 0;
+  part_read_ = 0;
+  part_sent_ = 0;
+  parts_.clear();
+  part_ = Part{};
+  part_header_.clear();
+  part_sha256_.clear();
+  part_at_ = 0;
   error_.clear();
 }
 
 bool Uploader::begin(const Meta& meta, std::string_view audio_path, std::string_view url, int64_t now_s,
-                     std::string_view access_token, Signer sign, std::string& error) {
+                     std::string_view access_token, Signer sign, std::string& error,
+                     uint32_t start_part) {
   cancel();
   if (!sign) {
     error = "no signer";
@@ -86,9 +95,10 @@ bool Uploader::begin(const Meta& meta, std::string_view audio_path, std::string_
     return false;
   }
   meta_ = meta;
-  // The bytes on the card are what the server sees and what the MAC covers.
+  // The bytes on the card are what the server sees and what the MAC covers. The
+  // digest in note.json is left alone: for a segmented note it is not this
+  // upload's to recompute, and a part's own digest travels on the wire.
   meta_.bytes = static_cast<uint32_t>(st.st_size);
-  meta_.sha256.clear();
   file_bytes_ = static_cast<uint32_t>(st.st_size);
   url_.assign(url);
   now_s_ = now_s;
@@ -100,8 +110,105 @@ bool Uploader::begin(const Meta& meta, std::string_view audio_path, std::string_
   tail_sent_ = false;
   http_status_ = 0;
   error_.clear();
-  phase_ = Phase::Hashing;
+  // The duration the plan works from is the WAV's own header, not note.json's
+  // advisory number: the parts must add up to the bytes that are actually sent.
+  const size_t head = std::fread(buf_, 1, std::min<size_t>(kChunk, file_bytes_), file_);
+  if (!probe_wav_header(buf_, head, wav_)) {
+    error = "recording.wav is not a WAV this firmware can send";
+    close();
+    return false;
+  }
+  parts_ = plan_parts(wav_);
+  if (parts_.size() > kMaxParts) {
+    error = "the note is too long to send in parts";
+    close();
+    return false;
+  }
+  part_at_ = 0;
+  if (start_part > 0 && start_part < parts_.size()) part_at_ = start_part;
+  if (!begin_part()) {
+    error = "cannot read recording.wav";
+    close();
+    return false;
+  }
+  // A note that needs parts asks the hub first, once a boot: an old hub ignores
+  // the part fields and would store part 0 as the whole note.
+  phase_ = parts_.size() > 1 && hub_parts_ < 0 ? Phase::Probing : Phase::Hashing;
   return true;
+}
+
+bool Uploader::begin_part() {
+  if (part_at_ >= parts_.size()) return false;
+  part_ = parts_[part_at_];
+  part_read_ = 0;
+  part_sent_ = 0;
+  part_sha256_.clear();
+  part_header_.clear();
+  hasher_ = hg::crypto::Sha256();
+  const bool segmented = parts_.size() > 1;
+  if (segmented) {
+    part_header_ = part_wav_header(wav_, part_.audio_bytes);
+    part_header_.shrink_to_fit();
+    hasher_.update(reinterpret_cast<const uint8_t*>(part_header_.data()), part_header_.size());
+    if (std::fseek(file_, static_cast<long>(part_.audio_offset), SEEK_SET) != 0) return false;
+  } else if (std::fseek(file_, 0, SEEK_SET) != 0) {
+    return false;
+  }
+  read_ = 0;
+  sent_ = 0;
+  return true;
+}
+
+void Uploader::degrade_to_single_part() {
+  parts_.clear();
+  part_.index = 0;
+  part_.count = 1;
+  part_.offset_s = 0;
+  part_.duration_s = meta_.duration_s;
+  part_.audio_offset = 0;
+  part_.audio_bytes = file_bytes_;
+  parts_.push_back(part_);
+  part_at_ = 0;
+  part_header_.clear();
+  part_read_ = 0;
+  part_sent_ = 0;
+}
+
+bool Uploader::probe_hub_parts() {
+  if (hub_parts_ >= 0) return hub_parts_ == 1;
+  hub_parts_ = 0;
+  const size_t scheme = url_.find("://");
+  const size_t path = scheme == std::string::npos ? std::string::npos : url_.find('/', scheme + 3);
+  const std::string origin = path == std::string::npos ? url_ : url_.substr(0, path);
+  const std::string health = origin + "/health";
+  esp_http_client_config_t cfg = {};
+  cfg.url = health.c_str();
+  cfg.method = HTTP_METHOD_GET;
+  cfg.timeout_ms = 5000;
+  cfg.disable_auto_redirect = true;
+  auto client = esp_http_client_init(&cfg);
+  if (!client) return false;
+  if (!token_.empty()) esp_http_client_set_header(client, "X-Gadget-Token", token_.c_str());
+  bool ok = false;
+  if (esp_http_client_open(client, 0) == ESP_OK) {
+    if (esp_http_client_fetch_headers(client) >= 0) {
+      std::string body;
+      char chunk[128];
+      int n = 0;
+      size_t guard = 0;
+      while ((n = esp_http_client_read(client, chunk, sizeof(chunk))) > 0 && guard++ < 16) {
+        body.append(chunk, static_cast<size_t>(n));
+      }
+      ok = esp_http_client_get_status_code(client) == 200 &&
+           (body.find("\"note_parts\":1") != std::string::npos ||
+            body.find("\"note_parts\": 1") != std::string::npos);
+    }
+    esp_http_client_close(client);
+  }
+  esp_http_client_cleanup(client);
+  hub_parts_ = ok ? 1 : 0;
+  ESP_LOGI(TAG, "hub %s parts (%s)", ok ? "takes" : "does not take", health.c_str());
+  return ok;
 }
 
 bool Uploader::write_all(const void* data, size_t len) {
@@ -128,11 +235,26 @@ Uploader::Step Uploader::step() {
     return Step::Retry;
   }
 
+  if (phase_ == Phase::Probing) {
+    if (!probe_hub_parts()) {
+      degrade_to_single_part();
+      if (!begin_part()) {
+        phase_ = Phase::Finished;
+        error_ = "cannot read recording.wav";
+        return Step::Retry;
+      }
+    }
+    phase_ = Phase::Hashing;
+    return Step::Running;
+  }
+
+  const bool segmented = parts_.size() > 1;
+
   if (phase_ == Phase::Hashing) {
     const size_t n = std::fread(buf_, 1, kChunk, file_);
     if (n > 0) {
       hasher_.update(buf_, n);
-      read_ += static_cast<uint32_t>(n);
+      if (segmented) part_read_ += static_cast<uint32_t>(n); else read_ += static_cast<uint32_t>(n);
       return Step::Running;
     }
     if (std::ferror(file_)) {
@@ -140,19 +262,32 @@ Uploader::Step Uploader::step() {
       error_ = "cannot read recording.wav";
       return Step::Retry;
     }
-    if (audio_read_short(read_, file_bytes_)) {
-      // Hashing a prefix would sign a digest the server cannot match and send a
-      // body that stops early. The card is not giving the file back right now;
-      // ask for the retry.
+    // Hashing a prefix would sign a digest the server cannot match and send a
+    // body that stops early. The card is not giving the file back right now;
+    // ask for the retry.
+    const uint32_t counted = segmented ? part_read_ : read_;
+    const uint32_t expected = segmented ? part_.audio_bytes : file_bytes_;
+    if (audio_read_short(counted, expected)) {
       phase_ = Phase::Finished;
-      error_ = "cannot read recording.wav: stopped at " + std::to_string(read_) + " of " +
-               std::to_string(file_bytes_) + " bytes";
+      error_ = "cannot read recording.wav: stopped at " + std::to_string(counted) + " of " +
+               std::to_string(expected) + " bytes";
       return Step::Retry;
     }
-    std::fseek(file_, 0, SEEK_SET);
+    if (!segmented) std::fseek(file_, 0, SEEK_SET);
     const auto digest = hasher_.finish();
-    meta_.sha256 = hg::crypto::hex(digest.data(), digest.size());
-    if (!build_request(meta_, "recording.wav", request_)) {
+    part_sha256_ = hg::crypto::hex(digest.data(), digest.size());
+    if (!segmented) sha256_ = part_sha256_;  // the note's own digest, as v1 sent it
+    // The wire copy: this part's duration and digest, and the per-part
+    // idempotency key (`<note_id>.<index>`), which the hub checks against the
+    // part fields. A single-part note keeps the note's own meta and key.
+    Meta wire = meta_;
+    wire.sha256 = part_sha256_;
+    const Part* part = segmented ? &part_ : nullptr;
+    if (segmented) {
+      wire.duration_s = part_.duration_s;
+      wire.idempotency_key = part_idempotency_key(meta_.note_id, part_.index);
+    }
+    if (!build_request(wire, "recording.wav", request_, part)) {
       phase_ = Phase::Finished;
       error_ = "note.json is not uploadable";
       return Step::Rejected;
@@ -162,9 +297,10 @@ Uploader::Step Uploader::step() {
     // here, at the send, not at begin(): hashing a note reads the whole
     // recording from the card first (minutes for a few hundred MB), and a stamp
     // from before that pass is already stale when the headers leave
-    // (t_1ea185ed).
+    // (t_1ea185ed). A part takes its own stamp, so a long note's last part is
+    // never signed with the first part's time.
     now_s_ = static_cast<int64_t>(std::time(nullptr));
-    const std::string canonical = canonical_string(meta_, now_s_, meta_.sha256);
+    const std::string canonical = canonical_string(wire, now_s_, part_sha256_, part);
     const std::string mac = sign_(canonical);
     if (mac.empty()) {
       phase_ = Phase::Finished;
@@ -176,8 +312,9 @@ Uploader::Step Uploader::step() {
     // Content-Length and the POST would never start. Capture stops a file short
     // of that (kMaxNoteFileBytes), so this is the note an older image recorded at
     // the old ceiling: it cannot ever be sent, and it is terminal rather than a
-    // retry that repeats forever.
-    const uint64_t body = request_.content_length(file_bytes_);
+    // retry that repeats forever. A part is far below this by construction.
+    const uint64_t audio_bytes = part_header_.size() + static_cast<uint64_t>(segmented ? part_.audio_bytes : file_bytes_);
+    const uint64_t body = request_.content_length(static_cast<size_t>(audio_bytes));
     if (body > static_cast<uint64_t>(INT32_MAX)) {
       phase_ = Phase::Finished;
       error_ = "the note is " + std::to_string(body) + " bytes, past one upload's " +
@@ -233,6 +370,11 @@ Uploader::Step Uploader::step() {
       phase_ = Phase::Finished;
       return Step::Retry;
     }
+    if (segmented && !write_all(part_header_.data(), part_header_.size())) {
+      close();
+      phase_ = Phase::Finished;
+      return Step::Retry;
+    }
     read_ = 0;  // count the body again: the hash pass has its own total
     phase_ = Phase::Sending;
     return Step::Running;
@@ -241,7 +383,7 @@ Uploader::Step Uploader::step() {
   if (phase_ == Phase::Sending) {
     const size_t n = std::fread(buf_, 1, kChunk, file_);
     if (n > 0) {
-      read_ += static_cast<uint32_t>(n);
+      if (segmented) part_sent_ += static_cast<uint32_t>(n); else read_ += static_cast<uint32_t>(n);
       if (!write_all(buf_, n)) {
         close();
         phase_ = Phase::Finished;
@@ -249,13 +391,15 @@ Uploader::Step Uploader::step() {
       }
       return Step::Running;
     }
-    if (audio_read_short(read_, file_bytes_)) {
+    const uint32_t counted = segmented ? part_sent_ : read_;
+    const uint32_t expected = segmented ? part_.audio_bytes : file_bytes_;
+    if (audio_read_short(counted, expected)) {
       // Same rule as the hash pass: do not close the body early and wait out a
-      // request that can never be answered. Retry the note as it is.
+      // request that can never be answered. Retry this part as it is.
       close();
       phase_ = Phase::Finished;
-      error_ = "cannot read recording.wav: stopped at " + std::to_string(read_) + " of " +
-               std::to_string(file_bytes_) + " bytes";
+      error_ = "cannot read recording.wav: stopped at " + std::to_string(counted) + " of " +
+               std::to_string(expected) + " bytes";
       return Step::Retry;
     }
     if (!tail_sent_) {
@@ -277,20 +421,47 @@ Uploader::Step Uploader::step() {
     drain(client, body);
     http_status_ = esp_http_client_get_status_code(client);
     close();
-    phase_ = Phase::Finished;
     const SyncResult result = classify_response(http_status_);
-    ESP_LOGI(TAG, "note %s: HTTP %d -> %s", meta_.note_id.c_str(), http_status_,
-             result == SyncResult::Accepted    ? "accepted"
-             : result == SyncResult::Duplicate ? "duplicate"
-             : result == SyncResult::Rejected  ? "rejected"
-                                               : "retry");
+    if (segmented) {
+      ESP_LOGI(TAG, "note %s part %u/%u: HTTP %d -> %s", meta_.note_id.c_str(), part_.index + 1,
+               part_.count, http_status_,
+               result == SyncResult::Accepted    ? "accepted"
+               : result == SyncResult::Duplicate ? "duplicate"
+               : result == SyncResult::Rejected  ? "rejected"
+                                                 : "retry");
+    } else {
+      ESP_LOGI(TAG, "note %s: HTTP %d -> %s", meta_.note_id.c_str(), http_status_,
+               result == SyncResult::Accepted    ? "accepted"
+               : result == SyncResult::Duplicate ? "duplicate"
+               : result == SyncResult::Rejected  ? "rejected"
+                                                 : "retry");
+    }
     switch (result) {
       case SyncResult::Accepted:
-      case SyncResult::Duplicate: return Step::Done;
+      case SyncResult::Duplicate:
+        if (segmented && part_at_ + 1 < parts_.size()) {
+          // This part is stored (or was already). The next one is a new POST:
+          // hash it, sign it with its own stamp, and stay Running.
+          ++part_at_;
+          tail_sent_ = false;
+          if (!begin_part()) {
+            phase_ = Phase::Finished;
+            error_ = "cannot read recording.wav";
+            return Step::Retry;
+          }
+          phase_ = Phase::Hashing;
+          return Step::Running;
+        }
+        phase_ = Phase::Finished;
+        return Step::Done;
       case SyncResult::Rejected:
+        phase_ = Phase::Finished;
         error_ = body.empty() ? "rejected" : body;
         return Step::Rejected;
-      case SyncResult::Retry: error_ = body.empty() ? "retry" : body; return Step::Retry;
+      case SyncResult::Retry:
+        phase_ = Phase::Finished;
+        error_ = body.empty() ? "retry" : body;
+        return Step::Retry;
     }
   }
   return Step::Retry;

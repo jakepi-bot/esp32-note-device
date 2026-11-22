@@ -718,9 +718,15 @@ void Runtime::begin_sync(uint32_t now) {
       if (!store_.write_meta(id, wire, error))
         ESP_LOGW(TAG, "note %s: cannot record the upload time: %s", id.c_str(), error.c_str());
     }
+    // Part progress belongs to one note: a different note starts at part 0.
+    if (sync_part_id_ != id) {
+      sync_part_id_ = id;
+      sync_part_ = 0;
+    }
     std::string error;
     if (!uploader_.begin(wire, store_.audio_path(notes::NoteState::Pending, id), notes_url(), std::time(nullptr),
-                         token_, [this](std::string_view canonical) { return sign(canonical); }, error)) {
+                         token_, [this](std::string_view canonical) { return sign(canonical); }, error,
+                         sync_part_)) {
       sync_id_ = id;
       retry_waiting_ = true;
       attempt_ += 1;
@@ -760,6 +766,7 @@ void Runtime::step_sync(uint32_t now) {
     return;
   }
   if (step == notes::Uploader::Step::Done) {
+    sync_part_ = 0;
     if (!store_.move(id, notes::NoteState::Pending, notes::NoteState::Sent))
       ESP_LOGW(TAG, "%s synced but could not be moved to sent/", id.c_str());
     store_.prune_sent();
@@ -776,6 +783,7 @@ void Runtime::step_sync(uint32_t now) {
   }
   if (step == notes::Uploader::Step::Rejected) {
     ESP_LOGW(TAG, "note %s rejected (HTTP %d): %s", id.c_str(), uploader_.http_status(), uploader_.error().c_str());
+    sync_part_ = 0;
     store_.move(id, notes::NoteState::Pending, notes::NoteState::Failed);
     retry_waiting_ = false;
     attempt_ = 0;
@@ -785,8 +793,11 @@ void Runtime::step_sync(uint32_t now) {
     return;
   }
 
-  // Retry: the note stays pending, the backoff doubles from 5 s to 5 min.
+  // Retry: the note stays pending, the backoff doubles from 5 s to 5 min. The
+  // part that failed is the one retried: the parts the hub already stored are
+  // not sent again (§2.5).
   retry_waiting_ = true;
+  sync_part_ = uploader_.part_index();
   retry_at_ms_ = now + notes::retry_delay_ms(attempt_ + 1);
   attempt_ += 1;
   notes::Meta meta = uploader_.meta();

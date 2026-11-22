@@ -55,6 +55,14 @@ The resting face, and what it returns to when a screen is left.
   window open: a thin stem-and-lobes rune while it advertises, a 2 px stem while
   a phone is connected. With the radio off the box is the Wi-Fi glyph again, so
   the band never shifts a pixel.
+- **Battery** is the level the console prints: the port's own percentage if it
+  has one, else the board's measured discharge curve, else the linear 3.30-4.15 V
+  fallback, all through one conversion (`notes_app/battery_facts.hpp`) so `notes
+  status`/`battery` and the glass cannot disagree. On a cable the shell carries a
+  bolt instead of a level; with no reading at all it carries `?`, which is
+  "unknown", never 0 %. A level that moved by 2 % or more repaints at the next
+  battery poll (once a minute), a 1 % step waits for the five-minute check, so
+  the ADC's noise does not cost frames.
 
 ## Recording
 

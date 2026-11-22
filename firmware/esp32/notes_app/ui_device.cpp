@@ -18,6 +18,7 @@
 #include "hg/protocol.hpp"
 #include "notes/notes_retention.hpp"
 #include "notes/sd_mount.hpp"
+#include "notes_app/battery_facts.hpp"
 #include "notes_app/ui_render.hpp"
 
 namespace hgp {
@@ -180,8 +181,16 @@ void NotesUi::poll_facts(uint32_t now_ms, bool slow) {
     if (ports_.power != nullptr) {
       const auto status = ports_.power->read();
       if (status) {
-        facts_.battery_pct = status->battery_percent ? static_cast<int8_t>(*status->battery_percent) : -1;
+        // The same conversion the runtime prints: this board's port fills
+        // battery_mv and never battery_percent, so copying the percent alone
+        // left the band's level -1 forever (it drew '?' unplugged while
+        // `notes status` said 90 %). -1 still means "no reading", never 0 %.
+        facts_.battery_pct = static_cast<int8_t>(hgp::battery_percent(*status, ports_.battery_curve));
         facts_.external = status->external_power.value_or(false);
+      } else {
+        // A failed read is not a reading (Power::read's contract): the band says
+        // '?' rather than keeping the last level as if it were live.
+        facts_.battery_pct = -1;
       }
     }
     uint64_t total = 0, free_bytes = 0;

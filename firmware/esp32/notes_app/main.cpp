@@ -571,6 +571,8 @@ extern "C" void app_main(void) {
   ui_ports.storage = &g_storage;
   ui_ports.config = &g_config;
   ui_ports.store = &g_store;
+  // The band's level is the runtime's percentage: one conversion, one curve.
+  ui_ports.battery_curve = board.battery_curve;
   ui_ports.firmware = esp_app_get_description()->version;
   g_ui.set_effect_hook(run_effect);
   // The runtime is the truth about the capture: the screens follow its answer,

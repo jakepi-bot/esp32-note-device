@@ -93,7 +93,7 @@ if(HG_BUILD_TESTS)
   if(NOT MSVC)
     add_executable(hg_notes_ui_tests tests/main.cpp tests/test_notes_screens.cpp tests/test_notes_refresh.cpp
                    tests/test_notes_recording.cpp)
-    target_include_directories(hg_notes_ui_tests PRIVATE esp32/main)
+    target_include_directories(hg_notes_ui_tests PRIVATE esp32/main drivers)
     target_link_libraries(hg_notes_ui_tests PRIVATE hg_core)
     target_sources(hg_notes_ui_tests PRIVATE esp32/main/notes_app/ui_keys.cpp
                                             esp32/main/notes_app/ui_view.cpp

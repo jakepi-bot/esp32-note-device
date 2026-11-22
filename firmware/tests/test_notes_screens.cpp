@@ -14,13 +14,16 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "hg/canvas.hpp"
+#include "hg/hal.hpp"
 #include "notes/notes_capture.hpp"
 #include "notes/notes_queue.hpp"
 #include "notes/notes_store.hpp"
+#include "notes_app/battery_facts.hpp"
 #include "notes_app/strings.hpp"
 #include "notes_app/ui_app.hpp"
 #include "notes_app/ui_cache.hpp"
@@ -947,4 +950,110 @@ TEST("band: the Bluetooth mark is the radio's answer, in the Wi-Fi box") {
   for (int y = 8; y < 24; ++y) {
     for (int x = 152; x < 160; ++x) CHECK(fb[y * 200 + x] != 0x0000);
   }
+}
+
+// ---------------------------------------------------------------------------
+// The band's battery (t_c1eab9f8): this board's port fills battery_mv and never
+// battery_percent, so the UI's copy of the percentage was -1 in every poll while
+// `notes status` printed 90 %. Both readers now call hgp::battery_percent
+// (notes_app/battery_facts.hpp), so the level and the console cannot disagree.
+
+namespace {
+
+// An hg::Power that answers one canned status, the way the board's latch does.
+class StubPower : public hg::Power {
+ public:
+  explicit StubPower(hg::PowerStatus status) : status_(status) {}
+  std::optional<hg::PowerStatus> read() override { return status_; }
+  bool power_off() override { return true; }
+
+ private:
+  hg::PowerStatus status_;
+};
+
+hg::PowerStatus mv_only(uint16_t mv) {
+  hg::PowerStatus s;
+  s.battery_mv = mv;
+  s.external_power = false;  // off the cable: the level, not the bolt
+  return s;
+}
+
+}  // namespace
+
+TEST("battery: a port that answers only mV gives the console's percentage") {
+  // The desk unit's own reading: `notes status` says 90 % at 4068 mV, this board
+  // having no curve. The band must land on that number from the same port.
+  StubPower power(mv_only(4068));
+  const auto status = power.read();
+  CHECK(status.has_value());
+  CHECK(hgp::battery_percent(*status, hg::Curve{}) == 90);
+
+  // The linear fallback's ends, unchanged from what the console printed before
+  // the conversion was shared: 3.30 V empty, 4.15 V full.
+  CHECK(hgp::battery_percent(mv_only(3300), hg::Curve{}) == 0);
+  CHECK(hgp::battery_percent(mv_only(3200), hg::Curve{}) == 0);
+  CHECK(hgp::battery_percent(mv_only(4150), hg::Curve{}) == 100);
+  CHECK(hgp::battery_percent(mv_only(4250), hg::Curve{}) == 100);
+
+  // A board with a measured curve uses it instead: 3704 mV is 49 % on the
+  // AMOLED-1.75C's curve where the straight line says 47.
+  CHECK(hgp::battery_percent(mv_only(3704), hg::kAmoled175cCurve) == 49);
+  CHECK(hgp::battery_percent(mv_only(3704), hg::Curve{}) == 47);
+
+  // A port's own percent wins over both.
+  hg::PowerStatus gauge = mv_only(3704);
+  gauge.battery_percent = 87;
+  CHECK(hgp::battery_percent(gauge, hg::kAmoled175cCurve) == 87);
+}
+
+TEST("battery: no reading is -1, never a level") {
+  // The latch with no calibration: it still answers external power and nothing
+  // about the cell. That is "unknown", not 0 %.
+  hg::PowerStatus external_only;
+  external_only.external_power = true;
+  CHECK(hgp::battery_percent(external_only, hg::Curve{}) == -1);
+  CHECK(hgp::battery_percent(hg::PowerStatus{}, hg::kAmoled175cCurve) == -1);
+
+  // And a failed read is not a reading: Power::read's contract is nullopt.
+  class FailingPower : public hg::Power {
+   public:
+    std::optional<hg::PowerStatus> read() override { return std::nullopt; }
+    bool power_off() override { return true; }
+  } failing;
+  CHECK(!failing.read().has_value());
+}
+
+TEST("band: a level is drawn from the reading, '?' only without one") {
+  // A real percentage fills the shell; an unknown level draws '?' (a blank box
+  // would read as 0 %); a cable draws the bolt. All three differ as ink.
+  Snapshot level = band_seed();  // 84 %, off the cable
+  level.external = false;
+  Snapshot unknown = band_seed();
+  unknown.battery_pct = -1;  // what every poll carried before this fix
+  unknown.external = false;
+  Snapshot zero = band_seed();
+  zero.battery_pct = 0;
+  zero.external = false;
+  Snapshot cable = level;
+  cable.external = true;
+
+  const uint64_t at_84 = home_band_hash(level, 156, 8, 190, 25);
+  const uint64_t at_unknown = home_band_hash(unknown, 156, 8, 190, 25);
+  const uint64_t at_zero = home_band_hash(zero, 156, 8, 190, 25);
+  const uint64_t on_cable = home_band_hash(cable, 156, 8, 190, 25);
+  CHECK(at_84 != at_unknown);    // the level reaches the glass
+  CHECK(at_unknown != at_zero);  // '?' is not a 0 % bar
+  CHECK(on_cable != at_84);      // the bolt is its own glyph
+  CHECK(on_cable != at_unknown);
+
+  // The port's own answer is what fills the box: an mv-only stub at 4068 mV is
+  // 90 %, and 90 % is not the unknown glyph.
+  StubPower power(mv_only(4068));
+  const auto status = power.read();
+  CHECK(status.has_value());
+  Snapshot from_port = band_seed();
+  from_port.battery_pct = static_cast<int8_t>(hgp::battery_percent(*status, hg::Curve{}));
+  from_port.external = false;
+  CHECK(from_port.battery_pct == 90);
+  CHECK(home_band_hash(from_port, 156, 8, 190, 25) != at_unknown);
 }

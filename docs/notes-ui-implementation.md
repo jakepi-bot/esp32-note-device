@@ -58,7 +58,7 @@ Zone A draws four facts and owns the only polling the screens do
 | clock `HH:MM` | `ports_.system->wall_time()` → `Facts::clock` → `Snapshot::clock_text[6]` | the text changing, on Home, while idle |
 | Wi-Fi | `Wifi::current()` | the association coming or going |
 | Bluetooth | `PhoneLink::radio_up()` / `phone_window()` → `Facts::bt` → `Snapshot::bt` | the radio's window coming or going |
-| battery | the ADC, every 60 s | a ≥ 2 % step, or any step once 5 minutes have passed |
+| battery | `hgp::battery_percent` over the port's `PowerStatus` and `board.battery_curve`, every 60 s — the same call `Runtime` prints in `notes status` | a ≥ 2 % step, or any step once 5 minutes have passed |
 | card free space | `statfs`, every 60 s | a move of ≥ 1 MiB |
 
 Three of those rules are the flicker fix, and each is one line of intent rather

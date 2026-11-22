@@ -16,6 +16,7 @@
 #include "hg/crypto.hpp"
 #include "hg/protocol.hpp"
 #include "notes/sd_mount.hpp"
+#include "notes_app/battery_facts.hpp"
 #include "notes_app/ui_keys.hpp"
 
 namespace hgn {
@@ -53,8 +54,6 @@ constexpr const char* kLowSpaceError = "SD almost full, no synced notes to delet
 constexpr const char* kSeqKey = "note_seq";
 constexpr const char* kNotesUrlKey = "notes_url";
 constexpr uint16_t kDefaultNotesPort = 8766;
-// The Discharge curve this board has none of: 3.30 V empty, 4.15 V full.
-constexpr uint16_t kEmptyMv = 3300, kFullMv = 4150;
 
 uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
@@ -213,26 +212,9 @@ void Runtime::refresh_battery() {
   }
   external_ = status->external_power.value_or(false);
   if (status->battery_mv) battery_mv_ = *status->battery_mv;
-  if (status->battery_percent) {
-    battery_pct_ = *status->battery_percent;
-    return;
-  }
-  if (!status->battery_mv) {
-    battery_pct_ = -1;
-    return;
-  }
-  const uint16_t mv = *status->battery_mv;
-  if (io_.battery_curve) {
-    battery_pct_ = hg::percent_on_curve(io_.battery_curve, mv);
-    return;
-  }
-  if (mv <= kEmptyMv) {
-    battery_pct_ = 0;
-  } else if (mv >= kFullMv) {
-    battery_pct_ = 100;
-  } else {
-    battery_pct_ = static_cast<int>((mv - kEmptyMv) * 100u / (kFullMv - kEmptyMv));
-  }
+  // One conversion, shared with the band (notes_app/battery_facts.hpp): the
+  // console and the glass cannot disagree about the level.
+  battery_pct_ = hgp::battery_percent(*status, io_.battery_curve);
 }
 
 void Runtime::shutdown() {

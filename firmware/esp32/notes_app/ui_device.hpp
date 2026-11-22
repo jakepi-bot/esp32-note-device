@@ -31,6 +31,7 @@
 #include <string>
 #include <string_view>
 
+#include "battery_curve.hpp"
 #include "device_config.hpp"
 #include "port_display_epd.hpp"
 #include "notes/notes_store.hpp"
@@ -55,6 +56,10 @@ class NotesUi {
     NvsStorage* storage = nullptr;
     DeviceConfig* config = nullptr;
     notes::Store* store = nullptr;
+    // The board's measured discharge curve, when it has one: the band converts
+    // the port's mV with the same helper the runtime prints (`notes status`), so
+    // the glass and the console cannot disagree about the level.
+    hg::Curve battery_curve{};
     const char* firmware = "";
   };
 

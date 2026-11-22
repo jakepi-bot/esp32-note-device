@@ -87,6 +87,13 @@ struct Snapshot {
   uint32_t count_sent = 0;
   uint32_t count_failed = 0;
 
+  // A one-line reason for the slot under Home's hero, already in the glass's
+  // words (a capture the stop discarded for having no audio). It outranks LAST
+  // and BOOT TO RECORD while it lasts and says nothing about the hero or the
+  // band, so no other state's precedence moves. Empty when there is nothing to
+  // explain; the caller clears it when its few seconds are up.
+  char notice[18] = {};
+
   // About. Strings copied, not pointed at, so a snapshot is self-contained.
   char firmware[12] = {};
   char device[16] = {};

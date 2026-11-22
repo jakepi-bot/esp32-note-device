@@ -88,6 +88,13 @@ Outcome UiState::publish(uint32_t now_ms, uint16_t dirty, Refresh at_least) {
   snap_.upload_done = upload_done_;
   snap_.upload_total = upload_total_;
   load_counts();
+  // A note that landed (or was deleted) after the notice was set makes it a lie
+  // about the card: the line goes back to the counts. A discard never moves them,
+  // so the notice it set survives the publish that carries it.
+  if (notice_until_ms_ != 0 && snap_.notes_total() != notice_notes_) {
+    notice_until_ms_ = 0;
+    snap_.notice[0] = '\0';
+  }
   load_window();
   Outcome out = app_.publish(snap_, dirty);
   if (out.refresh != Refresh::None || at_least != Refresh::None) {
@@ -182,6 +189,19 @@ Outcome UiState::tick(uint32_t now_ms) {
   merge(out, synced);
   merge(out, followed);
   adopt_app_facts();
+  // Home's notice is the one thing on the glass that lapses on its own: when its
+  // few seconds are up the counts line comes back, on Home and only on Home (a
+  // notice that lapsed behind another screen is simply gone from the next Home
+  // frame).
+  if (notice_until_ms_ != 0 && static_cast<int32_t>(now_ms - notice_until_ms_) >= 0) {
+    notice_until_ms_ = 0;
+    snap_.notice[0] = '\0';
+    if (app_.screen() == Screen::Home) {
+      merge(out, publish(now_ms, DirtyNotice, Refresh::Partial));
+    } else {
+      sync_app();
+    }
+  }
   return out;
 }
 
@@ -190,6 +210,12 @@ Outcome UiState::set_capture(bool recording, uint32_t elapsed_s, bool queued, ui
   capture_recording_ = recording;
   capture_queued_ = queued;
   capture_elapsed_s_ = elapsed_s;
+  if (recording) {
+    // A new capture is the news now, and the last stop's line would be a stale
+    // complaint over a note that is being made.
+    notice_until_ms_ = 0;
+    snap_.notice[0] = '\0';
+  }
   // The capture's own cap, not the setting's: the face says `OF 1:30·2.1G` when
   // the card is what limits the note, and the screen's cap stop lands on the
   // same second the runtime stops the file. Written before the app is asked, so
@@ -248,6 +274,18 @@ void UiState::set_upload_failed() {
 void UiState::set_play(uint32_t pos_s, uint32_t total_s) {
   play_pos_s_ = pos_s;
   if (total_s != 0) play_total_s_ = total_s;
+}
+
+void UiState::set_notice(std::string_view text, uint32_t now_ms, uint32_t ttl_ms) {
+  const size_t n = std::min(text.size(), sizeof snap_.notice - 1);
+  std::memcpy(snap_.notice, text.data(), n);
+  snap_.notice[n] = '\0';
+  // A zero ttl (or an empty line) means "nothing to say": no deadline, no line,
+  // so a caller that has nothing to explain costs no frame.
+  notice_until_ms_ = (ttl_ms != 0 && n != 0) ? (now_ms == 0 ? 1 : now_ms) + ttl_ms : 0;
+  if (notice_until_ms_ == 0) snap_.notice[0] = '\0';
+  // The counts as they are now: a note that lands later takes the line back.
+  notice_notes_ = snap_.notes_total();
 }
 
 }  // namespace hgp::notesui

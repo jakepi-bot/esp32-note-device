@@ -19,6 +19,7 @@
 #include "notes/notes_retention.hpp"
 #include "notes/sd_mount.hpp"
 #include "notes_app/battery_facts.hpp"
+#include "notes_app/strings.hpp"
 #include "notes_app/ui_render.hpp"
 
 namespace hgp {
@@ -42,6 +43,10 @@ constexpr uint32_t kSlowFactsMs = 60000;
 // the link, the window's deadline), and 250 ms is what makes a phone that
 // connects land on the glass while the person is still holding it.
 constexpr uint32_t kPhonePollMs = 250;
+// How long a discarded capture's reason keeps Home's one line. Long enough to be
+// read after a full refresh has settled, short enough that the counts line the
+// person expects on Home is back before they look twice.
+constexpr uint32_t kNoticeTtlMs = 5000;
 
 // Why the Phone window could not open, in words, for the log. The screen has its
 // own copy of these (strings.hpp); this is the serial line an operator reads.
@@ -597,6 +602,27 @@ void NotesUi::on_upload_failed() {
   if (!begun_) return;
   state_.set_upload_failed();
   publish(notesui::DirtyUpload);
+}
+
+void NotesUi::on_discarded() {
+  if (!begun_) return;
+  const uint32_t now = ports_.system != nullptr ? ports_.system->now_ms() : esp_timer_get_time() / 1000;
+  // The words are the screens': the runtime says what happened (no audio), the
+  // glass says it in the slot it has. Adopted here, drawn by the frame the stop
+  // already owes - never a second full refresh for one line.
+  state_.set_notice(notesui::sub::kNoAudioSaved, now, kNoticeTtlMs);
+  if (in_apply_) {
+    // The key that stopped the capture is mid-effect: its own frame is coming,
+    // and this line belongs on it (on_runtime_change's rule).
+    publish_pending_ = true;
+    pending_dirty_ = static_cast<uint16_t>(pending_dirty_ | notesui::DirtyNotice);
+    return;
+  }
+  // Ended from the console or the runtime: on Home only, because that is the
+  // screen with the slot. Anywhere else the notice rides the publish
+  // on_runtime_change is about to make when the capture ends, or the next Home
+  // frame if it has lapsed by then.
+  if (state_.screen() == notesui::Screen::Home) publish(notesui::DirtyNotice);
 }
 
 std::string NotesUi::console(std::string_view line) {

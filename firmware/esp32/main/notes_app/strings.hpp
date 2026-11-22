@@ -41,6 +41,9 @@ inline constexpr const char* kLast = "LAST %02u:%02u";
 inline constexpr const char* kBootToRecord = "BOOT TO RECORD";
 inline constexpr const char* kNothingLost = "NOTHING LOST";
 inline constexpr const char* kPlugIn = "PLUG IN SOON";
+// A capture the stop threw away because it held no audio: the reason the log
+// gives, in the space of the line. 14 columns, the width of BOOT TO RECORD.
+inline constexpr const char* kNoAudioSaved = "NO AUDIO SAVED";
 }  // namespace sub
 
 // Footers: one binding each, two only where both keys are load-bearing (§3.3).

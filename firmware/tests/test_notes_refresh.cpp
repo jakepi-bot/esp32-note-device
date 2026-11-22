@@ -348,6 +348,68 @@ TEST("facts: a one percent battery step is the ADC talking, not the glass") {
   CHECK(ui.snapshot().external);
 }
 
+TEST("notice: a discarded capture's reason takes Home's line, then the counts return") {
+  TempDir dir;
+  Store store(dir.path);
+  // A card with one sent note: Home's resting line is LAST, the line the notice
+  // has to give back.
+  CHECK(make_note(store, "hg-69ffb4e9-20261121T140203-0006", "2026-11-21T14:02:03Z", 40,
+                  NoteState::Sent));
+  UiState ui;
+  ui.begin(seed_for(), &store);
+  HomeView view = build_home(ui.snapshot());
+  CHECK(std::string(view.hero) == home::kReady);
+  CHECK(std::string(view.sub) == "LAST 14:02");
+
+  // The stop found no audio and the runtime signalled it (NotesUi::on_discarded
+  // hands Home the line, then publishes): the frame is Home once, partial, with
+  // the reason where the counts line was.
+  ui.set_notice(sub::kNoAudioSaved, 2000, 5000);
+  const Outcome drawn = ui.publish(2000, DirtyNotice, Refresh::Partial);
+  CHECK(drawn.draw);
+  CHECK(drawn.refresh == Refresh::Partial);  // one line on one screen, never full
+  view = ui.app().frame().home;              // the frame the panel is given
+  CHECK(std::string(view.sub) == "NO AUDIO SAVED");
+  CHECK(std::string(view.hero) == home::kReady);  // the hero is not the notice's
+  CHECK(std::string(view.band) == band::kAllSent);
+  CHECK(ui.snapshot().notes_total() == 1);   // nothing was saved
+
+  // Inside its few seconds nothing repaints.
+  CHECK(!ui.tick(4000).draw);
+  CHECK(std::string(ui.app().frame().home.sub) == "NO AUDIO SAVED");
+
+  // Its ttl runs out: the next pass puts the counts line back, once.
+  const Outcome lapsed = ui.tick(7000);
+  CHECK(lapsed.draw);
+  view = ui.app().frame().home;
+  CHECK(std::string(view.sub) == "LAST 14:02");
+  CHECK(ui.snapshot().notice[0] == '\0');
+  CHECK(!ui.tick(7100).draw);  // and the glass is quiet again
+}
+
+TEST("notice: a note that lands after the notice takes the line back") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(make_note(store, "hg-69ffb4e9-20261121T140203-0007", "2026-11-21T14:02:03Z", 40,
+                  NoteState::Sent));
+  UiState ui;
+  ui.begin(seed_for(), &store);
+
+  ui.set_notice(sub::kNoAudioSaved, 2000, 5000);
+  CHECK(ui.publish(2000, DirtyNotice, Refresh::Partial).draw);
+  CHECK(std::string(ui.app().frame().home.sub) == "NO AUDIO SAVED");
+
+  // A second note is committed while the line is up (a very short note, the
+  // runtime's own commit): "nothing saved" would be a lie about that card, so the
+  // publish drops the notice and draws the new note's LAST line instead.
+  CHECK(make_note(store, "hg-69ffb4e9-20261121T140203-0008", "2026-11-21T14:05:00Z", 1,
+                  NoteState::Sent));
+  const Outcome committed = ui.publish(3000, static_cast<uint16_t>(DirtyQueue | DirtyList));
+  CHECK(committed.draw);
+  CHECK(std::string(ui.app().frame().home.sub) == "LAST 14:05");
+  CHECK(ui.snapshot().notice[0] == '\0');
+}
+
 TEST("facts: a capture silences the band, and the band catches up after it") {
   TempDir dir;
   Store store(dir.path);

@@ -104,6 +104,10 @@ class Runtime {
     std::function<void()> changed;                              // counts, list or card state
     std::function<void(bool, uint8_t, uint8_t)> upload;         // active, done, total
     std::function<void()> upload_failed;                        // the note moved to failed/
+    // A capture the stop threw away because it held no audio: nothing was saved
+    // and the glass stays on Home, so this is the only news Home gets (the log
+    // and the console answer are not what a person in a hallway is reading).
+    std::function<void()> discarded;
   };
   void set_ui_hooks(UiHooks hooks) { ui_ = std::move(hooks); }
 

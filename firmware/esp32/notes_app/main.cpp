@@ -628,6 +628,10 @@ extern "C" void app_main(void) {
   ui_hooks.changed = [] { g_ui.on_runtime_change(); };
   ui_hooks.upload = [](bool active, uint8_t done, uint8_t total) { g_ui.on_upload(active, done, total); };
   ui_hooks.upload_failed = [] { g_ui.on_upload_failed(); };
+  // A stop that found no audio throws the capture away and stays on Home: with
+  // the counts unchanged, the line under the hero is the only thing that can say
+  // why nothing was saved.
+  ui_hooks.discarded = [] { g_ui.on_discarded(); };
   g_runtime.set_ui_hooks(ui_hooks);
 
   hgp::console::begin();

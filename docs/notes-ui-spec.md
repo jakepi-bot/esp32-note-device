@@ -341,8 +341,9 @@ them in this order and the face is always true.
 | 1 | `PLUG IN SOON` | low power |
 | 2 | `NOTHING LOST` | no card — the reassurance, because the hero only reports the fault |
 | 3 | `%u OF %u SENT` | uploading, `i` of `n` done |
-| 4 | `LAST %02u:%02u` | there is at least one note; its newest local time |
-| 5 | `BOOT TO RECORD` | no notes at all — the only state that needs a verb |
+| 4 | `NO AUDIO SAVED` | a stop just discarded a capture for holding no audio; it lapses after a few seconds and the line below returns |
+| 5 | `LAST %02u:%02u` | there is at least one note; its newest local time |
+| 6 | `BOOT TO RECORD` | no notes at all — the only state that needs a verb |
 | — | *blank* | otherwise |
 
 **The three slots never restate each other.** The band answers *what is queued*,
@@ -350,6 +351,15 @@ the hero answers *what mode am I in*, this line answers *what happened last or
 what to do now*. That is why `UPLOADING` pairs with `2 OF 3 SENT` and not with the
 count, and why `OFFLINE` pairs with `LAST 14:02` and not with `3 TO SEND` — the
 band already said it.
+
+`NO AUDIO SAVED` is the one line that does not describe a state but an event: a
+stop that found nothing to keep throws the capture away, the card does not move,
+so with the hero still `READY` and the band unchanged this line is the only thing
+on the glass that can say *nothing was saved*. It owns the slot for five seconds
+and then the line it replaced comes back (`LAST`, or `BOOT TO RECORD` on an empty
+card). It never displaces a line with a higher priority above, never touches the
+hero or the band, and a capture started or a note committed while it is up drops
+it early — a saved note makes it a lie.
 
 Every combination above is rendered in `01`–`07` of the wireframe set.
 
@@ -1204,7 +1214,7 @@ one gesture the user wanted to record with.
 ## 14. UI strings
 
 **These replace the i18n table.** There is no locale layer, no `i18n.cpp`, no
-table of translated pairs. The whole surface is the **56 strings** below, and nine of
+table of translated pairs. The whole surface is the **57 strings** below, and nine of
 them already exist in `ui_keys.cpp` (`menu_label()`, `action_label()`) — those must
 **not** be duplicated in the app.
 
@@ -1228,6 +1238,7 @@ one column is 12 px, at scale 3 it is 18 px.
 | `home.sub.boot_to_record` | `BOOT TO RECORD` | 2 | 14 | 166 | 168 **←** | Home | new |
 | `home.sub.nothing_lost` | `NOTHING LOST` | 2 | 12 | 142 | 168 | Home | new |
 | `home.sub.plug_in` | `PLUG IN SOON` | 2 | 12 | 142 | 168 | Home | new |
+| `home.sub.no_audio` | `NO AUDIO SAVED` | 2 | 14 | 166 | 168 **←** | Home | new |
 | `home.label.recording` | `RECORDING` | 2 | 9 | 106 | 106 **←** | Recording | new |
 | `fmt.of_cap` | `OF %u:%02u`, `OF %u:%02u:%02u` past an hour, `OF %u:%02u·%s` with the size | 2 | 7..13 | 156 | 106 | Recording, Playing | new |
 | `key.boot.record` | `BOOT: record` | 2 | 12 | 142 | 166 | Home | new |

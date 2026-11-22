@@ -30,9 +30,10 @@ const char* TAG = "hg.ui";
 constexpr size_t kPlayFrames = 2400;
 // While a note plays, the reader keeps one buffer in the speaker and waits.
 constexpr uint32_t kPlayPaceMs = 20;
-// The band's facts are a string compare and a clock read: once a second is
-// cheap and makes a link that came up between events land on the glass.
-constexpr uint32_t kFactsMs = 1000;
+// The band's facts are a string compare and a clock read: ten seconds is the
+// policy (t_3beb371a §5) - a link that came up lands on the glass within a poll,
+// and nothing repaints in between. At 1 s the poll itself was half the flicker.
+constexpr uint32_t kFactsMs = 10000;
 // Battery is an ADC read and the card's free space is a statfs: about 200 ms a
 // year at this cadence, and About is the only screen that reads them.
 constexpr uint32_t kSlowFactsMs = 60000;
@@ -125,6 +126,8 @@ void NotesUi::begin(const Ports& ports) {
   seed.note_max_s = ports_.config != nullptr ? static_cast<uint32_t>(ports_.config->note_max_s()) : 86400;
   seed.wifi_up = facts_.wifi_up;
   seed.clock_set = facts_.clock_set;
+  if (facts_.clock.valid) notesui::format_clock(facts_.clock, seed.clock_text);
+  seed.bt = facts_.bt;
   seed.card_free_bytes = facts_.card_free_bytes;
   seed.battery_pct = facts_.battery_pct;
   seed.external = facts_.external;
@@ -145,7 +148,30 @@ notesui::Facts NotesUi::read_facts() const {
   notesui::Facts f = facts_;
   f.wifi_up = ports_.wifi != nullptr && !ports_.wifi->current().empty();
   hg::WallTime wall;
-  f.clock_set = ports_.system != nullptr && ports_.system->wall_time(wall);
+  const bool have_time = ports_.system != nullptr && ports_.system->wall_time(wall);
+  f.clock_set = have_time;
+  f.clock.valid = have_time;
+  if (have_time) {
+    f.clock.year = wall.year;
+    f.clock.month = wall.month;
+    f.clock.day = wall.day;
+    f.clock.hour = wall.hour;
+    f.clock.minute = wall.minute;
+  }
+  // Bluetooth is the radio's answer, not a guess from the Phone screen: `radio`
+  // prints the same three states, so the mark and the console cannot disagree.
+  // The window is not only the Phone screen's - the boot window and `phone wake`
+  // both advertise with the glass on Home - so reading the phone window alone
+  // would leave the mark on Wi-Fi for every state the band can actually show.
+  f.bt = notesui::BtState::Off;
+  if (ports_.radio != nullptr) {
+    const PhoneWindow window = ports_.radio->phone_window();
+    if (window.connected) {
+      f.bt = notesui::BtState::Connected;
+    } else if (ports_.radio->radio_up() || window.left_ms != 0) {
+      f.bt = notesui::BtState::Advertising;
+    }
+  }
   return f;
 }
 
@@ -223,6 +249,7 @@ void NotesUi::render(notesui::Refresh refresh) {
     ports_.display->request_full_refresh();
     first_frame_ = false;
   }
+  ++frames_;
   ports_.display->flush(0, info.height);
 }
 
@@ -561,11 +588,19 @@ void NotesUi::on_upload_failed() {
 std::string NotesUi::console(std::string_view line) {
   if (line == "ui") {
     const notesui::Snapshot& snap = state_.snapshot();
-    char out[200];
-    std::snprintf(out, sizeof out, "screen %s, %u notes, %u to send, %u failed, card %s, wifi %s, clock %s",
+    // `ble` is the band's own mark and `frames` is every panel refresh since
+    // boot, so both §4's mark and §5's flicker budget are measurable over the
+    // console: sample `ui` twice and subtract.
+    const char* bt = snap.bt == notesui::BtState::Connected     ? "connected"
+                     : snap.bt == notesui::BtState::Advertising ? "advertising"
+                                                                : "off";
+    char out[240];
+    std::snprintf(out, sizeof out,
+                  "screen %s, %u notes, %u to send, %u failed, card %s, wifi %s, clock %s, ble %s, frames %u",
                   screen_name(state_.screen()), static_cast<unsigned>(snap.note_count),
                   static_cast<unsigned>(snap.count_pending), static_cast<unsigned>(snap.count_failed),
-                  snap.card ? "up" : "none", snap.wifi_up ? "up" : "down", snap.clock_set ? "set" : "unset");
+                  snap.card ? "up" : "none", snap.wifi_up ? "up" : "down", snap.clock_set ? "set" : "unset",
+                  bt, static_cast<unsigned>(frames_));
     return out;
   }
   if (line == "ui home") {

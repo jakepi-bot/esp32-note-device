@@ -143,6 +143,12 @@ HomeView build_home(const Snapshot& snap) {
     copy_out(band::kAllSent, view.band, sizeof view.band);
   }
 
+  // The clock and the radio's mark ride the same band (t_3beb371a §4): the time
+  // in its own slot left of the battery, the mark in the Wi-Fi glyph's box. Both
+  // are copies, so the frame stays self-contained like the rest of the snapshot.
+  if (snap.clock_set && snap.clock_text[0] != '\0') copy_out(snap.clock_text, view.clock, sizeof view.clock);
+  view.bt = snap.bt;
+
   // One line, context first, and never a restatement of the band.
   if (snap.low_power) {
     copy_out(sub::kPlugIn, view.sub, sizeof view.sub);

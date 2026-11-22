@@ -28,6 +28,11 @@ inline constexpr uint8_t kListRows = 6;
 // What a list row's right margin says: mark the exception, not the rule (§6.2).
 enum class NoteMark : uint8_t { None, Pending, Failed };
 
+// Bluetooth, as the band draws it (t_3beb371a §4). The radio is up only inside
+// the Phone window - the device advertises, a phone may be on it, or it is off
+// and the Wi-Fi glyph keeps the slot (§4.4).
+enum class BtState : uint8_t { Off, Advertising, Connected };
+
 // A note as the screens need it: no path, no id, no file work. The two stamp
 // fields are already formatted local time: the list prints them side by side,
 // the note screen prints them on two lines.
@@ -44,6 +49,10 @@ struct Snapshot {
   bool card = true;             // Store::ensure() succeeded
   bool wifi_up = false;
   bool clock_set = true;        // the clock has been set at least once
+  // "14:02", the minute the clock reads (t_3beb371a §4). Empty when the clock
+  // has never been set: the band's slot is then blank, not a stale time.
+  char clock_text[6] = {};
+  BtState bt = BtState::Off;    // the radio's window, from the port
   int8_t battery_pct = -1;      // -1 unknown
   bool external = false;        // on external power (the bolt)
   bool low_power = false;       // the caller's battery rule, ≤10 % off power
@@ -141,6 +150,8 @@ struct HomeView {
   const char* hero = nullptr;    // a strings.hpp constant
   char band[14] = {};            // "3 TO SEND" / "ALL SENT"; empty = none
   char sub[18] = {};             // "LAST 14:02"; empty = none
+  char clock[6] = {};            // "14:02"; empty when the clock is not set
+  BtState bt = BtState::Off;     // the radio's mark, in the Wi-Fi glyph's slot
   bool wifi_up = false;
   int8_t battery_pct = -1;
   bool external = false;

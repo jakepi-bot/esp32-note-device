@@ -32,6 +32,21 @@ const uint8_t kWifiCut[] = {
     0x01, 0x9e, 0x01, 0x87, 0x01, 0x83,
 };
 
+// The band's Wi-Fi glyph box, redrawn for Bluetooth (t_3beb371a §4): a stem with
+// the two lobes the mark is known by, thin while the window advertises and a
+// 2 px stem while a phone is on it. The Wi-Fi glyph keeps the slot whenever the
+// radio is off, so the band never shifts.
+const uint8_t kRuneAdvertising[] = {
+    0x00, 0x00, 0x06, 0x00, 0x05, 0x80, 0x04, 0x60, 0x04, 0x18,
+    0x04, 0x60, 0x05, 0x80, 0x06, 0x00, 0x05, 0x80, 0x04, 0x60,
+    0x04, 0x18, 0x04, 0x60, 0x05, 0x80, 0x06, 0x00, 0x00, 0x00,
+};
+const uint8_t kRuneConnected[] = {
+    0x00, 0x00, 0x06, 0x00, 0x07, 0x80, 0x06, 0x60, 0x06, 0x18,
+    0x06, 0x60, 0x07, 0x80, 0x06, 0x00, 0x07, 0x80, 0x06, 0x60,
+    0x06, 0x18, 0x06, 0x60, 0x07, 0x80, 0x06, 0x00, 0x00, 0x00,
+};
+
 // 28 x 15: a 26 px shell, a 2 px nub, then fill, bolt or '?' (§4.5). A blank
 // box would read as 0 %, so an unknown level is always drawn.
 void draw_battery(hg::Canvas& c, int x, int y, int8_t pct, bool external) {
@@ -68,7 +83,7 @@ void row(hg::Canvas& c, int y, const char* label, const char* value, bool select
 
 void home_face(hg::Canvas& c, const ScreenDraw& d) {
   const HomeView& v = d.home;
-  draw_band(c, v.band, v.wifi_up, v.battery_pct, v.external);
+  draw_band(c, v.band, v.clock, v.wifi_up, v.bt, v.battery_pct, v.external);
   rule(c, grid::kRuleY);
   const int bottom = grid::kRuleOneLine;  // one-line footer on Home
   const int group_h = 21 + 12 + 14;
@@ -84,7 +99,7 @@ void home_face(hg::Canvas& c, const ScreenDraw& d) {
 
 void recording_face(hg::Canvas& c, const ScreenDraw& d) {
   const HomeView& band = d.home;  // the queue count of the previous notes
-  draw_band(c, band.band, band.wifi_up, band.battery_pct, band.external);
+  draw_band(c, band.band, band.clock, band.wifi_up, band.bt, band.battery_pct, band.external);
   rule(c, grid::kRuleY);
   text_at(c, grid::kLeft, 38, recording::kLabel, grid::kScale, kInk);
   if (d.recording.queued) {
@@ -164,7 +179,7 @@ void confirm_face(hg::Canvas& c, const ScreenDraw& d) {
 
 void playing_face(hg::Canvas& c, const ScreenDraw& d) {
   const HomeView& band = d.home;
-  draw_band(c, band.band, band.wifi_up, band.battery_pct, band.external);
+  draw_band(c, band.band, band.clock, band.wifi_up, band.bt, band.battery_pct, band.external);
   rule(c, grid::kRuleY);
   text_at(c, grid::kLeft, 40, d.playing.when, grid::kScale, kInk);
   char elapsed[8], total[11];
@@ -218,9 +233,22 @@ void about_face(hg::Canvas& c, const ScreenDraw& d) {
 
 }  // namespace
 
-void draw_band(hg::Canvas& c, const char* queue, bool wifi_up, int8_t battery_pct, bool external) {
-  text_at(c, grid::kLeft, grid::kBandY, queue, grid::kScale, kInk);
-  c.bitmap1(136, grid::kBandY, 16, 15, wifi_up ? kWifiUp : kWifiCut, kInk);
+void draw_band(hg::Canvas& c, const char* queue, const char* clock, bool wifi_up, BtState bt,
+               int8_t battery_pct, bool external) {
+  // The band is full at scale 2: the queue slot runs to 130 px, then a 16 px
+  // glyph and a 28 px battery to the right margin. Adding a clock meant choosing
+  // between a second line and smaller type, and §3.2's band is one line, so the
+  // text drops to scale 1 - 6 px a column, which fits "3 TO SEND" and "14:02"
+  // together with the glyph and battery exactly where they were.
+  text_at(c, grid::kLeft, grid::kBandY + 3, queue, 1, kInk);
+  if (clock != nullptr && clock[0] != '\0') {
+    c.text(grid::kGlyphX - 6 - text_width(clock, 1), grid::kBandY + 3, clock, 1, kInk);
+  }
+  const uint8_t* mark = bt == BtState::Connected    ? kRuneConnected
+                        : bt == BtState::Advertising ? kRuneAdvertising
+                        : wifi_up                    ? kWifiUp
+                                                     : kWifiCut;
+  c.bitmap1(grid::kGlyphX, grid::kBandY, 16, 15, mark, kInk);
   draw_battery(c, 160, grid::kBandY, battery_pct, external);
 }
 

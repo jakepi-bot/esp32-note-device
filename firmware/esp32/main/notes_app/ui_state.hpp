@@ -26,6 +26,8 @@ namespace hgp::notesui {
 struct Facts {
   bool wifi_up = false;        // the station holds an association
   bool clock_set = true;       // the clock has been set at least once
+  Stamp clock;                 // the wall clock's local fields; `valid` is the answer
+  BtState bt = BtState::Off;   // the radio's window, off outside the Phone screen
   uint64_t card_free_bytes = 0;
   int8_t battery_pct = -1;     // -1 unknown
   bool external = false;       // on a cable
@@ -49,7 +51,9 @@ class UiState {
 
   // The link, the clock, the card's free space and the battery: compared with
   // the snapshot, so a fact that moved between events still reaches the glass
-  // and one that did not costs no frame.
+  // and one that did not costs no frame. The comparison is where the flicker
+  // budget lives (t_3beb371a §5): a 1 % battery step from the noisy ADC is not a
+  // change, and nothing at all is published while a capture is running.
   Outcome set_facts(const Facts& facts, uint32_t now_ms);
 
   // A key. The card is read *before* the screen machine acts, so a press works
@@ -113,6 +117,9 @@ class UiState {
   bool capture_recording_ = false;
   bool capture_queued_ = false;
   uint32_t capture_elapsed_s_ = 0;
+  // The last power fact put on the glass: a 1 % ADC step waits until the step
+  // is 2 % or five minutes have passed (t_3beb371a §5).
+  uint32_t last_power_ms_ = 0;
 };
 
 }  // namespace hgp::notesui

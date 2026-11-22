@@ -45,8 +45,16 @@ The resting face, and what it returns to when a screen is left.
   `NOTHING LOST` (no card, so nothing can be deleted), `3 OF 7 SENT` during an
   upload (with a progress bar), `LAST 14:02` (the newest note's minute), or
   `BOOT TO RECORD` on an empty card.
-- There is **no clock on the resting face** on purpose: a minute tick would cost
-  sixty whole-panel refreshes an hour. Time appears only as a timestamp.
+- **The clock** sits in the band, `HH:MM`, blank until the device has had the
+  time once (SNTP, or `clock set` from the console). It is the one fact allowed to
+  repaint a resting face: it draws when the minute changes and only on Home, so
+  a minute costs one partial refresh (sixty an hour, which is why it is drawn at
+  scale 1 and only here). A minute that turns over in a menu is drawn by the
+  frame that returns Home.
+- **Bluetooth** takes the Wi-Fi glyph's box in the band while the radio has a
+  window open: a thin stem-and-lobes rune while it advertises, a 2 px stem while
+  a phone is connected. With the radio off the box is the Wi-Fi glyph again, so
+  the band never shifts a pixel.
 
 ## Recording
 
@@ -190,6 +198,13 @@ notes/
   window, the five minutes the Phone screen owns (held open by a connected
   phone), the minutes after a note, the retry while notes wait, and an explicit
   `phone wake`. At rest the controller is off.
+- The radio can be stopped and started again as often as the windows ask: the
+  NimBLE handles the host allocates for the app are cleared when the controller
+  deinitialises, so the second window after the radio has rested (a note saved,
+  `phone wake`, the Phone screen) allocates fresh ones. Without that clearing the
+  second window memsets through a freed pointer and the device panics and
+  reboots - seen at 152 s on `phone wake` after the boot window closed, and after
+  a note was saved, fixed in `port_ble.cpp`'s `stop_radio()`.
 - A PWR tap powers off gracefully: the recording is committed, the upload in
   flight is cancelled, the card is flushed and released, the station is stopped,
   and the battery latch drops. On USB the card is mounted again, because the
@@ -206,7 +221,10 @@ notes/
 Over USB at 115200: `notes status|list|record|stop|sync|poweroff|mount|format|prune`,
 `screen` for the panel image as hex, `about`, `battery`, `clock`, `power`, `radio`,
 `sd`, `wifi [on|off]`, `keys`, `ui` (`ui home` forces a full-refresh hand-over,
-`ui press boot|hold|pwr` presses a key from a host with no finger on the board),
+`ui press boot|hold|pwr` presses a key from a host with no finger on the board;
+the plain `ui` line also answers `ble off|advertising|connected` for the band's
+radio mark and `frames N`, the panel refreshes since boot, which is how an idle
+face is shown never to redraw),
 `key boot|hold|pwr` (the same press, answering with the screen it left behind, so
 `@ok boot tap -> screen home` is a tap the runtime refused and
 `@ok boot tap -> screen recording` is one it took), `phone pair|wake|allow|refuse`,

@@ -840,3 +840,111 @@ TEST("phone: closing the screen ends the window and returns to the menu") {
   CHECK(by_hold.effect == Effect::ClosePhoneWindow);
   CHECK(app.screen() == Screen::Menu);
 }
+
+// ---------------------------------------------------------------------------
+// Zone A (t_3beb371a §4): the clock and the Bluetooth mark share the band with
+// the queue count, the Wi-Fi glyph and the battery, and the last three do not
+// move a pixel to make room.
+
+namespace {
+
+uint64_t ink_hash(const uint16_t* fb, int x0, int y0, int x1, int y1) {
+  uint64_t h = 1469598103934665603ull;
+  for (int y = y0; y < y1; ++y) {
+    for (int x = x0; x < x1; ++x) {
+      h ^= (fb[y * 200 + x] & 1u);
+      h *= 1099511628211ull;
+    }
+  }
+  return h;
+}
+
+// Home as the glass gets it, from a snapshot.
+uint64_t home_band_hash(const Snapshot& snap, int x0, int y0, int x1, int y1) {
+  static uint16_t fb[200 * 200];
+  std::memset(fb, 0xFF, sizeof fb);
+  hg::Canvas canvas(fb, 200, 200, false);
+  ScreenDraw frame;
+  frame.screen = Screen::Home;
+  frame.home = build_home(snap);
+  draw(canvas, frame);
+  return ink_hash(fb, x0, y0, x1, y1);
+}
+
+Snapshot band_seed() {
+  Snapshot snap;
+  snap.card = true;
+  snap.wifi_up = true;
+  snap.battery_pct = 84;
+  snap.count_pending = 3;
+  return snap;
+}
+
+}  // namespace
+
+TEST("band: the clock takes its own slot and the glyphs keep theirs") {
+  Snapshot with_clock = band_seed();
+  with_clock.clock_set = true;
+  std::snprintf(with_clock.clock_text, sizeof with_clock.clock_text, "14:02");
+  Snapshot without = band_seed();
+  without.clock_set = false;
+
+  // The Wi-Fi box and the battery are byte-identical with and without a clock:
+  // this is the \"the band does not shift\" rule, as ink.
+  CHECK(home_band_hash(with_clock, 136, 8, 189, 24) == home_band_hash(without, 136, 8, 189, 24));
+  // And the left slot changed: the time is drawn.
+  CHECK(home_band_hash(with_clock, 12, 8, 133, 24) != home_band_hash(without, 12, 8, 133, 24));
+
+  // The time is left of the glyph box, not under it: no ink in the 2 px gutter
+  // at 134..135, and ink in the clock's own columns.
+  static uint16_t fb[200 * 200];
+  std::memset(fb, 0xFF, sizeof fb);
+  hg::Canvas canvas(fb, 200, 200, false);
+  ScreenDraw frame;
+  frame.screen = Screen::Home;
+  frame.home = build_home(with_clock);
+  draw(canvas, frame);
+  for (int y = 8; y < 24; ++y) {
+    for (int x = 132; x < 136; ++x) CHECK(fb[y * 200 + x] != 0x0000);
+  }
+  CHECK(ink_hash(fb, 96, 8, 132, 24) != home_band_hash(without, 96, 8, 132, 24));
+
+  // A snapshot from a first frame that never got the clock says nothing rather
+  // than 00:00.
+  Snapshot fresh;
+  CHECK(build_home(fresh).clock[0] == '\0');
+  CHECK(std::string(build_home(with_clock).clock) == "14:02");
+}
+
+TEST("band: the Bluetooth mark is the radio's answer, in the Wi-Fi box") {
+  Snapshot off = band_seed();
+  Snapshot advertising = band_seed();
+  advertising.bt = BtState::Advertising;
+  Snapshot connected = band_seed();
+  connected.bt = BtState::Connected;
+
+  const uint64_t off_box = home_band_hash(off, 136, 8, 153, 24);
+  const uint64_t adv_box = home_band_hash(advertising, 136, 8, 153, 24);
+  const uint64_t on_box = home_band_hash(connected, 136, 8, 153, 24);
+  CHECK(off_box != adv_box);
+  CHECK(off_box != on_box);
+  CHECK(adv_box != on_box);  // advertising is thin, connected is 2 px
+
+  // Off is the Wi-Fi glyph, in both of its states: the radio's mark never
+  // silently stands in for a link that is down.
+  Snapshot wifi_down = off;
+  wifi_down.wifi_up = false;
+  CHECK(off_box != home_band_hash(wifi_down, 136, 8, 153, 24));
+
+  // Nothing bleeds out of the box into the 8 px gap the battery starts after.
+  static uint16_t fb[200 * 200];
+  std::memset(fb, 0xFF, sizeof fb);
+  hg::Canvas canvas(fb, 200, 200, false);
+  ScreenDraw frame;
+  frame.screen = Screen::Home;
+  frame.home = build_home(connected);
+  draw(canvas, frame);
+  for (int y = 8; y < 24; ++y) {
+    for (int x = 152; x < 160; ++x) CHECK(fb[y * 200 + x] != 0x0000);
+  }
+}

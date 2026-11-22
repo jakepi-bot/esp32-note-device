@@ -156,7 +156,7 @@ y=186  └───────────────────────�
 
 | Zone | x | first row | content budget | carries |
 |---|---|---|---|---|
-| A · facts | 12 … 188 | glyph top **y = 8** | band height 15 px, ink to y = 22 | queue state, Wi-Fi, battery |
+| A · facts | 12 … 188 | glyph top **y = 8** | band height 15 px, ink to y = 22 | queue state, the clock, Wi-Fi / Bluetooth, battery |
 | rule | 12 … 188 | **y = 27** | 1 px | the only rule on a one-rule screen |
 | B · content | 12 … 188 | **y = 32** | to y = 138 (2-line footer) or y = 156 (1-line) | everything the screen is *about* |
 | rule | 12 … 188 | **y = 144** or **y = 162** | 1 px | closes the page |
@@ -168,24 +168,39 @@ element allowed to break the margin (§3.4).
 
 ### 3.2 Zone A is facts, and facts do not tick
 
-The band carries three things, all of them event-driven:
+The band carries four things, all of them event-driven:
 
 | Slot | x | Size | Content |
 |---|---|---|---|
-| queue | 12 | text, ≤ 10 cols | `3 TO SEND` / `ALL SENT` / `NO CARD` / blank |
-| Wi-Fi | 136 | 16 × 15 bitmap | up (uncut) or down (2 px cut) |
+| queue | 12 | text at scale 1, ≤ 21 cols | `3 TO SEND` / `ALL SENT` / `NO CARD` / blank |
+| clock | right of queue | text at scale 1 | `14:02`, blank until the clock has been set once |
+| Wi-Fi / Bluetooth | 136 | 16 × 15 bitmap | Wi-Fi up (uncut) or down (2 px cut); the Bluetooth rune while the radio has a window open (thin = advertising, 2 px stem = a phone connected) |
 | battery | 160 | 28 × 15 procedural | fill, bolt, or `?` |
 
-**There is deliberately no clock in the band.** A minute-accurate clock on the
-resting face costs 60 panel updates an hour, and each partial refresh re-drives
-every pixel of the whole panel (§15.2). The plan's idle target is **under 1 mA**
-with nothing queued, and a ticking clock is incompatible with it. Time appears
-where it is a *timestamp* rather than a clock — the notes list and a note's own
-screen — so the only thing that changes on the glass is a thing that happened.
+**The clock is the one exception, and it is bounded.** The original rule was no
+clock at all: a minute-accurate clock costs 60 panel updates an hour and each
+partial refresh re-drives every pixel of the whole panel (§15.2). The device now
+carries a clock anyway, because a notes device with no way to read the time is a
+notes device you cannot date a note with. The cost is bounded by four rules: it
+is drawn on **Home only** (a minute that turns over in a menu or on the
+recording face is adopted into the snapshot and drawn by the next frame that
+returns Home, not by a refresh of its own); it repaints **only when the HH:MM
+text changes**, so the poll that reads the clock costs nothing; that poll runs
+every **10 s**, not every second; and a battery that moves by one percent — the
+ADC's own noise — is not a change. Measured on the board: two minutes on Home
+produced exactly two refreshes, one per minute; two minutes in a menu produced
+none from the poll.
+
+**Bluetooth is drawn in the Wi-Fi glyph's box, never beside it.** The mark is the
+radio's answer, the same three states `radio` prints (off / advertising /
+connected), and the box is the reason the band does not shift when it appears.
+The Wi-Fi glyph keeps the slot whenever the radio is off, which is every state
+except the boot window, a note's window and the Phone screen's window.
 
 This is the single most useful rule in the document: **nothing redraws unless
-something changed.** The only timers in the whole UI are the recording counter and
-the playback position, and both run only while the user is holding a session open.
+something changed.** The only timers in the whole UI are the recording counter,
+the playback position and the minute of the clock, and the first two run only
+while the user is holding a session open.
 
 ### 3.3 The footer is one label
 
@@ -348,7 +363,7 @@ Every combination above is rendered in `01`–`07` of the wireframe set.
 | battery fill | PARTIAL | fill is **growth-only in one direction per charge cycle**; see §15.3 |
 | Wi-Fi icon up ↔ down | PARTIAL | 16 × 15 region |
 | upload progress bar | PARTIAL | **growth-only, so it leaves no residue at all** |
-| *the clock* | — | there is no clock; see §3.2 |
+| *the clock* | minutes *n* × 1, Home only | the HH:MM text changed; a minute that turns over elsewhere is drawn by the next Home frame |
 
 The one transition on this screen that must be full is `UPLOADING → READY`,
 because it changes three slots at once and a partial leaves the hero's word

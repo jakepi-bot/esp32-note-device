@@ -157,8 +157,13 @@ class NotesUi {
   uint16_t pending_dirty_ = notesui::DirtyNone;
   uint32_t last_facts_ms_ = 0;
   uint32_t last_slow_facts_ms_ = 0;
+  // Every frame this UI has put on the panel since boot. It is the number the
+  // flicker budget is measured in (t_3beb371a §5): `ui` prints it, so two
+  // readings a minute apart answer "did the glass repaint while nothing
+  // happened" without a finger on the board or a log line per refresh.
+  uint32_t frames_ = 0;
   // The Phone screen polls the port on its own clock: the window's deadline and
-  // a phone connecting are not facts the other screens' 1 s poll would carry.
+  // a phone connecting are facts the band's 10 s poll should not have to carry.
   uint32_t last_phone_ms_ = 0;
   std::atomic<Play> play_state_{Play::Idle};
 

@@ -572,6 +572,15 @@ bool stop_radio() {
     ESP_LOGW(TAG, "Bluetooth controller did not deinit (%s)", esp_err_to_name(err));
     return false;
   }
+  // The npl handles are pointers into the host's own memory, which deinit has
+  // just freed. Cleared here, so the next start_radio() callocs fresh ones; left
+  // set, `npl_freertos_event_init` memsets through a stale pointer, and the
+  // second window after the radio rested (the boot window closing, then a note
+  // saved or `phone wake`) panics with StoreProhibited at 0xa5a5a5a5.
+  g_update_ev.event = nullptr;
+  g_forget_ev.event = nullptr;
+  g_answer_ev.event = nullptr;
+  g_drop.co = nullptr;
   ESP_LOGI(TAG, "Bluetooth radio off: %s", "the chip can light-sleep again");
   return true;
 }

@@ -27,6 +27,7 @@ inline constexpr int kLeft = 12;         // left margin
 inline constexpr int kRight = 188;       // right edge of content
 inline constexpr int kWidth = kRight - kLeft;  // 176 px, 14 columns at scale 2
 inline constexpr int kBandY = 8;         // zone A, glyph top
+inline constexpr int kGlyphX = 136;      // the Wi-Fi / Bluetooth box (§3.2)
 inline constexpr int kRuleY = 27;        // the rule under the band
 inline constexpr int kRowTop = 32;       // zone B, first row
 inline constexpr int kRowPitch = 18;
@@ -58,7 +59,11 @@ struct ScreenDraw {
 void draw(hg::Canvas& canvas, const ScreenDraw& draw);
 
 // The pieces, exposed for the host test's per-screen checks.
-void draw_band(hg::Canvas& canvas, const char* queue, bool wifi_up, int8_t battery_pct, bool external);
+// Zone A. `queue` and `clock` share the left slot at scale 1; the glyphs keep
+// the slots §3.2 gives them, so a band with a clock looks like a band without
+// one. `bt` takes the Wi-Fi box whenever the radio's window is up.
+void draw_band(hg::Canvas& canvas, const char* queue, const char* clock, bool wifi_up, BtState bt,
+               int8_t battery_pct, bool external);
 void draw_selection(hg::Canvas& canvas, int row_y);
 void draw_panel_text_on(hg::Canvas& canvas, int x, int y, const char* text, bool on_bar);
 void draw_progress(hg::Canvas& canvas, int y, uint8_t pct);

@@ -2,8 +2,21 @@
 #include "notes_app/ui_state.hpp"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 namespace hgp::notesui {
+namespace {
+
+// The flicker budget (t_3beb371a §5). The ADC moves a percent or two between
+// reads with nothing happening, and every publish is a whole-panel waveform, so
+// a fact has to earn its frame.
+constexpr int kBatteryStepPct = 2;                          // ignore the 1 % noise
+constexpr uint32_t kBatteryRateMs = 5u * 60u * 1000u;       // and no more than this often
+constexpr uint64_t kCardFreeSlackBytes = 1ull << 20;        // 1 MiB: a write moves free space
+
+}  // namespace
 
 void UiState::begin(const Snapshot& seed, notes::Store* store) {
   store_ = store;
@@ -17,6 +30,9 @@ void UiState::begin(const Snapshot& seed, notes::Store* store) {
   app_.begin(snap_);
   snap_.stub_first = snap_.stub_rows = 0;
   load_window();
+  // The boot frame already carries the seed's battery, so the five-minute power
+  // window starts at power-on rather than at the first poll.
+  last_power_ms_ = 1;
 }
 
 void UiState::load_counts() {
@@ -85,20 +101,61 @@ Outcome UiState::publish(uint32_t now_ms, uint16_t dirty, Refresh at_least) {
 }
 
 Outcome UiState::set_facts(const Facts& facts, uint32_t now_ms) {
+  // A capture owns the glass (t_3beb371a §5): the 30 s counter is the only
+  // repaint it allows, so nothing here is published or even adopted - the facts
+  // stay in the caller's cache and the first poll after the stop compares them
+  // with what is still drawn, which is what makes the band correct again without
+  // a repaint in the middle of the note.
+  if (capture_recording_ || snap_.recording) return Outcome{};
+
+  char clock_text[6] = {};
+  if (facts.clock.valid) format_clock(facts.clock, clock_text);
+
   uint16_t dirty = DirtyNone;
   if (facts.wifi_up != snap_.wifi_up) dirty |= DirtyLink;
-  if (facts.clock_set != snap_.clock_set) dirty |= DirtyClock;
-  if (facts.card_free_bytes != snap_.card_free_bytes) dirty |= DirtyAbout;
+  if (facts.bt != snap_.bt) dirty |= DirtyLink;  // both live in the band
+  const bool had_clock = snap_.clock_text[0] != '\0';
+  const bool has_clock = clock_text[0] != '\0';
+  if (facts.clock_set != snap_.clock_set || had_clock != has_clock ||
+      (has_clock && std::strcmp(clock_text, snap_.clock_text) != 0)) {
+    dirty |= DirtyClock;
+  }
+
+  // The battery: a step of one percent is the ADC talking, not the cell. A step
+  // of two or more draws, and so does a smaller one once five minutes have
+  // passed, so the level never drifts far from the glass while nothing happens.
+  const bool external_changed = facts.external != snap_.external;
+  const bool pct_changed = facts.battery_pct != snap_.battery_pct;
+  const int step = facts.battery_pct >= 0 && snap_.battery_pct >= 0
+                       ? std::abs(static_cast<int>(facts.battery_pct) - static_cast<int>(snap_.battery_pct))
+                       : 100;
+  const bool rate_due = last_power_ms_ == 0 || now_ms - last_power_ms_ >= kBatteryRateMs;
   const bool low = facts.battery_pct >= 0 && facts.battery_pct <= 10 && !facts.external;
-  if (facts.battery_pct != snap_.battery_pct || facts.external != snap_.external || low != snap_.low_power)
-    dirty |= DirtyPower;
+  const bool power_dirty = external_changed || low != snap_.low_power ||
+                           (pct_changed && (step >= kBatteryStepPct || rate_due));
+
+  const uint64_t free_now = facts.card_free_bytes, free_was = snap_.card_free_bytes;
+  const uint64_t free_moved = free_now > free_was ? free_now - free_was : free_was - free_now;
+  const bool about_dirty = free_moved >= kCardFreeSlackBytes;
+
+  if (power_dirty) dirty |= DirtyPower;
+  if (about_dirty) dirty |= DirtyAbout;
 
   snap_.wifi_up = facts.wifi_up;
   snap_.clock_set = facts.clock_set;
-  snap_.card_free_bytes = facts.card_free_bytes;
-  snap_.battery_pct = facts.battery_pct;
-  snap_.external = facts.external;
-  snap_.low_power = low;
+  std::snprintf(snap_.clock_text, sizeof snap_.clock_text, "%s", clock_text);
+  snap_.bt = facts.bt;
+  if (power_dirty) {
+    snap_.battery_pct = facts.battery_pct;
+    snap_.external = facts.external;
+    snap_.low_power = low;
+    last_power_ms_ = now_ms == 0 ? 1 : now_ms;
+  }
+  if (about_dirty) snap_.card_free_bytes = facts.card_free_bytes;
+
+  // The clock is a Home fact: a minute that turns over on any other screen is
+  // adopted but not drawn, and the full frame that returns Home carries it.
+  if ((dirty & DirtyClock) && app_.screen() != Screen::Home) dirty &= ~DirtyClock;
   if (dirty == DirtyNone) return Outcome{};
   return publish(now_ms, dirty, Refresh::Partial);
 }

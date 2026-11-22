@@ -46,6 +46,41 @@ table:
 
 `ui_device.cpp` translates that into `request_full_refresh()` before the flush.
 
+## The band, and the flicker budget
+
+Zone A draws four facts and owns the only polling the screens do
+(`ui_state.cpp`, `ui_render.cpp` `draw_band`, `notes_app/ui_device.cpp`
+`read_facts`). The spec's §3.2 is the rule; the measured behaviour is:
+
+| Fact | Where it comes from | What it takes to repaint |
+|---|---|---|
+| queue count | `Runtime::refresh_counts()`, on a count that moved | a count that actually changed |
+| clock `HH:MM` | `ports_.system->wall_time()` → `Facts::clock` → `Snapshot::clock_text[6]` | the text changing, on Home, while idle |
+| Wi-Fi | `Wifi::current()` | the association coming or going |
+| Bluetooth | `PhoneLink::radio_up()` / `phone_window()` → `Facts::bt` → `Snapshot::bt` | the radio's window coming or going |
+| battery | the ADC, every 60 s | a ≥ 2 % step, or any step once 5 minutes have passed |
+| card free space | `statfs`, every 60 s | a move of ≥ 1 MiB |
+
+Three of those rules are the flicker fix, and each is one line of intent rather
+than a timer:
+
+* `UiState::set_facts` compares instead of publishing. A one-percent battery move
+  is the ADC's own noise on this board, so it is neither drawn nor adopted; the
+  glass keeps the level it drew until a 2 % step or the five-minute window.
+* `kFactsMs` is 10 s (it was 1 s). The card's free space and the battery keep
+  their own 60 s path, and `Snapshot::bt` rides the 10 s one.
+* `set_facts` returns before anything is adopted while `capture_recording_` or
+  `Snapshot::recording` is set, so a capture's only repaint is the counter — the
+  first poll after the stop is what brings the band up to date, without a frame
+  in the middle of the note.
+
+`ui` answers `..., clock set, ble off|advertising|connected, frames N`: the mark
+is the radio's answer in the same spelling `radio` prints, and `frames N` counts
+every panel refresh since boot, which is how "nothing repainted" is measured over
+the console without a log line per refresh. On the board: two minutes on Home
+moved it by exactly two (the clock's minutes), two minutes in a menu by none, and
+a 95 s capture by three, 29.4 s apart.
+
 ## The recording face follows the runtime
 
 `ScreenApp` does not decide whether a capture is running: `Runtime::recording()`

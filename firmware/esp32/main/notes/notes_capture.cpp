@@ -121,6 +121,7 @@ bool Capture::start(Store& store, std::string_view id, uint32_t max_seconds, uin
   full_ = false;
   space_out_ = false;
   failed_ = false;
+  discarded_ = false;
   uint8_t header[44];
   wav_header(header, 0);
   if (std::fwrite(header, 1, sizeof(header), file_) != sizeof(header)) {
@@ -185,6 +186,19 @@ bool Capture::finish(Meta& meta, std::string& error) {
     std::clearerr(file_);
     data_bytes = file_data_bytes();
   }
+  // A capture with less than a quarter second in it is not a note: it is a tap
+  // let go, or a microphone that never delivered. Nothing is committed - the
+  // partial file and the folder go, and no note.json is ever written - so no
+  // empty row can reach pending/, the queue's no-recording sweep never sees a
+  // fresh one, and the counts on the glass stay honest. abort() closes the file
+  // and clears the member state; the discard flag is set after it because that
+  // is this object's answer to the caller, not the file tree's.
+  if (data_bytes < kMinNoteDataBytes) {
+    abort();
+    discarded_ = true;
+    error = "no audio";
+    return false;
+  }
   uint8_t header[44];
   wav_header(header, data_bytes);
   // Patching the header overwrites bytes already on the card, so it costs no
@@ -198,11 +212,6 @@ bool Capture::finish(Meta& meta, std::string& error) {
   close();
   if (failed || !patched) {
     error = "the card stopped accepting writes";
-    abort();
-    return false;
-  }
-  if (data_bytes == 0) {
-    error = "the microphone delivered nothing";
     abort();
     return false;
   }
@@ -246,6 +255,7 @@ void Capture::abort() {
   full_ = false;
   space_out_ = false;
   failed_ = false;
+  discarded_ = false;
 }
 
 }  // namespace hgp::notes

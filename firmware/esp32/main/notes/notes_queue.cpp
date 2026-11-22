@@ -343,4 +343,16 @@ std::string deleted_failed_answer(uint32_t count) {
   return "@ok deleted " + std::to_string(count) + " failed";
 }
 
+std::string discarded_answer(std::string_view id) {
+  std::string out = "@ok discarded ";
+  out += id;
+  out += ": no audio";
+  return out;
+}
+
+std::string pruned_answer(uint32_t sent, uint32_t pending, uint32_t failed) {
+  return "@ok pruned " + std::to_string(sent) + " sent, " + std::to_string(pending) +
+         " empty pending, " + std::to_string(failed) + " empty failed";
+}
+
 }  // namespace hgp::notes

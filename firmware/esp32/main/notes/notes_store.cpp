@@ -311,4 +311,29 @@ uint32_t Store::prune_sent(size_t keep) {
   return removed;
 }
 
+Store::PruneCounts Store::prune_notes(size_t keep_sent) {
+  PruneCounts out;
+  out.sent = prune_sent(keep_sent);
+  for (NoteState state : {NoteState::Pending, NoteState::Failed}) {
+    for (const auto& id : list(state)) {
+      // locate() looks in pending/ first: an id that also lives there is the
+      // pending row's to sweep, not this state's, and deleting it from the
+      // wrong folder is how a note goes missing.
+      NoteState where = state;
+      if (!locate(id, where) || where != state) continue;
+      // The uploader's own no-audio line: a missing recording, a zero-length
+      // one, and a bare 44-byte header are all empty. A note with audio is
+      // never touched, however short.
+      if (audio_bytes(state, id) >= kMinAudioBytes) continue;
+      if (!erase(id)) continue;
+      if (state == NoteState::Pending) {
+        ++out.pending;
+      } else {
+        ++out.failed;
+      }
+    }
+  }
+  return out;
+}
+
 }  // namespace hgp::notes

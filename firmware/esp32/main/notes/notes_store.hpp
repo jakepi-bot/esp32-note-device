@@ -85,6 +85,21 @@ class Store {
   uint32_t erase_failed();
   // Keeps the newest `keep` entries under sent/ (spec §7.2: prune over 500).
   uint32_t prune_sent(size_t keep = 500);
+  // What `notes prune` swept, by state.
+  struct PruneCounts {
+    uint32_t sent = 0;     // sent/ entries past `keep`
+    uint32_t pending = 0;  // pending/ notes with no audio
+    uint32_t failed = 0;   // failed/ notes with no audio
+    uint32_t total() const { return sent + pending + failed; }
+  };
+  // `notes prune`: sent/ down to `keep_sent`, and every empty row out of
+  // pending/ and failed/. "Empty" is the uploader's own no-audio line
+  // (kMinAudioBytes): a recording that is missing, zero-length, or nothing but
+  // its 44-byte WAV header. Nothing that holds audio is touched, so a note the
+  // hub might still take survives. An id that lives in more than one state is
+  // only removed from the first state that holds it (pending, then failed), the
+  // same rule erase() uses.
+  PruneCounts prune_notes(size_t keep_sent = 500);
 
  private:
   bool make_dir(const std::string& path);

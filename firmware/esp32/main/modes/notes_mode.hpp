@@ -207,6 +207,9 @@ class NotesModeImpl final : public NotesMode {
   // Why the last `notes stop` stored nothing (empty: it did). finish_note runs
   // for a button tap and a cap as well, so the console reads this afterwards.
   std::string stop_error_;
+  // The last stop threw the capture away because it held no audio (a tap let
+  // go): the console answers that as a discard, not as a failed note.
+  bool stop_discarded_ = false;
   bool formatting_ = false;   // `notes format` runs on its own task: a format
                               // takes tens of seconds and the loop must live
 };

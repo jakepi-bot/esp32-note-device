@@ -182,6 +182,10 @@ bool NotesModeImpl::on_cancel_button() {
 
 void NotesModeImpl::start_note(uint32_t now) {
   if (mode_ != Mode::Idle) return;
+  // A new recording is not the previous stop's story: a refusal below must not
+  // answer with the last discard's reason.
+  stop_error_.clear();
+  stop_discarded_ = false;
   if (app_->in_turn()) {
     ESP_LOGW(TAG, "not recording a note: Hermes is in a turn");
     return;
@@ -235,6 +239,7 @@ void NotesModeImpl::start_note(uint32_t now) {
   mode_ = Mode::Recording;
   rec_started_ms_ = now;
   stop_error_.clear();
+  stop_discarded_ = false;
   ui_->set(UiPhase::Recording);
   mic_->start(notes::kSampleRate);
   ESP_LOGI(TAG, "recording %s (cap %d s)", meta_.note_id.c_str(), config_->note_max_s());
@@ -245,6 +250,7 @@ void NotesModeImpl::finish_note(uint32_t now, const char* why) {
   if (mode_ != Mode::Recording) return;
   if (mic_) mic_->stop();
   mode_ = Mode::Idle;
+  stop_discarded_ = false;
   // The microphone is stopped, so nothing new is pushed: wait for the writer
   // to have the rest on the card before the file is finished. 30 s is the
   // card's own pathological worst case, not a normal wait.
@@ -252,6 +258,21 @@ void NotesModeImpl::finish_note(uint32_t now, const char* why) {
   std::string error;
   const bool capped = capture_.full();
   if (!capture_.finish(meta_, error)) {
+    if (capture_.discarded()) {
+      // A tap that was let go, or a microphone that never delivered: nothing was
+      // said and nothing is kept. finish() already removed the partial file and
+      // the note folder, and no note.json is written, so no row ever reaches
+      // pending/ and the uploader's no-recording sweep never sees this note.
+      // This is not a card fault: the card stays mounted, the face stays on
+      // Home, and the one line says why nothing was saved.
+      ESP_LOGW(TAG, "note %s discarded: no audio", meta_.note_id.c_str());
+      stop_error_ = "no audio";
+      stop_discarded_ = true;
+      ui_->set(UiPhase::Idle);
+      refresh_counts(false);
+      if (ui_) ui_->set_status("No audio: nothing saved");
+      return;
+    }
     ESP_LOGW(TAG, "note not saved (%s): %s", why, error.c_str());
     stop_error_ = error.empty() ? "the recording was not usable" : error;
     ui_->set(UiPhase::Error, error);
@@ -837,6 +858,9 @@ std::string NotesModeImpl::console(std::string_view args) {
     const std::string id = meta_.note_id;
     finish_note(now_ms(), "console");
     if (mode_ == Mode::Recording) return "@error the note was not saved";
+    // A capture discarded for having no audio is not a failed note: nothing was
+    // kept, and the card was never at fault.
+    if (stop_discarded_) return notes::discarded_answer(id);
     // finish_note leaves the mode Idle on every path, so the reason it stored
     // nothing is what says whether the console may claim a note.
     if (!stop_error_.empty()) return "@error the note was not saved: " + stop_error_;
@@ -958,9 +982,10 @@ std::string NotesModeImpl::console(std::string_view args) {
     return buf;
   }
   if (cmd == "prune") {
-    const uint32_t removed = store_.prune_sent();
+    if (mode_ == Mode::Recording) return "@error stop the recording first";
+    const notes::Store::PruneCounts removed = store_.prune_notes();
     refresh_counts(true);
-    return "@ok pruned " + std::to_string(removed);
+    return notes::pruned_answer(removed.sent, removed.pending, removed.failed);
   }
   return "@error usage: notes [status | record | stop | sync | ble | list | mount | format | prune | retention | delete]";
 }

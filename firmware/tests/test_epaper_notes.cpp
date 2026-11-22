@@ -688,6 +688,87 @@ TEST("a note whose recording is missing or empty is quarantined, not retried") {
   CHECK_EQ(store.pending_ids().size(), size_t(1));
 }
 
+TEST("a capture under a quarter second is discarded: no file, no note.json, no pending row") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  Meta m = sample_meta();
+  m.note_id = make_note_id(m.device_id, 1795140312, 31);
+
+  // A tap let go after one 100 ms block: a WAV header and 4,800 bytes of audio.
+  Capture capture;
+  std::string error;
+  CHECK(capture.start(store, m.note_id, 300, error));
+  std::vector<int16_t> block(2400, 900);  // 100 ms at 24 kHz
+  capture.feed(block.data(), block.size());
+  CHECK_EQ(capture.bytes(), uint32_t(4800));
+  CHECK(!capture.finish(m, error));
+  CHECK(capture.discarded());  // the object's answer: not a card fault
+  CHECK_EQ(error, std::string("no audio"));
+  struct stat st{};
+  CHECK(stat(store.audio_path(NoteState::Pending, m.note_id).c_str(), &st) != 0);
+  CHECK(stat((store.audio_path(NoteState::Pending, m.note_id) + ".part").c_str(), &st) != 0);
+  CHECK(stat(store.meta_path(NoteState::Pending, m.note_id).c_str(), &st) != 0);
+  CHECK(stat(store.note_dir(NoteState::Pending, m.note_id).c_str(), &st) != 0);
+  CHECK_EQ(store.count(NoteState::Pending), uint32_t(0));  // nothing reached the card
+  CHECK_EQ(store.pending_ids().size(), size_t(0));         // nothing reached the queue
+  CHECK_EQ(store.pending_bytes(), uint32_t(0));
+
+  // A capture with no samples at all takes the same path: a bare 44-byte header
+  // is not a note, and the card is never blamed for it.
+  Meta bare = m;
+  bare.note_id = make_note_id(m.device_id, 1795140313, 32);
+  Capture silent;
+  CHECK(silent.start(store, bare.note_id, 300, error));
+  CHECK(!silent.finish(bare, error));
+  CHECK(silent.discarded());
+  CHECK(stat(store.note_dir(NoteState::Pending, bare.note_id).c_str(), &st) != 0);
+  CHECK_EQ(store.count(NoteState::Pending), uint32_t(0));
+
+  // The flag belongs to the capture that set it: the next start is a fresh
+  // recording, not a carried-over discard.
+  CHECK(silent.start(store, bare.note_id, 300, error));
+  CHECK(!silent.discarded());
+  silent.abort();
+}
+
+TEST("the shortest note finish() keeps is past the uploader's no-audio line, so its sweep never fires") {
+  // The two lines that meet here: a capture under kMinNoteDataBytes is discarded
+  // at stop, and kMinAudioBytes is the uploader's own "no recording" line whose
+  // quarantine sweep moves a pending note to failed/. As long as the stop line
+  // is above the sweep line, a note that exists was never empty.
+  CHECK_EQ(kMinNoteDataBytes, uint32_t(12000));  // 0.25 s at 24 kHz PCM16 mono
+  CHECK(kMinNoteDataBytes > kMinAudioBytes);
+  CHECK(plan_upload(44 + kMinNoteDataBytes) == QueueAction::Upload);
+
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  Meta m = sample_meta();
+  m.note_id = make_note_id(m.device_id, 1795140312, 33);
+  Capture capture;
+  std::string error;
+  CHECK(capture.start(store, m.note_id, 300, error));
+  std::vector<int16_t> block(2400, 700);                                 // 100 ms
+  for (int i = 0; i < 2; ++i) capture.feed(block.data(), block.size());  // 9,600 B
+  std::vector<int16_t> tail(1200, 700);                                  // +2,400 B = 12,000
+  capture.feed(tail.data(), tail.size());
+  CHECK_EQ(capture.bytes(), kMinNoteDataBytes);
+  CHECK(capture.finish(m, error));  // exactly the line: kept
+  CHECK(!capture.discarded());
+  CHECK_EQ(m.bytes, kMinNoteDataBytes);
+  CHECK_EQ(m.duration_s, 1u);  // the contract's floor, never 0
+
+  // note.json is the commit (the mode writes it after finish()), so a note that
+  // exists is one the sweep takes.
+  CHECK(store.write_meta(m.note_id, m, error));
+  CHECK_EQ(store.pending_ids().size(), size_t(1));
+  const uint64_t file = store.audio_bytes(NoteState::Pending, m.note_id);
+  CHECK_EQ(file, uint64_t(44 + kMinNoteDataBytes));
+  CHECK(plan_upload(file) == QueueAction::Upload);  // not Quarantine: no move to failed/
+  CHECK_EQ(store.count(NoteState::Failed), uint32_t(0));
+}
+
 TEST("delete removes a note's audio, then its note.json, then the folder") {
   TempDir dir;
   Store store(dir.path);
@@ -746,6 +827,74 @@ TEST("a failed note deletes one at a time, and --failed empties the folder") {
   CHECK_EQ(store.erase_failed(), uint32_t(0));  // already empty
 }
 
+TEST("notes prune deletes empty pending and failed rows, and keeps every note with audio") {
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  std::string error;
+
+  // What the card held while this bug was live: a pending note with note.json
+  // and no recording.wav (the "0 B queued" row, 00:00 OF 0:00 on the glass), one
+  // with nothing but the 44-byte header, the same two under failed/, and a dead
+  // folder that never got its note.json.
+  const std::string empty_pending = make_note_id("hg-0123456789abcdef", 1795140312, 41);
+  const std::string header_pending = make_note_id("hg-0123456789abcdef", 1795140313, 42);
+  const std::string empty_failed = make_note_id("hg-0123456789abcdef", 1795140314, 43);
+  const std::string header_failed = make_note_id("hg-0123456789abcdef", 1795140315, 44);
+  const std::string half_pending = make_note_id("hg-0123456789abcdef", 1795140316, 45);
+  const std::string good_pending = make_note_id("hg-0123456789abcdef", 1795140317, 46);
+  for (const std::string* id : {&empty_pending, &header_pending, &empty_failed, &header_failed}) {
+    CHECK(store.create_note(*id, error));
+    Meta m = sample_meta();
+    m.note_id = *id;
+    m.idempotency_key = *id;
+    CHECK(store.write_meta(*id, m, error));
+  }
+  uint8_t header[44] = {};
+  wav_header(header, 0);
+  CHECK(store.move(empty_failed, NoteState::Pending, NoteState::Failed));
+  CHECK(store.move(header_failed, NoteState::Pending, NoteState::Failed));
+  write_bytes(store.audio_path(NoteState::Pending, header_pending), header, sizeof(header));
+  write_bytes(store.audio_path(NoteState::Failed, header_failed), header, sizeof(header));
+  CHECK(store.create_note(half_pending, error));  // no audio, no note.json
+  CHECK(make_note(store, good_pending));          // 45 bytes: audio the hub takes
+
+  CHECK_EQ(store.count(NoteState::Pending), uint32_t(4));
+  CHECK_EQ(store.count(NoteState::Failed), uint32_t(2));
+  const Store::PruneCounts swept = store.prune_notes();
+  CHECK_EQ(swept.pending, 3u);  // the two empty rows and the dead folder
+  CHECK_EQ(swept.failed, 2u);   // the missing one and the header-only one
+  CHECK_EQ(swept.sent, 0u);
+  CHECK_EQ(swept.total(), 5u);
+  CHECK_EQ(store.count(NoteState::Pending), uint32_t(1));  // only the note with audio
+  CHECK_EQ(store.count(NoteState::Failed), uint32_t(0));
+  CHECK_EQ(store.pending_ids().size(), size_t(1));
+  CHECK_EQ(store.pending_ids()[0], good_pending);
+  struct stat st{};
+  CHECK(stat(store.note_dir(NoteState::Failed, header_failed).c_str(), &st) != 0);
+  CHECK(stat(store.note_dir(NoteState::Pending, empty_pending).c_str(), &st) != 0);
+
+  // A second run finds nothing: pruning is idempotent.
+  CHECK_EQ(store.prune_notes().total(), 0u);
+  CHECK_EQ(store.count(NoteState::Pending), uint32_t(1));
+
+  // sent/ still keeps the newest `keep`, and the one answer carries all three
+  // counts so one console line says what the whole sweep did.
+  std::vector<std::string> sent_ids;
+  for (unsigned i = 1; i <= 3; ++i) {
+    const std::string id = make_note_id("hg-0123456789abcdef", 1795140400 + static_cast<int64_t>(i), 50 + i);
+    CHECK(make_note(store, id));
+    CHECK(store.move(id, NoteState::Pending, NoteState::Sent));
+    sent_ids.push_back(id);
+  }
+  const Store::PruneCounts sent = store.prune_notes(1);
+  CHECK_EQ(sent.sent, 2u);
+  CHECK_EQ(sent.pending, 0u);
+  CHECK_EQ(sent.failed, 0u);
+  CHECK_EQ(store.count(NoteState::Sent), uint32_t(1));
+  CHECK_EQ(store.list(NoteState::Sent)[0], sent_ids[2]);  // the newest survived
+}
+
 TEST("a half-written note folder deletes, and an id outside the tree does not") {
   TempDir dir;
   Store store(dir.path);
@@ -790,6 +939,8 @@ TEST("the delete answers are the exact strings the console prints") {
   CHECK_EQ(unknown_note_answer("hg-1"), std::string("@error unknown note hg-1"));
   CHECK_EQ(deleted_failed_answer(0), std::string("@ok deleted 0 failed"));
   CHECK_EQ(deleted_failed_answer(12), std::string("@ok deleted 12 failed"));
+  CHECK_EQ(pruned_answer(2, 0, 9), std::string("@ok pruned 2 sent, 0 empty pending, 9 empty failed"));
+  CHECK_EQ(discarded_answer("hg-1"), std::string("@ok discarded hg-1: no audio"));
 }
 
 TEST("a read that stops short of the card's size is a read failure, not the end of the file") {

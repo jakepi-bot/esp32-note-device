@@ -29,6 +29,16 @@ namespace hgp::notes {
 // The 44-byte canonical WAV header for `data_bytes` of PCM16 mono at 24 kHz.
 void wav_header(uint8_t out[44], uint32_t data_bytes, uint32_t sample_rate = kSampleRate);
 
+// The shortest capture worth keeping: a quarter second of audio. A BOOT tap
+// that is released again, or a microphone that delivered nothing, leaves a WAV
+// header and a handful of bytes; that is not a note. finish() discards anything
+// under this rather than committing it, so a zero-length row can never reach
+// pending/ (and the uploader's no-recording sweep never sees a fresh one). The
+// number is well past kMinAudioBytes (45), the uploader's own "no audio" line.
+constexpr uint32_t kMinNoteMs = 250;
+constexpr uint32_t kMinNoteDataBytes =
+    kSampleRate * kMinNoteMs / 1000 * kChannels * (kBitsPerSample / 8);
+
 // How many whole seconds a WAV of `data_bytes` holds (always at least 1 for a
 // non-empty recording: the contract's duration_seconds floor).
 uint32_t wav_seconds(uint32_t data_bytes, uint32_t sample_rate = kSampleRate);
@@ -61,9 +71,14 @@ class Capture {
   // Header patched with the bytes the file really holds, fsynced and renamed.
   // Fills meta.bytes and meta.duration_s. A capture the card cut short is
   // committed like any other (that is the point: the note exists, with the
-  // audio it has). False (with `error`) only when the card stopped answering
-  // or the recording is unusable, in which case the folder is cleaned up.
+  // audio it has). False (with `error`) when the card stopped answering, or
+  // when the capture is shorter than kMinNoteDataBytes: that one is discarded -
+  // the partial file and the note folder are removed, no note.json is written,
+  // and discarded() says why the caller should not treat it as a card fault.
   bool finish(Meta& meta, std::string& error);
+  // finish() threw the capture away because it held no audio (under a quarter
+  // second). Cleared by the next start().
+  bool discarded() const { return discarded_; }
   // Drops the partial file and the note folder (aborted recording).
   void abort();
 
@@ -95,6 +110,7 @@ class Capture {
   bool full_ = false;
   bool space_out_ = false;   // the card filled under the write
   bool failed_ = false;
+  bool discarded_ = false;   // finish() found no audio to keep
 };
 
 }  // namespace hgp::notes

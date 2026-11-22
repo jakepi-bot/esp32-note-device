@@ -220,6 +220,9 @@ class Runtime {
   bool retry_waiting_ = false;
   uint32_t retry_at_ms_ = 0;
   std::string stop_error_;
+  // The last stop threw the capture away because it held no audio (a tap let
+  // go): the console says so instead of claiming a note or a failure.
+  bool stop_discarded_ = false;
   bool writer_ready_ = false;  // the writer task exists; else the recording writes inline
   bool ble_linked_ = false;
 

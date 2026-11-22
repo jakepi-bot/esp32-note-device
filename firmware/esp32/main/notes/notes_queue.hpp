@@ -168,5 +168,12 @@ std::string human_bytes(uint64_t bytes);
 std::string deleted_answer(std::string_view id);       // "@ok deleted <id>"
 std::string unknown_note_answer(std::string_view id);  // "@error unknown note <id>"
 std::string deleted_failed_answer(uint32_t count);     // "@ok deleted <count> failed"
+// `notes stop` when the capture held no audio and was discarded: nothing was
+// stored, and that is not a failure ("@ok discarded <id>: no audio").
+std::string discarded_answer(std::string_view id);
+// `notes prune`: what the sent prune and the two empty sweeps took, in one line
+// ("@ok pruned 2 sent, 0 empty pending, 9 empty failed"). Formatted here so the
+// host tests pin the string instead of the console's formatting.
+std::string pruned_answer(uint32_t sent, uint32_t pending, uint32_t failed);
 
 }  // namespace hgp::notes

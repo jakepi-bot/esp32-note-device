@@ -509,6 +509,10 @@ void Runtime::start_note(uint32_t now) {
     ESP_LOGW(TAG, "not recording: a recording is already running");
     return;
   }
+  // A new recording is not the previous stop's story: a refusal below must not
+  // answer with the last discard's reason.
+  stop_error_.clear();
+  stop_discarded_ = false;
   // An upload in flight is not a reason to drop the press. It is a reason not to
   // honour it yet: the microphone's samples reach this task, and this task is
   // inside the uploader's socket writes for seconds at a time - a capture
@@ -595,6 +599,7 @@ void Runtime::finish_note(uint32_t now, const char* why) {
   if (io_.mic) io_.mic->stop();
   mode_ = Mode::Idle;
   next_space_ms_ = 0;
+  stop_discarded_ = false;
   // The microphone is stopped, so nothing new is pushed: wait for the writer to
   // have the rest on the card before the file is finished.
   if (writer_ready_ && !writer_.drain(30000))
@@ -603,6 +608,21 @@ void Runtime::finish_note(uint32_t now, const char* why) {
   const bool capped = capture_.full();
   const bool space_out = capture_.space_out();
   if (!capture_.finish(meta_, error)) {
+    if (capture_.discarded()) {
+      // A tap that was let go, or a microphone that never delivered: nothing was
+      // said and nothing is kept. finish() removed the partial file and the note
+      // folder and wrote no note.json, so no row reaches pending/ and the
+      // uploader's no-recording sweep never sees this note. Not a card fault:
+      // the mount stays, the glass stays on Home, and the log carries the one
+      // line saying why nothing was saved.
+      ESP_LOGW(TAG, "note %s discarded: no audio", meta_.note_id.c_str());
+      stop_error_ = "no audio";
+      stop_discarded_ = true;
+      error_.clear();
+      refresh_counts();
+      notify_ui();
+      return;
+    }
     ESP_LOGW(TAG, "note not saved (%s): %s", why, error.c_str());
     stop_error_ = error.empty() ? "the recording was not usable" : error;
     error_ = error;
@@ -1009,6 +1029,7 @@ std::string Runtime::console(std::string_view args) {
     if (mode_ != Mode::Recording) return "@error not recording";
     const std::string id = meta_.note_id;
     finish_note(now, "console");
+    if (stop_discarded_) return notes::discarded_answer(id);
     if (!stop_error_.empty()) return "@error the note was not saved: " + stop_error_;
     return "@ok stored " + id;
   }
@@ -1098,9 +1119,10 @@ std::string Runtime::console(std::string_view args) {
     return ensure_sd() ? "@ok card mounted" : "@error " + sd_error_;
   }
   if (cmd == "prune") {
-    const uint32_t removed = store_.prune_sent();
+    if (mode_ == Mode::Recording) return "@error stop the recording first";
+    const notes::Store::PruneCounts removed = store_.prune_notes();
     refresh_counts();
-    return "@ok pruned " + std::to_string(removed);
+    return notes::pruned_answer(removed.sent, removed.pending, removed.failed);
   }
   if (cmd == "ble") {
     if (!io_.ble || !io_.ble->available()) return "@error this build has no Bluetooth note sync";

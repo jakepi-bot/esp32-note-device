@@ -210,6 +210,41 @@ TEST("home: the band and the line never restate the hero") {
   CHECK(std::string(first.sub) == "BOOT TO RECORD");
 }
 
+TEST("home: a notice takes the line from LAST, and every more urgent line still wins") {
+  Snapshot snap;
+  // The line is 14 columns, the width of BOOT TO RECORD, so it fits the body.
+  CHECK(hg::Canvas::text_width(sub::kNoAudioSaved, grid::kScale) <= grid::kWidth);
+  snap.count_pending = 0;
+  snap.clock_set = true;
+  std::snprintf(snap.notes[0].clock, sizeof snap.notes[0].clock, "14:02");
+  snap.stub_first = 0;
+  snap.stub_rows = 1;
+  snap.note_count = 1;
+  std::snprintf(snap.notice, sizeof snap.notice, "%s", sub::kNoAudioSaved);
+  CHECK(std::string(build_home(snap).sub) == "NO AUDIO SAVED");  // over LAST 14:02
+
+  // The hero and the band are the notice's neighbours, not its business: a
+  // discarded capture leaves both exactly as they were.
+  CHECK(std::string(build_home(snap).hero) == "READY");
+  CHECK(std::string(build_home(snap).band) == "ALL SENT");
+
+  // An upload in flight is the more urgent line (it is the hero's own sentence),
+  // so the notice waits rather than replacing it.
+  Snapshot uploading = snap;
+  uploading.upload_active = true;
+  uploading.upload_done = 1;
+  uploading.upload_total = 3;
+  CHECK(std::string(build_home(uploading).sub) == "1 OF 3 SENT");
+
+  // A card fault and low power are Home's own faults, ahead of any notice.
+  Snapshot no_card = snap;
+  no_card.card = false;
+  CHECK(std::string(build_home(no_card).sub) == "NOTHING LOST");
+  Snapshot low = snap;
+  low.low_power = true;
+  CHECK(std::string(build_home(low).sub) == "PLUG IN SOON");
+}
+
 TEST("home: the upload bar is determinate and capped") {
   Snapshot snap;
   snap.upload_active = true;

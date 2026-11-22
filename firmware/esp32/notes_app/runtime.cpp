@@ -620,6 +620,10 @@ void Runtime::finish_note(uint32_t now, const char* why) {
       stop_discarded_ = true;
       error_.clear();
       refresh_counts();
+      // Before the counts publish: the screens' Home carries this line on the
+      // frame the stop owes, so a discarded tap is explained on the glass rather
+      // than by an unchanged READY and a log nobody on the bench reads.
+      if (ui_.discarded) ui_.discarded();
       notify_ui();
       return;
     }

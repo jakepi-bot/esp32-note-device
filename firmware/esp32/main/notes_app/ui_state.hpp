@@ -13,6 +13,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 
 #include "notes/notes_store.hpp"
 #include "notes_app/ui_app.hpp"
@@ -88,6 +89,15 @@ class UiState {
   void set_upload_failed();
   void set_play(uint32_t pos_s, uint32_t total_s);
 
+  // A one-line reason for Home's slot under the hero (a capture the stop
+  // discarded for holding no audio), for `ttl_ms` and then no longer: the
+  // counts line comes back when it lapses, which tick() watches for. It is
+  // adopted, not drawn - the caller publishes (`DirtyNotice`) when the glass may
+  // see it, the way the other facts above are handed over. A capture that starts
+  // or a card that moves drops it early: it explains the last stop, and a new
+  // note would make it a lie.
+  void set_notice(std::string_view text, uint32_t now_ms, uint32_t ttl_ms);
+
   const Snapshot& snapshot() const { return snap_; }
   Screen screen() const { return app_.screen(); }
   const ScreenApp& app() const { return app_; }
@@ -125,6 +135,11 @@ class UiState {
   // The last power fact put on the glass: a 1 % ADC step waits until the step
   // is 2 % or five minutes have passed (t_3beb371a §5).
   uint32_t last_power_ms_ = 0;
+  // Home's notice: the ms it lapses at (0: none) and the card's total when it
+  // was set, so a note that lands after it takes the line back (a saved note is
+  // not a discarded one).
+  uint32_t notice_until_ms_ = 0;
+  uint32_t notice_notes_ = 0;
 };
 
 }  // namespace hgp::notesui

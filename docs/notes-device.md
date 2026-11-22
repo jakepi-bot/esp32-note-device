@@ -49,6 +49,12 @@ The resting face, and what it returns to when a screen is left.
   `NOTHING LOST` (no card, so nothing can be deleted), `3 OF 7 SENT` during an
   upload (with a progress bar), `LAST 14:02` (the newest note's minute), or
   `BOOT TO RECORD` on an empty card.
+- **A stop that heard nothing** - a tap let go inside a quarter second - throws
+  the capture away rather than saving an empty note, and for five seconds this
+  line says `NO AUDIO SAVED` in place of `LAST ...`. The hero stays `READY` and
+  the band does not move, so this one line is the whole account of why nothing
+  was kept; when it lapses the counts line returns. A recording started or a
+  note committed in the meantime takes the line back at once.
 - **The clock** sits in the band, `HH:MM`, blank until the device has had the
   time once (SNTP, or `clock set` from the console). It is the one fact allowed to
   repaint a resting face: it draws when the minute changes and only on Home, so

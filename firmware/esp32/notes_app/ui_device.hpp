@@ -118,6 +118,12 @@ class NotesUi {
   void on_upload(bool active, uint8_t done, uint8_t total);
   void on_upload_failed();
 
+  // The runtime discarded a capture because it held no audio: nothing was saved
+  // and the device stays on Home, so the one line under the hero says why for a
+  // few seconds (this build has no log for the person holding it). The hook the
+  // runtime fires from finish_note's discard branch.
+  void on_discarded();
+
   // The console's `ui` command: what the glass is showing, in words.
   std::string console(std::string_view line);
 

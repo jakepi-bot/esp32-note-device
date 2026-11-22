@@ -200,7 +200,9 @@ HomeView build_home(const Snapshot& snap) {
   if (snap.clock_set && snap.clock_text[0] != '\0') copy_out(snap.clock_text, view.clock, sizeof view.clock);
   view.bt = snap.bt;
 
-  // One line, context first, and never a restatement of the band.
+  // One line, context first, and never a restatement of the band. A notice is
+  // what happened just now (a discarded capture, nothing saved), so it outranks
+  // LAST while it lasts and the counts line returns when it lapses.
   if (snap.low_power) {
     copy_out(sub::kPlugIn, view.sub, sizeof view.sub);
   } else if (!snap.card) {
@@ -208,6 +210,8 @@ HomeView build_home(const Snapshot& snap) {
   } else if (snap.upload_active && snap.upload_total > 0) {
     std::snprintf(view.sub, sizeof view.sub, sub::kOfN, static_cast<unsigned>(snap.upload_done),
                   static_cast<unsigned>(snap.upload_total));
+  } else if (snap.notice[0] != '\0') {
+    copy_out(snap.notice, view.sub, sizeof view.sub);
   } else if (const NoteStub* newest = stub_at(snap, 0)) {
     // The newest note's local minute: a timestamp, never a clock (§3.2).
     unsigned hour = 0, minute = 0;

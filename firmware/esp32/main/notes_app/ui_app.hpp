@@ -58,6 +58,7 @@ enum Dirty : uint16_t {
   DirtyAbout = 1u << 6,     // firmware, device id, card free
   DirtyPlayback = 1u << 7,  // position, duration
   DirtyRecording = 1u << 8, // the counter
+  DirtyNotice = 1u << 9,    // Home's one line: a notice set or lapsed
 };
 
 struct Outcome {

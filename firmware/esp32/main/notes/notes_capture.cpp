@@ -72,10 +72,12 @@ bool Capture::start(Store& store, std::string_view id, uint32_t max_seconds, std
     store_ = nullptr;
     return false;
   }
-  // The cap is the note_max_s setting, and never past the contract's 900 s.
-  const uint32_t capped_s = std::min<uint32_t>(max_seconds, kMaxDurationS);
-  max_bytes_ = capped_s * kSampleRate * kChannels * (kBitsPerSample / 8);
-  max_bytes_ = std::min<uint32_t>(max_bytes_, static_cast<uint32_t>(kMaxNoteBytes));
+  // The cap is the note_max_s setting, and never past kMaxDurationS. The byte
+  // budget is computed in 64 bits: 24 h at 24 kHz is 4.1 GB, past a 32-bit
+  // product, and the result is then held to kMaxNoteBytes (2 GiB, 12.4 h).
+  const uint64_t capped_s = std::min<uint64_t>(max_seconds, kMaxDurationS);
+  const uint64_t wanted = capped_s * kSampleRate * kChannels * (kBitsPerSample / 8);
+  max_bytes_ = static_cast<uint32_t>(std::min<uint64_t>(wanted, kMaxNoteBytes));
   bytes_ = 0;
   full_ = false;
   failed_ = false;
@@ -143,6 +145,9 @@ bool Capture::finish(Meta& meta, std::string& error) {
   }
   meta.bytes = data_bytes;
   meta.duration_s = wav_seconds(data_bytes);
+  // The contract's ceiling, in lockstep with kMaxDurationS: a note that ran to
+  // the byte cap (12.4 h) or to the 24 h time cap still reports a storable
+  // duration_seconds, and nothing here truncates it at 15 min any more.
   if (meta.duration_s > kMaxDurationS) meta.duration_s = kMaxDurationS;
   store_ = nullptr;
   return true;

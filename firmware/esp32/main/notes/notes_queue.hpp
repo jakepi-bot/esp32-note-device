@@ -21,13 +21,17 @@ constexpr uint32_t kSampleRate = 24000;
 constexpr uint32_t kChannels = 1;
 constexpr uint32_t kBitsPerSample = 16;
 constexpr uint32_t kSchemaVersion = 1;
-// Contract §2.4: the audio part may not exceed 32 MiB; a note never comes
-// close (300 s at 24 kHz is 14.4 MB) but the cap is checked while recording.
-constexpr size_t kMaxNoteBytes = 32u * 1024u * 1024u;
-// Contract §2.4: duration_seconds is 1..900. The device caps a recording at
-// note_max_s (300 s by default).
+// The per-note ceiling, and the only practical limit: a recording runs until
+// the card is full, and this stops one note at 2 GiB. 2 GiB is 12.4 h of
+// 24 kHz PCM16 mono (48 KB/s), and it keeps a single file well inside what
+// FAT32 and the RIFF 32-bit size fields handle (4 GiB is their limit).
+constexpr size_t kMaxNoteBytes = 2ull * 1024ull * 1024ull * 1024ull;
+// duration_seconds is 1..86400 (24 h), the same range the hub's DURATION_MAX
+// enforces (plugin/protocol.py NOTE_DURATION_MAX). The byte cap above stops a
+// 24 kHz note at 12.4 h, so this is a sanity bound, never the limit a user
+// meets: the setting that actually ends a note early is note_max_s.
 constexpr uint32_t kMinDurationS = 1;
-constexpr uint32_t kMaxDurationS = 900;
+constexpr uint32_t kMaxDurationS = 24u * 60u * 60u;  // 86400
 
 // One note's `note.json`, in the order the file writes it (spec §7.3). The
 // wire fields of the upload contract are kept verbatim here, so a retry is
@@ -39,7 +43,7 @@ struct Meta {
   std::string firmware;
   int64_t created_ms = 0;      // unix ms, RTC-backed
   std::string recorded_at;     // ISO-8601 with an offset (we emit "…Z"), raw MAC input
-  uint32_t duration_s = 0;     // 1..900
+  uint32_t duration_s = 0;     // 1..86400 (kMaxDurationS)
   std::string idempotency_key; // = note_id
   uint32_t bytes = 0;          // recording.wav as written
   std::string sha256;          // lowercase hex of recording.wav, filled before the first upload

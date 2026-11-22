@@ -374,7 +374,7 @@ def test_a_future_recorded_at_beyond_the_window_is_422(server):
     assert status == 422 and error_of(payload)["field"] == "recorded_at"
 
 
-@pytest.mark.parametrize("duration", ["0", "901", "8.5", " 8", "eight", ""])
+@pytest.mark.parametrize("duration", ["0", "86401", "8.5", " 8", "eight", "", "-1"])
 def test_a_bad_duration_is_422(server, duration):
     status, payload = upload(server, fields(duration_seconds=duration))
     assert status == 422 and error_of(payload)["field"] == "duration_seconds"
@@ -501,8 +501,12 @@ def test_a_matching_checksum_is_accepted(server):
 # -- size caps are 413 (§2.4) ----------------------------------------------------------
 
 def test_the_caps_are_the_contracts():
-    assert MAX_NOTE_BYTES == 32 * 1024 * 1024
+    # 2 GiB, the device's own per-note ceiling (kMaxNoteBytes): the two sides
+    # carry the same number so a note the firmware accepted is never refused here.
+    assert MAX_NOTE_BYTES == protocol.NOTE_MAX_BYTES == 2 * 1024 * 1024 * 1024
     assert MAX_REQUEST_BYTES == MAX_NOTE_BYTES + 64 * 1024
+    # duration_seconds is 1..86400 (24 h), the firmware's kMaxDurationS.
+    assert (protocol.NOTE_DURATION_MIN, protocol.NOTE_DURATION_MAX) == (1, 86400)
 
 
 def test_an_oversize_content_length_is_413_before_the_body(server):
@@ -521,11 +525,63 @@ def test_an_oversize_audio_part_is_413(server, tmp_path):
 
 
 def test_an_oversize_body_without_a_length_is_413(server, monkeypatch):
-    monkeypatch.setattr(notes_ingest, "MAX_REQUEST_BYTES", 1024)  # the real cap is 32 MiB + 64 KiB
+    monkeypatch.setattr(notes_ingest, "MAX_REQUEST_BYTES", 1024)  # the real cap is 2 GiB + 64 KiB
     huge = wav_bytes(frames=1024)
     status, payload = upload(server, fields(), huge, body=multipart(fields(), huge),
                              content_length=None)
     assert status == 413 and error_of(payload)["code"] == "too_large"
+
+
+# -- a note past the old 32 MiB / 15 min caps ingests unchanged (§2.4) -------------------
+
+
+def a_long_note(mib=34):
+    """A real WAV past the old 32 MiB cap; 24 kHz PCM16 mono is 48 KB/s, so 34 MiB
+    is about 12 minutes and a 20-minute note is 57.6 MB."""
+    return wav_bytes(frames=(mib * 1024 * 1024) // 2)
+
+
+def sha256_of(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def test_a_twelve_hour_duration_is_accepted(server):
+    # The device's own ceiling (kMaxDurationS): an hour-long note is no longer 422.
+    status, payload = upload(server, fields(duration_seconds="43200"))
+    assert status == 202 and payload["status"] == "accepted"
+
+
+def test_a_note_over_the_old_32_mib_cap_is_accepted_whole(server):
+    audio = a_long_note()
+    assert len(audio) > 32 * 1024 * 1024
+    body_fields = fields(duration_seconds="1200", idempotency_key="long-note-direct")
+    status, payload = upload(server, body_fields, audio)
+    assert status == 202 and payload["status"] == "accepted"
+    entry = server.inbox / payload["job_id"]
+    stored = entry / "recording.wav"
+    assert stored.stat().st_size == len(audio)  # nothing truncated or dropped
+    assert sha256_of(stored) == hashlib.sha256(audio).hexdigest()
+    assert json.loads((entry / "note.json").read_text())["duration_seconds"] == 1200
+
+
+def test_a_large_note_goes_through_the_http_route_unchanged(server):
+    # The route spools the body to the staging area and parses an mmap of it, so a
+    # note the old cap refused must arrive byte-identical and leave no spool behind.
+    audio = a_long_note()
+    body_fields = fields(duration_seconds="1200", idempotency_key="long-note-route")
+    body = multipart(body_fields, audio)
+    wire = signed(body_fields, audio)
+    wire["content-type"] = f"multipart/form-data; boundary={BOUNDARY}"
+    response = TestClient(create_app(server)).post("/notes/v1", content=body, headers=wire)
+    assert response.status_code == 202, response.text
+    entry = server.inbox / response.json()["job_id"]
+    assert (entry / "recording.wav").stat().st_size == len(audio)
+    assert sha256_of(entry / "recording.wav") == hashlib.sha256(audio).hexdigest()
+    assert list(server.staging_dir.iterdir()) == []
 
 
 # -- storage failures 507 / 503 (§3.2, §5.7) -------------------------------------------

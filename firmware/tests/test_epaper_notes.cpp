@@ -414,6 +414,40 @@ TEST("a recording stops at its cap, never at a partial sample") {
   CHECK_EQ(store.count(NoteState::Pending), 0u);
 }
 
+TEST("a note past the old 15 minute and 32 MiB caps keeps its real length") {
+  // 1200 s at 24 kHz PCM16 mono is 57.6 MB: past the old kMaxDurationS (900 s)
+  // and past the old kMaxNoteBytes (32 MiB), so this is the note the firmware
+  // used to cut short twice over. A 24 h cap must let it through untouched.
+  TempDir dir;
+  Store store(dir.path);
+  CHECK(store.ensure());
+  Meta m = sample_meta();
+  m.note_id = make_note_id(m.device_id, 1795140712, 12);
+  Capture capture;
+  std::string error;
+  CHECK(capture.start(store, m.note_id, kMaxDurationS, error));  // 86400 s ceiling
+  std::vector<int16_t> second(kSampleRate, 7);                  // one second at 24 kHz
+  for (int i = 0; i < 1200; ++i) capture.feed(second.data(), second.size());
+  CHECK(!capture.full());  // 20 min is nowhere near the byte ceiling
+  CHECK(capture.finish(m, error));
+  CHECK_EQ(m.duration_s, 1200u);  // not clamped to 900
+  CHECK_EQ(m.bytes, uint32_t(1200u * kSampleRate * 2u));
+  CHECK(m.bytes > 32u * 1024u * 1024u);
+  CHECK_EQ(capture.seconds(), 1200u);  // the wav_seconds the screen reports
+  CHECK(store.discard(NoteState::Pending, m.note_id));
+}
+
+TEST("the per-note ceiling and the duration ceiling are the hub's numbers too") {
+  // plugin/protocol.py NOTE_MAX_BYTES / NOTE_DURATION_MAX. Both sides must carry
+  // the same numbers: a device-accepted note has to be ingestible unchanged.
+  CHECK_EQ(kMaxNoteBytes, size_t(2ull * 1024ull * 1024ull * 1024ull));
+  CHECK_EQ(kMaxDurationS, 24u * 60u * 60u);
+  CHECK_EQ(kMinDurationS, 1u);
+  // The 24 h time cap never binds before the byte cap does (12.4 h at 48 KB/s),
+  // so the ceiling a user meets is the file size, not a stopwatch.
+  CHECK(uint64_t(kMaxDurationS) * kSampleRate * kChannels * 2u > uint64_t(kMaxNoteBytes));
+}
+
 namespace {
 
 bool path_exists(const std::string& path) {

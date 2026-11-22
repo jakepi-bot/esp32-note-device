@@ -814,7 +814,7 @@ y=194  └───────────────────────�
 | rule | 12 | 27 | | |
 | label `RECORDING` | 12 | 38 | 106 × 14 | scale 2, sentence case is wrong here — uppercase |
 | elapsed | centred | 62 | ≤ 88 × 21 | scale 3, `M:SS` — the hero |
-| cap | centred | 94 | ≤ 82 × 14 | `OF M:SS`, from `note_max_s` (300 s default) |
+| cap | centred | 94 | ≤ 82 × 14 | `OF M:SS`, from `note_max_s` (86400 s default: `OF 24:00`, hours once past 99:59) |
 | bar | 12 | 118 | 176 × 9 | `elapsed / cap` |
 | rule | 12 | 144 | | |
 | footer | 12 | 152, 170 | | **two lines** |
@@ -1450,7 +1450,7 @@ that wrong once.
 | 4 | Two notes in the same minute are indistinguishable on the confirm | accepted, §8.2; mitigated by the hold and deterministic order |
 | 5 | 8 consecutive bar moves before a forced full | a starting value, not a measurement. Tune against the real panel; the constant belongs next to `kFullEvery` |
 | 6 | `Phone` and `Wi-Fi` frames are owned by the ports | out of scope by design (§12); only the `F` hand-off is specified |
-| 7 | `note_max_s` cap shown as `OF 5:00` | read it from the setting, do not hard-code 300 s |
+| 7 | `note_max_s` cap shown as `OF 5:00` | read it from the setting, do not hard-code the default; past 99:59 it reads `OF 24:00` |
 
 ---
 ---

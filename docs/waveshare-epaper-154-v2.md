@@ -402,7 +402,7 @@ leaves a half-note that looks complete. Scan order: directory name ascending
   // Before the first clock sync the board's time is 1970: a note recorded then
   // is uploaded stamped with the time it is sent (and that string is written
   // back here), never with 1970 — see the paragraph below.
-  "duration_seconds": 8,                   // 1..900, advisory
+  "duration_seconds": 8,                   // 1..86400, advisory
   "idempotency_key": "hg-0123456789abcdef-20261119T204512-0001",  // = note_id
   "sample_rate": 24000,
   "channels": 1,

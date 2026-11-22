@@ -47,7 +47,7 @@ struct Snapshot {
   int8_t battery_pct = -1;      // -1 unknown
   bool external = false;        // on external power (the bolt)
   bool low_power = false;       // the caller's battery rule, ≤10 % off power
-  uint32_t note_max_s = 300;    // the recording cap (config, never hard-coded)
+  uint32_t note_max_s = 86400;  // the recording cap (DeviceConfig::note_max_s)
   bool recording = false;
   uint32_t record_elapsed_s = 0;
 
@@ -119,7 +119,7 @@ void format_when(const Stamp& stamp, char out[13]);
 void format_clock(const Stamp& stamp, char out[6]);
 // "0:14", "12:03". 5 columns at most.
 void format_duration(uint32_t seconds, char out[8]);
-// "OF 5:00". 7 columns.
+// "OF 5:00", and "OF 24:00" when the cap is longer than 99:59. 8 columns.
 void format_of(uint32_t seconds, char out[11]);
 
 // A note.json's `recorded_at` (UTC, "YYYY-MM-DDTHH:MM:SSZ") as local fields.
@@ -192,7 +192,7 @@ bool build_confirm(const Snapshot& snap, uint16_t index, ConfirmView& out);
 
 struct RecordingView {
   uint32_t elapsed_s = 0;
-  uint32_t cap_s = 300;
+  uint32_t cap_s = 86400;  // DeviceConfig::note_max_s's default, replaced from the config
 };
 
 struct PlayingView {

@@ -184,7 +184,7 @@ to the idempotency key.
 | `firmware` | firmware version string |
 | `created_ms` | unix ms, RTC/SNTP-backed |
 | `recorded_at` | ISO-8601 UTC, `YYYY-MM-DDTHH:MM:SSZ` |
-| `duration_s` | 1..900 (device caps at `note_max_s`, default 300) |
+| `duration_s` | 1..86400 (device caps at `note_max_s`, default 86400 = the ceiling) |
 | `idempotency_key` | equal to `note_id` |
 | `bytes` | size of `recording.wav` |
 | `sha256` | lowercase hex of the WAV, filled before the first upload |
@@ -201,7 +201,7 @@ to the idempotency key.
   rejections move it to `failed/`, which is terminal and only emptied by
   `notes delete --failed`.
 
-**Limits**: audio ≤ 32 MiB, duration 1..900 s, sample rate fixed at 24 kHz.
+**Limits**: audio ≤ 2 GiB, duration 1..86400 s, sample rate fixed at 24 kHz.
 
 ## 9. Note upload path
 

@@ -45,6 +45,7 @@ import hashlib
 import hmac
 import json
 import logging
+import mmap
 import os
 import re
 import shutil
@@ -69,13 +70,14 @@ except Exception:  # pragma: no cover - the pipeline ships beside this module
 NOTE_PATH = "/notes/v1"
 HEALTH_PATH = "/health"
 
-#: The contract's audio cap (§2.4): 32 MiB.
-MAX_NOTE_BYTES = 32 * 1024 * 1024
+#: The contract's audio cap (§2.4): 2 GiB, the same ceiling the device records
+#: to (protocol.NOTE_MAX_BYTES), so a device-accepted note is never refused here.
+MAX_NOTE_BYTES = protocol.NOTE_MAX_BYTES
 #: The whole request may carry the audio plus 64 KiB of metadata and boundaries.
 MAX_REQUEST_BYTES = MAX_NOTE_BYTES + 64 * 1024
 MAX_SKEW_S = 300
-DURATION_MIN = 1
-DURATION_MAX = 900
+DURATION_MIN = protocol.NOTE_DURATION_MIN
+DURATION_MAX = protocol.NOTE_DURATION_MAX
 
 #: Transient staging write errors are retried three times, 100 ms apart (§5.7),
 #: inside the request; anything else (notably ``ENOSPC``) answers 507 at once and
@@ -153,7 +155,8 @@ class _Inconsistent(Exception):
 class _Part:
     name: str
     filename: Optional[str]
-    value: bytes
+    #: A zero-copy view into the request body (see parse_multipart).
+    value: bytes | memoryview
     content_type: Optional[str]
 
     @property
@@ -206,40 +209,45 @@ def _part_headers(block: bytes) -> dict[str, str]:
     return headers
 
 
-def parse_multipart(body: bytes, boundary: str) -> list[_Part]:
+def parse_multipart(body, boundary: str) -> list[_Part]:
     """Parse a ``multipart/form-data`` body into its parts.
 
-    Deliberately a small, strict parser over the fully-read bytes: the audio is
-    bounded at 32 MiB, and doing it here (instead of a framework form parser)
-    keeps the contract's exact-value and repeated-part rules under our control.
+    Deliberately a small, strict parser over the fully-read body: doing it here
+    (instead of a framework form parser) keeps the contract's exact-value and
+    repeated-part rules under our control. ``body`` is anything a route may hand
+    over — ``bytes`` (the direct entry point tests drive), a ``bytearray``, or an
+    ``mmap`` of the spooled request — so only ``body.find`` is required; every
+    part's value is a zero-copy ``memoryview`` into it, which is what keeps a
+    multi-gigabyte note from being copied twice before it is written out.
     Raises ``_Malformed`` for anything that is not a well-formed multipart body.
     """
     if not boundary:
         raise _Malformed("the Content-Type has no multipart boundary")
     delimiter = b"--" + boundary.encode("latin-1")
+    view = memoryview(body)
     start = body.find(delimiter)
     if start < 0:
         raise _Malformed("the body is not multipart: its boundary was not found")
     pos = start + len(delimiter)
     parts: list[_Part] = []
     while True:
-        if body.startswith(b"--", pos):  # closing delimiter, epilogue ignored
+        if view[pos:pos + 2] == b"--":  # closing delimiter, epilogue ignored
             return parts
-        if body.startswith(b"\r\n", pos):
+        if view[pos:pos + 2] == b"\r\n":
             pos += 2
-        elif body.startswith(b"\n", pos):  # tolerate a bare LF after the boundary
+        elif view[pos:pos + 1] == b"\n":  # tolerate a bare LF after the boundary
             pos += 1
         else:
             raise _Malformed("malformed multipart: a boundary is not followed by CRLF")
         head_end = body.find(b"\r\n\r\n", pos)
         if head_end < 0:
             raise _Malformed("malformed multipart: a part's headers never end")
-        headers = _part_headers(body[pos:head_end])
+        headers = _part_headers(bytes(view[pos:head_end]))
         start_of_value = head_end + 4
         end = body.find(b"\r\n" + delimiter, start_of_value)
         if end < 0:
             raise _Malformed("malformed multipart: a part is not closed by the boundary")
-        value = body[start_of_value:end]
+        value = view[start_of_value:end]
         pos = end + 2 + len(delimiter)
         disposition = headers.get("content-disposition", "")
         kind, params = _split_parameters(disposition)
@@ -278,7 +286,7 @@ def normalize_recorded_at(raw: str) -> str:
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def sniff_codec(audio: bytes) -> Optional[str]:
+def sniff_codec(audio: bytes | memoryview) -> Optional[str]:
     """``"wav"``/``"opus"`` for audio the contract accepts, else None (§2.3).
 
     WAV: ``RIFF``…``WAVE`` with a PCM (format 1) 16-bit mono ``fmt `` chunk at
@@ -303,8 +311,10 @@ def sniff_codec(audio: bytes) -> Optional[str]:
                 return "wav"
             pos += 8 + size + (size & 1)  # chunks are word-aligned
         return None
-    if audio.startswith(b"OggS"):
-        head = audio.find(b"OpusHead", 0, 512)
+    if audio[:4] == b"OggS":
+        # Ogg's first page header is small: copying it is cheaper than teaching
+        # every caller to carry a bytes-like that also has .find().
+        head = bytes(audio[:512]).find(b"OpusHead")
         if head < 0 or head + 10 > len(audio):
             return None
         return "opus" if audio[head + 9] == 1 else None
@@ -320,7 +330,7 @@ class _Request:
     recorded_at_utc: str  # normalized: job_id derivation, note.json
     duration_raw: str  # exactly as transmitted: MAC input
     duration_seconds: int
-    audio: bytes
+    audio: bytes | memoryview  # view into the body's buffer, never a copy
     codec: str
     idempotency_key: Optional[str]
     checksum: Optional[str]
@@ -342,7 +352,7 @@ def _retry_transient(action: Callable[[], Any]) -> Any:
     raise AssertionError("unreachable")
 
 
-def _write_file(path: Path, data: bytes) -> None:
+def _write_file(path: Path, data: bytes | bytearray | memoryview) -> None:
     """One write attempt: open, write, fsync (the caller adds the transient retry)."""
     with open(path, "wb") as handle:
         handle.write(data)
@@ -350,7 +360,7 @@ def _write_file(path: Path, data: bytes) -> None:
         os.fsync(handle.fileno())
 
 
-def _write_durable(path: Path, data: bytes) -> None:
+def _write_durable(path: Path, data: bytes | bytearray | memoryview) -> None:
     """Write and fsync one file, reopening and retrying the transient errors."""
     _retry_transient(lambda: _write_file(path, data))
 
@@ -446,6 +456,16 @@ class NotesServer:
         if stop and self._worker is not None:
             self.stop()
         return stop
+
+    @property
+    def staging_dir(self) -> Path:
+        """Where a request body is spooled and an entry is built (``.staging``).
+
+        The route spools here rather than in ``/tmp``: it is the same filesystem
+        as ``inbox/``, so a note that does not fit fails there instead of being
+        copied across mounts, and it is cleaned by the same rule.
+        """
+        return self._staging
 
     @property
     def refs(self) -> int:
@@ -581,7 +601,8 @@ class NotesServer:
         return None
 
     def handle_upload(self, headers: Mapping[str, str], content_type: Optional[str],
-                      content_length: Optional[int], body: bytes) -> tuple[int, dict]:
+                      content_length: Optional[int],
+                      body: bytes | bytearray | mmap.mmap) -> tuple[int, dict]:
         """Validate, authorize, de-duplicate and stage one upload; answer as §3 says.
 
         This is the whole contract minus the byte-moving HTTP layer, which is why
@@ -599,7 +620,7 @@ class NotesServer:
             return error
         return self._accept(request)
 
-    def _validate(self, body: bytes, content_type: Optional[str]) -> _Request:
+    def _validate(self, body: bytes | bytearray | mmap.mmap, content_type: Optional[str]) -> _Request:
         """§4 steps 4-5 plus the codec check: parse, then formats and ranges."""
         _, params = _content_type(content_type)
         try:
@@ -636,7 +657,7 @@ class NotesServer:
 
         def text(name: str) -> str:
             try:
-                return fields[name].value.decode("utf-8")
+                return bytes(fields[name].value).decode("utf-8")
             except UnicodeDecodeError as exc:
                 raise _Rejected(*_fail(422, "invalid_field",
                                        f"{name} is not UTF-8 text", field=name)) from exc
@@ -972,13 +993,50 @@ def create_app(server: NotesServer, page_dir: Optional[Path | str] = None):
         early = server.precheck(headers, headers.get("content-type"), length)
         if early is not None:
             return reply(*early)
-        body = bytearray()
-        async for chunk in request.stream():
-            body += chunk
-            if len(body) > MAX_REQUEST_BYTES:  # a chunked sender with no length to pre-check
-                return reply(*_fail(413, "too_large", f"the request exceeds {MAX_REQUEST_BYTES} bytes"))
-        status, payload = await asyncio.to_thread(server.handle_upload, headers,
-                                                  headers.get("content-type"), length, bytes(body))
+        # The body is spooled to the staging area instead of a bytearray: a note
+        # may be as large as the device's own ceiling (2 GiB, MAX_NOTE_BYTES), and
+        # holding the body, a copy of the audio part and the hasher at once is
+        # what would take the host down. The spool lives on the same filesystem
+        # as inbox/, so an upload that does not fit fails here (507, retryable)
+        # before a byte reaches an entry, instead of halfway through staging one.
+        try:
+            staging = server.staging_dir
+            staging.mkdir(parents=True, exist_ok=True)
+            spool = tempfile.NamedTemporaryFile(dir=staging, prefix="request-",
+                                                suffix=".part", delete=False)
+        except OSError as exc:
+            logger.error("voice-note request spool could not be created: %s", exc)
+            return reply(*_fail(507, "storage", f"the upload could not be buffered: {exc}",
+                                retryable=True))
+        try:
+            size = 0
+            with spool:
+                async for chunk in request.stream():
+                    size += len(chunk)
+                    if size > MAX_REQUEST_BYTES:  # a chunked sender with no length to pre-check
+                        return reply(*_fail(413, "too_large",
+                                            f"the request exceeds {MAX_REQUEST_BYTES} bytes"))
+                    try:
+                        spool.write(chunk)
+                    except OSError as exc:  # ENOSPC and friends: loud, and retryable (§5.7)
+                        logger.error("voice-note request spool write failed: %s", exc)
+                        return reply(*_fail(507, "storage",
+                                            f"the upload could not be buffered: {exc}", retryable=True))
+                spool.flush()
+                os.fsync(spool.fileno())
+            if size == 0:  # an empty body is the contract's 400, below
+                status, payload = await asyncio.to_thread(
+                    server.handle_upload, headers, headers.get("content-type"), length, b"")
+            else:
+                with open(spool.name, "rb") as handle, \
+                        mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
+                    status, payload = await asyncio.to_thread(
+                        server.handle_upload, headers, headers.get("content-type"), length, mapped)
+        finally:
+            try:
+                os.unlink(spool.name)
+            except OSError:
+                pass
         return reply(status, payload)
 
     @app.get(HEALTH_PATH)

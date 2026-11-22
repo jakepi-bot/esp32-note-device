@@ -18,7 +18,9 @@ class DeviceConfig {
   void begin(hg::Storage& storage);
 
   // Longest single voice note in seconds; the offline mode caps recordings
-  // at it (300 = five minutes, the spec's default).
+  // at it. The default is the ceiling (86400 = 24 h), so a note runs until the
+  // card or the 2 GiB per-note cap stops it; the setting only lets a user ask
+  // for a shorter one.
   int note_max_s() const;
   bool set_note_max_s(int seconds);
 

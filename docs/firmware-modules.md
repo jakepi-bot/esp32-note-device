@@ -79,7 +79,7 @@ Everything runs on the task that calls `App::tick()`; there is no locking.
 
 ```cpp
 void DeviceConfig::begin(hg::Storage& storage);
-int  note_max_s() const;                 // 300 by default, clamped 10..3600
+int  note_max_s() const;                 // 86400 (24 h) by default, clamped 10..86400
 bool set_note_max_s(int seconds);
 uint32_t boot_count() const;             // +1 every boot, logged at start
 std::optional<std::string> get(std::string_view key) const;

@@ -48,10 +48,10 @@ retry of one recording is byte-identical.
 
 | Part | Required | Format and rules |
 |---|---|---|
-| `audio` | yes | Exactly one **file** part (it carries a `filename`; a text-typed `audio` part is `400`). Non-empty, ≤ 32 MiB. Codec per [§2.3](#23-audio-codecs); the part's own `Content-Type` and `filename` are advisory — the server sniffs the bytes. |
+| `audio` | yes | Exactly one **file** part (it carries a `filename`; a text-typed `audio` part is `400`). Non-empty, ≤ 2 GiB. Codec per [§2.3](#23-audio-codecs); the part's own `Content-Type` and `filename` are advisory — the server sniffs the bytes. |
 | `device_id` | yes | `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` — the paired device's id, as in the hub's enrollment. |
 | `recorded_at` | yes | ISO-8601 **with an offset**: `2026-11-20T08:15:04-06:00`, `2026-11-20T14:15:04Z`, optional fractional seconds, offset `±hh:mm` or `±hhmm`. Naive (offset-less) timestamps are rejected. The server normalizes it to UTC whole seconds, `YYYY-MM-DDTHH:MM:SSZ`, for storage and key derivation; the **raw** string goes into the HMAC and stays in `note.json`. Must not be more than 300 s in the future; there is no lower bound. |
-| `duration_seconds` | yes | Decimal integer in `1..900`. Advisory: never verified against the audio (the server does not decode it), copied to the note. |
+| `duration_seconds` | yes | Decimal integer in `1..86400` (24 h). Advisory: never verified against the audio (the server does not decode it), copied to the note. |
 | `idempotency_key` | no | `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`. Generated once per recording by the device and resent unchanged on every retry; [§5.1](#51-idempotency-key-derivation) defines the key with and without it. |
 | `checksum` | no | 64 lowercase hex chars: SHA-256 of the `audio` bytes as sent. When present it must equal the digest the server computes, else `409`. The server always computes the digest itself; this field only lets a corrupted transfer be rejected loudly. |
 
@@ -100,12 +100,17 @@ Sniffed from magic bytes; the declared part type is ignored.
 
 ### 2.4 Limits
 
-- Audio part ≤ **32 MiB** (33 554 432 bytes). Whole request ≤ audio cap +
+- Audio part ≤ **2 GiB** (2 147 483 648 bytes). Whole request ≤ audio cap +
   64 KiB: checked from `Content-Length` before the body is read, and enforced
   while reading when the header is absent (then `413` and the connection is
-  dropped).
-- `duration_seconds` ∈ `1..900` — 15 min of headroom over the boards' 5 min
-  recording cap.
+  dropped). 2 GiB is the device's own per-note ceiling (`kMaxNoteBytes` in
+  `firmware/esp32/main/notes/notes_queue.hpp`), which is 12.4 h of 24 kHz PCM16
+  mono and stays inside what FAT32 and the RIFF 32-bit size fields handle; the
+  two numbers are the same so a note the firmware accepted is never refused
+  here. `plugin/protocol.py` (`NOTE_MAX_BYTES`, `NOTE_DURATION_MAX`) is the one
+  place both halves name.
+- `duration_seconds` ∈ `1..86400` — 24 h, the firmware's `kMaxDurationS`. The
+  byte cap stops a 24 kHz note at 12.4 h first, so this is a sanity bound.
 - `recorded_at` has no lower bound (a late upload of an old recording is
   legal), so the server cannot tell a real date from a dead clock: **the sender
   owns the clock**. A board with no RTC boots at 1970, and the reference
@@ -137,7 +142,7 @@ is a host-side concern.
 ### 3.2 Errors
 
 ```json
-{"error": {"code": "invalid_field", "message": "duration_seconds must be an integer in 1..900", "field": "duration_seconds", "retryable": false}}
+{"error": {"code": "invalid_field", "message": "duration_seconds must be an integer in 1..86400", "field": "duration_seconds", "retryable": false}}
 ```
 
 `field` appears only when one part is at fault; `retryable` mirrors the table.
@@ -402,7 +407,7 @@ Under `platforms.gadget.extra`:
 Environment: `GADGET_ACCESS_TOKEN` — if set, every request must carry it in
 `X-Gadget-Token`.
 
-Fixed constants: audio cap 32 MiB; `duration_seconds` `1..900`; clock skew
+Fixed constants: audio cap 2 GiB; `duration_seconds` `1..86400`; clock skew
 ±300 s for both `X-Gadget-Ts` and a future `recorded_at`; pipeline attempts 8
 with the backoff above; device backoff 5 s → 300 s; idle poll 120 s; staging
 retry ×3 at 100 ms.

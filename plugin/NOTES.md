@@ -67,10 +67,10 @@ are ignored; a repeated part is `400`.
 
 | Part | Required | Format and rules |
 |---|---|---|
-| `audio` | yes | Exactly one **file** part, non-empty, ≤ 32 MiB. Sniffed from the bytes: WAV PCM16 mono 8–48 kHz, or Ogg Opus mono. The part's own `Content-Type` and `filename` are ignored — send `audio=@file` and the server identifies the codec itself. |
+| `audio` | yes | Exactly one **file** part, non-empty, ≤ 2 GiB. Sniffed from the bytes: WAV PCM16 mono 8–48 kHz, or Ogg Opus mono. The part's own `Content-Type` and `filename` are ignored — send `audio=@file` and the server identifies the codec itself. |
 | `device_id` | yes | `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` — the paired device's id, as in the hub's enrollment. |
 | `recorded_at` | yes | ISO-8601 **with an offset**: `2026-11-20T08:15:04-06:00`, `2026-11-20T14:15:04Z`, optional fractional seconds. Normalized to `YYYY-MM-DDTHH:MM:SSZ` for storage and key derivation; the **raw** string goes into the HMAC. Must not be more than 300 s in the future. |
-| `duration_seconds` | yes | Decimal integer `1..900`. Advisory: never verified against the audio, copied to the note. |
+| `duration_seconds` | yes | Decimal integer `1..86400` (24 h). Advisory: never verified against the audio, copied to the note. |
 | `idempotency_key` | no | `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`. Generated once per recording and resent unchanged on every retry; the device's `note_id` fits and is the natural value. |
 | `checksum` | no | 64 lowercase hex chars: SHA-256 of the `audio` bytes as sent. When present it must equal the digest the server computed, else `409`. |
 
@@ -179,7 +179,7 @@ Error envelope — one shape for every failure, `field` only when one part is
 at fault:
 
 ```
-{"error": {"code": "invalid_field", "message": "duration_seconds must be an integer in 1..900", "field": "duration_seconds", "retryable": false}}
+{"error": {"code": "invalid_field", "message": "duration_seconds must be an integer in 1..86400", "field": "duration_seconds", "retryable": false}}
 ```
 
 | HTTP | `code` | `retryable` | Cause |
@@ -190,7 +190,7 @@ at fault:
 | 405 | `method_not_allowed` | no | not `POST` (the answer keeps `Allow: POST`) |
 | 409 | `checksum_mismatch` | no | supplied `checksum` ≠ computed digest |
 | 409 | `idempotency_conflict` | no | known `job_id`, different audio bytes |
-| 413 | `too_large` | no | audio over 32 MiB or request over audio + 64 KiB |
+| 413 | `too_large` | no | audio over 2 GiB or request over audio + 64 KiB |
 | 415 | `unsupported_codec` | no | sniffing found no supported codec |
 | 422 | `invalid_field` | no | format/range rule failed; `error.field` names the part |
 | 500 | `internal` | yes | unexpected server error |
@@ -313,9 +313,9 @@ entry whose `attempts` still reads 8 is re-quarantined on the next pass).
 | `401 auth` | Device not enrolled (id ↔ key), `X-Gadget-Ts` outside ±300 s (board RTC), MAC over different strings — the canonical string must use the raw transmitted field values and include `\|idempotency_key` **only** when that part was sent — or a token mismatch | Re-pair the device; fix the clock; recompute over exactly the transmitted fields |
 | `409 checksum_mismatch` | The `checksum` part ≠ the bytes received: a corrupted transfer | Resend the identical audio |
 | `409 idempotency_conflict` | Same `job_id`, different audio: the firmware re-used a key for another recording | Generate `idempotency_key` once per recording and never change it |
-| `422 invalid_field` | `error.field` names the part — `recorded_at` needs an offset and ≤ 300 s in the future; `duration_seconds` must be `1..900` | Fix that field |
+| `422 invalid_field` | `error.field` names the part — `recorded_at` needs an offset and ≤ 300 s in the future; `duration_seconds` must be `1..86400` | Fix that field |
 | `415 unsupported_codec` | Not WAV PCM16 mono 8–48 kHz and not Ogg Opus mono (sniffed from bytes, not the declared type) | Re-encode the recording |
-| `413 too_large` | Audio > 32 MiB, or the whole request > audio cap + 64 KiB | Trim the recording |
+| `413 too_large` | Audio > 2 GiB, or the whole request > audio cap + 64 KiB | Trim the recording |
 | `503 unavailable` | The server is paused or shutting down (`"status":"paused"` in `/health`) | Retry; it answers again after the restart |
 | `507 storage` | Host disk full or the staging directory unwritable; `/health` `last_error` says what failed | Free space — the device's backoff resends automatically |
 | `202` but no note appears | `GET /health`: is the job still in `inbox`? In `failed/` its `.error` names `code`, `step` and `attempts`. The profile needs speech-to-text **and** a model configured — both run host-side after the 202 | Configure STT/model, then re-upload the same key (that requeues a quarantined job), or fix what `.error` names |

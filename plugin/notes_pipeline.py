@@ -41,6 +41,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from . import protocol
+
 logger = logging.getLogger(__name__)
 
 #: Total attempts per job (1 + 7 retries); the eighth failure quarantines.
@@ -277,8 +279,11 @@ class NoteMeta:
         if not _DEVICE_ID.fullmatch(device_id):
             raise PipelineError("device_id is not filename-safe", step="verify",
                                 code="invalid_metadata", retryable=False)
-        if not 1 <= duration <= 900 or not _HEX64.fullmatch(audio_sha256) \
-                or codec not in ("wav", "opus"):
+        # The same duration range the endpoint enforces (protocol.NOTE_DURATION_MAX,
+        # 24 h): a note that passed ingest must not be quarantined here for being long.
+        if (not protocol.NOTE_DURATION_MIN <= duration <= protocol.NOTE_DURATION_MAX
+                or not _HEX64.fullmatch(audio_sha256)
+                or codec not in ("wav", "opus")):
             raise PipelineError("duration_seconds/audio_sha256/codec fail the contract's format",
                                 step="verify", code="invalid_metadata", retryable=False)
         try:

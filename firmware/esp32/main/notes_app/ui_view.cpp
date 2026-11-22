@@ -47,17 +47,30 @@ void format_clock(const Stamp& stamp, char out[6]) {
 }
 
 void format_duration(uint32_t seconds, char out[8]) {
-  // 99:59 is the ceiling the slot takes; the recording cap is 900 s at most, so
-  // nothing the device can produce is ever clamped here.
+  // 99:59 is the ceiling the slot takes, and a note may now run for hours, so a
+  // longer time is clamped here for the glass only (the note keeps its real
+  // length; the cap line, format_of, does show hours).
   const uint32_t shown = seconds > 99u * 60u + 59u ? 99u * 60u + 59u : seconds;
   std::snprintf(out, 8, "%u:%02u", static_cast<unsigned>(shown / 60),
                 static_cast<unsigned>(shown % 60));
 }
 
 void format_of(uint32_t seconds, char out[11]) {
-  const uint32_t shown = seconds > 99u * 60u + 59u ? 99u * 60u + 59u : seconds;
-  std::snprintf(out, 11, "OF %u:%02u", static_cast<unsigned>(shown / 60),
-                static_cast<unsigned>(shown % 60));
+  // The cap slot takes "OF 99:59", and a note's cap is now the whole card
+  // (DeviceConfig::note_max_s defaults to 86400 s), so anything longer is shown
+  // in hours and minutes: "OF 24:00" reads as "as long as the card lasts", where
+  // a clamped "OF 99:59" would be a lie.
+  if (seconds > 99u * 60u + 59u) {
+    // Clamped to what the slot can hold (999 h), so the compiler can bound the
+    // conversion instead of refusing it: nothing the firmware records is close.
+    uint32_t hours = seconds / 3600u;
+    if (hours > 999u) hours = 999u;
+    std::snprintf(out, 11, "OF %u:%02u", static_cast<unsigned>(hours),
+                  static_cast<unsigned>((seconds / 60u) % 60u));
+    return;
+  }
+  std::snprintf(out, 11, "OF %u:%02u", static_cast<unsigned>(seconds / 60u),
+                static_cast<unsigned>(seconds % 60u));
 }
 
 Stamp stamp_from_unix(int64_t unix_s) {

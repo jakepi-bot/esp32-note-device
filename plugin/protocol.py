@@ -20,6 +20,19 @@ SUBPROTOCOL = "hermes-gadget.v1"
 AUTH_CONTEXT = b"hermes-gadget/v1|"
 OTA_CONTEXT = b"hermes-gadget/v1|ota|"
 NOTE_CONTEXT = b"hermes-gadget/v1|note|"
+
+# -- the voice-note contract's fixed limits (docs/voice-note-ingestion.md §2.4) --
+#: A note's audio may be as large as the card it was recorded on allows: 2 GiB.
+#: This is the device's own per-note ceiling (``kMaxNoteBytes`` in
+#: firmware/esp32/main/notes/notes_queue.hpp), so a note the firmware accepts is
+#: never refused here. 2 GiB is 12.4 h of 24 kHz PCM16 mono at 48 KB/s, and it
+#: keeps one file well inside the 4 GiB that FAT32 and the RIFF size fields cap.
+NOTE_MAX_BYTES = 2 * 1024 * 1024 * 1024
+#: ``duration_seconds`` is advisory (never checked against the audio): 1 s to
+#: 86400 s (24 h), the firmware's ``kMaxDurationS``. Both sides carry the same
+#: numbers; change them together or a device-accepted note is rejected at ingest.
+NOTE_DURATION_MIN = 1
+NOTE_DURATION_MAX = 24 * 60 * 60
 DEVICE_ID_PREFIX = "hg-"
 DEVICE_ID_RE = re.compile(r"^hg-[0-9a-f]{16}$")
 KEY_BYTES = 32

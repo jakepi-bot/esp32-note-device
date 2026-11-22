@@ -545,7 +545,7 @@ def wire_cases(audio: bytes, codec: str) -> list[Case]:
         Case("recorded_at in the future", 422, "invalid_field", "recorded_at",
              sign={"recorded_at": "2030-01-01T00:00:00Z"}),
         Case("duration 0", 422, "invalid_field", "duration_seconds", sign={"duration": "0"}),
-        Case("duration 901", 422, "invalid_field", "duration_seconds", sign={"duration": "901"}),
+        Case("duration 86401", 422, "invalid_field", "duration_seconds", sign={"duration": "86401"}),
         Case("duration not an integer", 422, "invalid_field", "duration_seconds", sign={"duration": "4.5"}),
         Case("idempotency key with a space", 422, "invalid_field", "idempotency_key",
              sign={"idem": "not a key"}),

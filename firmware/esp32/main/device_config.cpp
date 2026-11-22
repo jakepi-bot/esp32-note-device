@@ -12,9 +12,14 @@ namespace {
 constexpr const char* TAG = "hg.config";
 constexpr const char* kNoteMaxKey = "note_max_s";
 constexpr const char* kBootCountKey = "boot_count";
-constexpr int kDefaultNoteMaxS = 300;
+// The default is the ceiling, not a 5-minute clip: a note runs until the card
+// (or the 2 GiB per-note cap in notes_queue.hpp) stops it. The setting is kept
+// so a user can still choose a short limit, and its range matches the device's
+// duration ceiling so a value the firmware accepts is always storable and
+// ingestible (the hub's DURATION_MAX is the same 86400).
+constexpr int kDefaultNoteMaxS = 86400;
 constexpr int kMinNoteMaxS = 10;
-constexpr int kMaxNoteMaxS = 3600;
+constexpr int kMaxNoteMaxS = 86400;
 
 int to_int(const std::optional<std::string>& raw, int fallback) {
   if (!raw || raw->empty()) return fallback;

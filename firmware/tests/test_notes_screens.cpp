@@ -108,6 +108,21 @@ Snapshot snapshot_for(const Cache& cache, Store& store, Screen screen, uint16_t 
 
 }  // namespace
 
+TEST("the recording cap is drawn as a real duration, past 99:59 too") {
+  // A note now runs until the card (or 2 GiB) stops it, so the cap line cannot
+  // clamp at the slot's 99:59: 300 s stays "OF 5:00" and 86400 s (the config
+  // default, 24 h) reads "OF 24:00" instead of a lie.
+  char small[11], whole[11], hours[11];
+  format_of(300, small);
+  format_of(99u * 60u + 59u, whole);
+  format_of(24u * 60u * 60u, hours);
+  CHECK_EQ(std::string(small), std::string("OF 5:00"));
+  CHECK_EQ(std::string(whole), std::string("OF 99:59"));
+  CHECK_EQ(std::string(hours), std::string("OF 24:00"));
+  // It still fits the cap slot at the body size (the slot is ~180 px, 8 columns).
+  CHECK(hg::Canvas::text_width(hours, grid::kScale) <= 180);
+}
+
 TEST("home: the hero is the first true statement, in the spec's order") {
   Snapshot snap;
   snap.card = false;

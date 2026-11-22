@@ -175,9 +175,11 @@ Over USB at 115200: `notes status|list|record|stop|sync|poweroff|mount|format|pr
 `screen` for the panel image as hex, `about`, `battery`, `clock`, `power`, `radio`,
 `sd`, `wifi [on|off]`, `keys`, `ui` (`ui home` forces a full-refresh hand-over),
 `key boot|hold|pwr` (the same press the keys make, for a bench with no finger on
-the board), `phone pair|wake|allow|refuse`, `wifi-setup [stop]`, and the usual
-`set`/`get`/`diag`/`log`/`help`. The `screen` verb is how a transition's ghosting
-is measured without a camera.
+the board; it answers with the screen the press left behind, so
+`@ok boot tap -> screen home` is a tap the runtime refused and
+`@ok boot tap -> screen recording` is one it took), `phone pair|wake|allow|refuse`,
+`wifi-setup [stop]`, and the usual `set`/`get`/`diag`/`log`/`help`. The `screen`
+verb is how a transition's ghosting is measured without a camera.
 
 ## Known limits
 
@@ -189,3 +191,8 @@ is measured without a camera.
   confirm; the hold and the list order are what protect them.
 - The full-refresh duration of this panel has not been measured; every screen
   change is budgeted at about a second.
+- A tap that lands while a note is uploading is refused, not queued: the runtime
+  is in its syncing mode and the log says `not recording: an upload is in
+  flight`. With the queue long that can be minutes of a BOOT tap doing nothing,
+  so record before the queue grows or wait for `notes status` to say `mode
+  idle`.

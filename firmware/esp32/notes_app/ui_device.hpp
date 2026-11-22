@@ -106,6 +106,10 @@ class NotesUi {
   std::string console(std::string_view line);
 
   notesui::Screen screen() const { return state_.screen(); }
+  // The screen's own word for where it is ("home", "recording", ...): the first
+  // field of `ui`, and the answer `key` prints so a press that started nothing
+  // says so at the console without a log hunt.
+  const char* screen_word() const;
 
  private:
   enum class Play : uint8_t { Idle, Starting, Running, Stopping };

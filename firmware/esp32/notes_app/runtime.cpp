@@ -471,21 +471,30 @@ std::string Runtime::on_action(int action) {
 }
 
 void Runtime::start_note(uint32_t now) {
-  if (mode_ != Mode::Idle) return;
+  // Every refusal is logged where it happens, so the console's answer for a
+  // BOOT tap that started nothing is never "its reason is above" over an empty
+  // log. A quiet return here is what let a tap look like a dead key.
+  if (mode_ != Mode::Idle) {
+    ESP_LOGW(TAG, "not recording: %s",
+             mode_ == Mode::Syncing ? "an upload is in flight" : "a recording is already running");
+    return;
+  }
   stop_error_.clear();
   if (!io_.mic) {
-    error_ = "No microphone";
     ESP_LOGW(TAG, "not recording: this board brought up no microphone");
+    error_ = "No microphone";
     notify_ui();
     return;
   }
   if (!ensure_sd()) {
+    ESP_LOGW(TAG, "not recording: %s", sd_error_.empty() ? "no SD card" : sd_error_.c_str());
     error_ = sd_error_.empty() ? "No SD card" : sd_error_;
     notify_ui();
     return;
   }
   run_retention(now, true);
   if (low_space_) {
+    ESP_LOGW(TAG, "not recording: %s", kLowSpaceError);
     error_ = kLowSpaceError;
     notify_ui();
     return;
@@ -505,6 +514,7 @@ void Runtime::start_note(uint32_t now) {
   }
   if (!created) {
     error_ = error.empty() ? "Cannot write to the card" : error;
+    ESP_LOGW(TAG, "not recording: %s", error_.c_str());
     sd_ready_ = false;
     sd_mount::release();
     notify_ui();

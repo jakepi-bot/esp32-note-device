@@ -115,7 +115,9 @@ bool run_effect(hgp::notesui::Effect effect, uint16_t note) {
   switch (effect) {
     case Effect::BeginRecording: {
       const std::string answer = g_runtime.on_action(static_cast<int>(Action::StartRecording));
-      if (answer.empty()) ESP_LOGW(TAG, "the runtime would not start a recording (its reason is above)");
+      // Runtime::start_note logs its own reason on every refusal, so this is
+      // the summary line: the glass goes back to Home and the log says why.
+      if (answer.empty()) ESP_LOGW(TAG, "the runtime refused to start a recording");
       return !answer.empty();
     }
     case Effect::EndRecording: {
@@ -383,16 +385,17 @@ std::string console_line(std::string_view line) {
     return out;
   }
   if (line.rfind("key ", 0) == 0) {
-    // TEMPORARY (t_704171a7): the same press the loop makes, for a host with no
-    // finger on the board. Removed before this lands.
+    // The same press the keys make, for a bench with no finger on the board.
+    // `press()` runs the screen machine and the effect synchronously, so the
+    // screen this prints is the one the glass was handed, not a guess.
     const std::string_view which(line.substr(4));
     if (which == "boot") {
       g_ui.press(hgp::notesui::Key::BootTap);
-      return std::string("@ok boot tap");
+      return std::string("@ok boot tap -> screen ") + g_ui.screen_word();
     }
     if (which == "hold") {
       g_ui.press(hgp::notesui::Key::BootHold);
-      return std::string("@ok boot hold");
+      return std::string("@ok boot hold -> screen ") + g_ui.screen_word();
     }
     if (which == "pwr") {
       g_ui.press(hgp::notesui::Key::Power);

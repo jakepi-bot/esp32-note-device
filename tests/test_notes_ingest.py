@@ -716,3 +716,29 @@ def test_the_route_answers_400_for_a_non_multipart_request(server):
                            headers={"content-type": "application/octet-stream"})
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "bad_request"
+
+
+def test_a_slow_body_is_not_a_replay_attack(server):
+    """A 248 MB note takes ~17 minutes; its stamp is minted before the send.
+
+    The skew window is measured from when the request arrived, so a body that
+    streams for longer than MAX_SKEW_S is still accepted, while a stamp that is
+    stale at arrival is still refused.
+    """
+    from plugin.notes_ingest import MAX_SKEW_S
+
+    body_fields = fields()
+    stale = int(time.time()) - 20 * 60  # stamped twenty minutes before it ends
+    headers = signed(body_fields, ts=str(stale))
+    body = multipart(body_fields, WAV)
+    content_type = f"multipart/form-data; boundary={BOUNDARY}"
+
+    # Arrived inside the window (10 s after its stamp), body finished 20 min later.
+    status, payload = server.handle_upload(headers, content_type, len(body), body,
+                                           float(stale) + 10)
+    assert status == 202, payload
+    # Stale when it arrived: still a replay, however fast the body was.
+    status, payload = server.handle_upload(headers, content_type, len(body), body,
+                                           float(stale) + MAX_SKEW_S + 60)
+    assert status == 401
+    assert error_of(payload)["code"] == "auth"

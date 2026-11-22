@@ -602,7 +602,8 @@ class NotesServer:
 
     def handle_upload(self, headers: Mapping[str, str], content_type: Optional[str],
                       content_length: Optional[int],
-                      body: bytes | bytearray | mmap.mmap) -> tuple[int, dict]:
+                      body: bytes | bytearray | mmap.mmap,
+                      received_at: Optional[float] = None) -> tuple[int, dict]:
         """Validate, authorize, de-duplicate and stage one upload; answer as §3 says.
 
         This is the whole contract minus the byte-moving HTTP layer, which is why
@@ -615,7 +616,7 @@ class NotesServer:
             request = self._validate(body, content_type)
         except _Rejected as rejection:
             return rejection.status, rejection.payload
-        error = self._authorize(dict(headers), request)
+        error = self._authorize(dict(headers), request, received_at)
         if error is not None:
             return error
         return self._accept(request)
@@ -710,7 +711,8 @@ class NotesServer:
                         idempotency_key=idempotency_key, checksum=checksum,
                         audio_sha256=hashlib.sha256(audio_part.value).hexdigest())
 
-    def _authorize(self, headers: Mapping[str, str], request: _Request) -> Optional[tuple[int, dict]]:
+    def _authorize(self, headers: Mapping[str, str], request: _Request,
+                   received_at: Optional[float] = None) -> Optional[tuple[int, dict]]:
         """§4 step 6: timestamp skew, enrollment, MAC, optional access token.
 
         The MAC covers the raw field strings and the digest of the bytes we
@@ -722,7 +724,12 @@ class NotesServer:
         mac = h.get(H_MAC, "")
         if _TS.fullmatch(ts_raw) is None:
             return _fail(401, "auth", "X-Gadget-Ts must be decimal unix seconds")
-        if abs(time.time() - int(ts_raw)) > MAX_SKEW_S:
+        # Against the moment the request arrived, not the moment its body was
+        # fully read: the device stamps the header before it sends, and the body
+        # of a long note takes minutes. The window still bounds what an attacker
+        # can replay; it no longer bounds how long a legitimate body may take.
+        window_base = time.time() if received_at is None else received_at
+        if abs(window_base - int(ts_raw)) > MAX_SKEW_S:
             return _fail(401, "auth", "X-Gadget-Ts is outside the ±300 s window")
         key = self.store.key_for(request.device_id) if self.store is not None else None
         if not key:
@@ -993,6 +1000,11 @@ def create_app(server: NotesServer, page_dir: Optional[Path | str] = None):
         early = server.precheck(headers, headers.get("content-type"), length)
         if early is not None:
             return reply(*early)
+        # When the request arrived, not when its body finished. `X-Gadget-Ts` is
+        # stamped by the device before it starts sending, and a multi-hundred-MB
+        # note legitimately takes minutes to stream: judged against the clock at
+        # the end of the body, every such upload looked like a replay (§2.4).
+        received_at = time.time()
         # The body is spooled to the staging area instead of a bytearray: a note
         # may be as large as the device's own ceiling (2 GiB, MAX_NOTE_BYTES), and
         # holding the body, a copy of the audio part and the hasher at once is
@@ -1026,12 +1038,14 @@ def create_app(server: NotesServer, page_dir: Optional[Path | str] = None):
                 os.fsync(spool.fileno())
             if size == 0:  # an empty body is the contract's 400, below
                 status, payload = await asyncio.to_thread(
-                    server.handle_upload, headers, headers.get("content-type"), length, b"")
+                    server.handle_upload, headers, headers.get("content-type"), length, b"",
+                    received_at)
             else:
                 with open(spool.name, "rb") as handle, \
                         mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
                     status, payload = await asyncio.to_thread(
-                        server.handle_upload, headers, headers.get("content-type"), length, mapped)
+                        server.handle_upload, headers, headers.get("content-type"), length, mapped,
+                        received_at)
         finally:
             try:
                 os.unlink(spool.name)

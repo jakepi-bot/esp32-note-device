@@ -829,8 +829,8 @@ y=194  └───────────────────────�
 | band | — | 8 | — | queue count of the *previous* notes |
 | rule | 12 | 27 | | |
 | label `RECORDING` | 12 | 38 | 106 × 14 | scale 2, sentence case is wrong here — uppercase |
-| elapsed | centred | 62 | ≤ 88 × 21 | scale 3, `M:SS` — the hero |
-| cap | centred | 94 | ≤ 82 × 14 | `OF M:SS`, from `note_max_s` (86400 s default: `OF 24:00`, hours once past 99:59) |
+| elapsed | centred | 62 | ≤ 88 × 21 | scale 3, `M:SS` and `H:MM:SS` past an hour — the hero, the real length, never a clamp |
+| cap | centred | 94 | ≤ 88 × 14 | `OF M:SS` and `OF H:MM` past an hour, plus the room behind it: `OF 1:30·2.2G`. The cap is the capture's own budget — the setting, the 2 GiB ceiling and the card's free space less its 256 MB reserve, whichever is smallest — not the setting alone |
 | bar | 12 | 118 | 176 × 9 | `elapsed / cap` |
 | rule | 12 | 144 | | |
 | footer | 12 | 152, 170 | | **two lines** |
@@ -1219,7 +1219,7 @@ one column is 12 px, at scale 3 it is 18 px.
 | `home.sub.nothing_lost` | `NOTHING LOST` | 2 | 12 | 142 | 168 | Home | new |
 | `home.sub.plug_in` | `PLUG IN SOON` | 2 | 12 | 142 | 168 | Home | new |
 | `home.label.recording` | `RECORDING` | 2 | 9 | 106 | 106 **←** | Recording | new |
-| `fmt.of_cap` | `OF %u:%02u` | 2 | 7 | 82 | 106 | Recording, Playing | new |
+| `fmt.of_cap` | `OF %u:%02u`, `OF %u:%02u:%02u` past an hour, `OF %u:%02u·%s` with the size | 2 | 7..13 | 156 | 106 | Recording, Playing | new |
 | `key.boot.record` | `BOOT: record` | 2 | 12 | 142 | 166 | Home | new |
 | `key.boot.next` | `BOOT: next` | 2 | 10 | 118 | 166 | Menu, List, Note | new |
 | `key.boot.stop` | `BOOT: stop` | 2 | 10 | 118 | 166 | Recording, Playing | new |

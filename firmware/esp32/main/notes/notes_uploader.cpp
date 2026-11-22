@@ -3,6 +3,7 @@
 
 #include <sys/stat.h>
 
+#include <cstdint>
 #include <cstring>
 #include <ctime>
 
@@ -170,7 +171,20 @@ Uploader::Step Uploader::step() {
       error_ = "cannot sign the request";
       return Step::Rejected;
     }
-    total_ = static_cast<uint32_t>(request_.content_length(file_bytes_));
+    // The body is head + audio + tail and the ESP client declares its length as
+    // a signed 32-bit int: a note at or past 2 GiB would arrive as a negative
+    // Content-Length and the POST would never start. Capture stops a file short
+    // of that (kMaxNoteFileBytes), so this is the note an older image recorded at
+    // the old ceiling: it cannot ever be sent, and it is terminal rather than a
+    // retry that repeats forever.
+    const uint64_t body = request_.content_length(file_bytes_);
+    if (body > static_cast<uint64_t>(INT32_MAX)) {
+      phase_ = Phase::Finished;
+      error_ = "the note is " + std::to_string(body) + " bytes, past one upload's " +
+               std::to_string(INT32_MAX) + ": it can never be sent";
+      return Step::Rejected;
+    }
+    total_ = static_cast<uint32_t>(body);
     esp_http_client_config_t cfg = {};
     cfg.url = url_.c_str();
     cfg.method = HTTP_METHOD_POST;

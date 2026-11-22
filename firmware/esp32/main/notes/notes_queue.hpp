@@ -26,6 +26,18 @@ constexpr uint32_t kSchemaVersion = 1;
 // 24 kHz PCM16 mono (48 KB/s), and it keeps a single file well inside what
 // FAT32 and the RIFF 32-bit size fields handle (4 GiB is their limit).
 constexpr size_t kMaxNoteBytes = 2ull * 1024ull * 1024ull * 1024ull;
+// The room a note leaves on the card: a recording is capped at the free space
+// minus this, so a note can never be the write that fills the volume. The FAT's
+// own slack, the note.json, the directory entries and the retention pass all
+// live inside it.
+constexpr uint64_t kNoteReserveBytes = 256ull * 1024ull * 1024ull;
+// The largest file a note may be: the per-note ceiling less the multipart
+// head and tail, because the device HTTP stack takes the declared body length
+// as a signed 32-bit int (esp_http_client_open(client, int)) and a body of
+// 2 GiB or more would arrive as a negative Content-Length. The head and the
+// tail are a few hundred bytes of `note.json`; 64 KiB is slack, not a limit
+// anyone meets - the byte cap stops a note at 12.4 h either way.
+constexpr uint64_t kMaxNoteFileBytes = kMaxNoteBytes - 64ull * 1024ull;
 // duration_seconds is 1..86400 (24 h), the same range the hub's DURATION_MAX
 // enforces (plugin/protocol.py NOTE_DURATION_MAX). The byte cap above stops a
 // 24 kHz note at 12.4 h, so this is a sanity bound, never the limit a user

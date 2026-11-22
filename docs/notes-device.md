@@ -188,9 +188,28 @@ notes/
 - The upload moves a note from `pending/` to `sent/` only after the server
   answers 2xx (or `200 duplicate`); a terminal 4xx moves it to `failed/`.
 - Synced notes are deleted after 14 days, and oldest-first when the card is under
-  10% free. `pending/` and `failed/` are never deleted by age.
-- The device refuses to start a recording on a full card rather than write a note
-  the card cannot hold.
+  10% free. `pending/` and `failed/` are never deleted by age, and never by size
+  either: a note the hub has not taken is not a candidate however large it is
+  (a 1.5 GiB pending note beside an older synced one is a host case).
+- A note is capped when it starts: the setting (`note_max_s`, 24 h out of the
+  box), the 2 GiB per-note ceiling, and the card's free space less a **256 MB
+  reserve**, whichever is smallest. The recording face says which one it got
+  (`OF 1:30·2.2G`), so a note is never the write that fills the volume. A card
+  with less than the reserve free starts no note at all (`notes record` answers
+  `SD almost full, no synced notes to delete`); the 10 % above is the rule that
+  decides when synced notes are pruned, not whether a note may start, so a big
+  card at 9 % free still records what it has room for.
+- The free space is re-read every 30 s while a note runs (the same tick the
+  counter moves on, no second timer). If the card fills anyway - another writer,
+  a mount that over-reported - the note **commits** with the audio it holds: the
+  RIFF header is rewritten with the real byte count and the log says
+  `(the card filled: kept what it holds)`. A note that reaches its own budget
+  stops the same way and logs `(the note's budget reached)`.
+- `notes list` prints each id with its `duration_seconds` (`<id>=5400`), so a
+  note past 100 minutes reads its real length; the note screen prints it as
+  `14:02 · 1h30` and the counter as `1:30:00`. The list shows the newest eight
+  ids per state - the cap is there to keep one console line readable, so it must
+  not hide the note just recorded.
 
 ## Radio and power
 

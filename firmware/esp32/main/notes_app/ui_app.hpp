@@ -97,6 +97,10 @@ class ScreenApp {
   // draws the recording face with the wait on it, no counter. Returns the frame
   // that move owes, if any.
   Outcome follow_capture(bool recording, uint32_t elapsed_s, uint32_t now_ms, bool queued = false);
+  // The cap the running capture started with (the runtime's own budget), so the
+  // recording face and the cap stop below read the card's answer instead of the
+  // setting's default. Called beside follow_capture; 0 leaves the snapshot's cap.
+  void set_capture_cap(uint32_t cap_s, uint64_t cap_bytes);
   // The runtime said no to an effect the screens had already acted on: put the
   // screen back where the device really is (Home for a recording that never
   // began), so the frame drawn is the truth and not the intent.

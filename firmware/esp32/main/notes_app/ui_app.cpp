@@ -374,6 +374,11 @@ Outcome ScreenApp::tick(uint32_t now_ms) {
   return out;
 }
 
+void ScreenApp::set_capture_cap(uint32_t cap_s, uint64_t cap_bytes) {
+  if (cap_s != 0) snap_.note_max_s = cap_s;
+  snap_.record_cap_bytes = cap_bytes;
+}
+
 Outcome ScreenApp::follow_capture(bool recording, uint32_t elapsed_s, uint32_t now_ms, bool queued) {
   Outcome out;
   if (queued && !recording) {
@@ -576,6 +581,7 @@ ScreenDraw ScreenApp::frame() const {
     case Screen::Recording:
       d.recording.elapsed_s = snap_.record_elapsed_s;
       d.recording.cap_s = snap_.note_max_s;
+      d.recording.cap_bytes = snap_.record_cap_bytes;
       d.recording.queued = snap_.record_queued;
       break;
     case Screen::Menu:

@@ -111,19 +111,47 @@ Snapshot snapshot_for(const Cache& cache, Store& store, Screen screen, uint16_t 
 
 }  // namespace
 
-TEST("the recording cap is drawn as a real duration, past 99:59 too") {
-  // A note now runs until the card (or 2 GiB) stops it, so the cap line cannot
-  // clamp at the slot's 99:59: 300 s stays "OF 5:00" and 86400 s (the config
-  // default, 24 h) reads "OF 24:00" instead of a lie.
-  char small[11], whole[11], hours[11];
-  format_of(300, small);
-  format_of(99u * 60u + 59u, whole);
-  format_of(24u * 60u * 60u, hours);
-  CHECK_EQ(std::string(small), std::string("OF 5:00"));
-  CHECK_EQ(std::string(whole), std::string("OF 99:59"));
-  CHECK_EQ(std::string(hours), std::string("OF 24:00"));
-  // It still fits the cap slot at the body size (the slot is ~180 px, 8 columns).
-  CHECK(hg::Canvas::text_width(hours, grid::kScale) <= 180);
+TEST("durations keep their real length: hours past 99:59, never a clamp") {
+  // A note runs until the card (or 2 GiB) stops it, so nothing on the glass may
+  // clamp at the old 99:59: a 90 minute note reads "1:30:00", and the cap line
+  // reads the same shape instead of a "99:59" nobody believes.
+  char small[10], whole[10], long_note[10];
+  format_duration(14, small);
+  format_duration(59u * 60u + 59u, whole);
+  format_duration(90u * 60u, long_note);
+  CHECK_EQ(std::string(small), std::string("0:14"));
+  CHECK_EQ(std::string(whole), std::string("59:59"));
+  CHECK_EQ(std::string(long_note), std::string("1:30:00"));
+  // The 24 h contract ceiling is the longest the counter can ever read.
+  char ceiling[10];
+  format_duration(24u * 60u * 60u, ceiling);
+  CHECK_EQ(std::string(ceiling), std::string("24:00:00"));
+  CHECK(hg::Canvas::text_width(ceiling, grid::kHero) <= 200);  // the hero, scale 3
+
+  // The note screen's line also carries the clock, in 14 columns at the body
+  // size: a long note takes the short form rather than being cut.
+  char short_note[6];
+  format_duration_short(90u * 60u + 5u, short_note);
+  CHECK_EQ(std::string(short_note), std::string("1h30"));
+  format_duration_short(14, short_note);
+  CHECK_EQ(std::string(short_note), std::string("0:14"));
+
+  // The cap line: exact below an hour, to the minute past it, with the room the
+  // capture was given beside it.
+  char cap_small[24], cap_hours[24], cap_card[24];
+  format_cap(300, 0, cap_small);
+  format_cap(90u * 60u, 2100ull * 1024ull * 1024ull, cap_hours);
+  format_cap(15u * 60u, 300ull * 1024ull * 1024ull, cap_card);
+  CHECK_EQ(std::string(cap_small), std::string("OF 5:00"));
+  CHECK_EQ(std::string(cap_hours), std::string("OF 1:30\xc2\xb7" "2.2G"));
+  CHECK_EQ(std::string(cap_card), std::string("OF 15:00\xc2\xb7" "300M"));
+  // The widest line a full card can ask for still fits the body's 176 px.
+  char widest[24];
+  // The largest budget a note can be given: kMaxNoteFileBytes, 12 h 25 min of
+  // 48 KB/s audio (the exact seconds the capture's own budget works out to).
+  format_cap(44737, 2ull * 1024ull * 1024ull * 1024ull - 64ull * 1024ull, widest);
+  CHECK_EQ(std::string(widest), std::string("OF 12:25\xc2\xb7" "2.1G"));
+  CHECK(hg::Canvas::text_width(widest, grid::kScale) <= 176);
 }
 
 TEST("home: the hero is the first true statement, in the spec's order") {
@@ -295,6 +323,33 @@ TEST("list: the window the app asks for is the window it draws") {
   NoteView stale;
   CHECK(app.open_note() >= kListRows);
   CHECK(!build_note(list_window, app.open_note(), 0, stale));
+}
+
+TEST("note: a note past 100 minutes shows its real length, not a clamp") {
+  // 5400 s is 90 minutes: past the old 99:59 ceiling, and the length is the one
+  // fact this screen exists to show. The line also carries the clock, so the
+  // long form ("14:02 \u00b7 1:30:00") is one column too wide - the short form says
+  // the same length in five.
+  Snapshot snap;
+  std::snprintf(snap.notes[0].day, sizeof snap.notes[0].day, "21 Nov");
+  std::snprintf(snap.notes[0].clock, sizeof snap.notes[0].clock, "14:02");
+  snap.stub_first = 0;
+  snap.stub_rows = 1;
+  snap.notes[0].duration_s = 5400;
+  NoteView view;
+  CHECK(build_note(snap, 0, 0, view));
+  CHECK_EQ(std::string(view.when), std::string("14:02 \xc2\xb7 1h30"));
+  CHECK(hg::Canvas::text_width(view.when, grid::kScale) <= grid::kWidth);
+
+  // Under an hour the plain time is the clearest, and it fits beside the clock.
+  snap.notes[0].duration_s = 20u * 60u;
+  CHECK(build_note(snap, 0, 0, view));
+  CHECK_EQ(std::string(view.when), std::string("14:02 \xc2\xb7 20:00"));
+
+  // The counter on the note's own screen is the same number, never 99:59.
+  snap.notes[0].duration_s = 5400;
+  CHECK(build_note(snap, 0, 0, view));
+  CHECK(std::string(view.when).find("99:59") == std::string::npos);
 }
 
 TEST("list: rows carry a date and a mark for the exception only") {

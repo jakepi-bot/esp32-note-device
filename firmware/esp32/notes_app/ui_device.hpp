@@ -85,6 +85,12 @@ class NotesUi {
     // A tap the runtime kept because an upload is in flight: the glass draws the
     // queued face rather than a counter for a note that is not being made.
     std::function<bool()> queued;
+    // What the running capture may hold: the runtime's budget in seconds and in
+    // bytes, read off the capture itself, so the face says what the card has room
+    // for (`OF 1:30·2.1G`) and the cap stop lands where the file stops. 0 = the
+    // probe has no answer (the snapshot's own cap stands).
+    std::function<uint32_t()> cap_s;
+    std::function<uint64_t()> cap_bytes;
   };
   void set_capture_probe(CaptureProbe probe) { capture_probe_ = std::move(probe); }
 

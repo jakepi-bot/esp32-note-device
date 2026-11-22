@@ -478,10 +478,14 @@ notesui::Outcome NotesUi::sync_capture() {
   const bool queued = capture_probe_.queued ? capture_probe_.queued() : false;
   const uint32_t now = ports_.system != nullptr ? ports_.system->now_ms() : esp_timer_get_time() / 1000;
   const uint32_t elapsed = capture_probe_.elapsed_s ? capture_probe_.elapsed_s() : 0;
+  // The cap the capture started with, not the setting's default: a note is
+  // limited by the card's room as often as by `note_max_s`.
+  const uint32_t cap_s = capture_probe_.cap_s && recording ? capture_probe_.cap_s() : 0;
+  const uint64_t cap_bytes = capture_probe_.cap_bytes && recording ? capture_probe_.cap_bytes() : 0;
   static bool was_queued = false;
   if (was_queued && recording) ESP_LOGI(TAG, "a queued tap started: the probe says %u s", static_cast<unsigned>(elapsed));
   was_queued = queued;
-  return state_.set_capture(recording, elapsed, queued, now);
+  return state_.set_capture(recording, elapsed, queued, now, cap_s, cap_bytes);
 }
 
 void NotesUi::start_playback(uint16_t index) {

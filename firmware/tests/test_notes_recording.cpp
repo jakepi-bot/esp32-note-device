@@ -187,3 +187,43 @@ TEST("queue: a stale counter origin cannot commit a capture the card says is emp
   CHECK(late.effect != Effect::EndRecording);
   CHECK(app.screen() == Screen::Recording);
 }
+
+TEST("recording: the face carries the capture's own cap, and stops where the file stops") {
+  // The setting says 24 h; the card had room for 1.5 h when the capture started
+  // (a console `notes record`, so the glass adopts the runtime's own second). The
+  // face must say 1.5 h - the note can only ever be that long - and the screen
+  // must stop the capture there, not at the setting.
+  Snapshot snap = recording_snapshot();
+  snap.note_max_s = 24u * 60u * 60u;
+  ScreenApp app;
+  app.begin(snap);
+  app.set_capture_cap(5400, 252ull * 1024ull * 1024ull);
+  const Outcome entered = app.follow_capture(true, 5399, 6000000);  // 100 min of uptime
+  CHECK(entered.draw);
+  CHECK(app.screen() == Screen::Recording);
+  CHECK_EQ(app.frame().recording.cap_s, 5400u);
+  CHECK_EQ(app.frame().recording.cap_bytes, 252ull * 1024ull * 1024ull);
+  CHECK_EQ(app.snapshot().note_max_s, 5400u);
+
+  // A cap answer of 0 means "the probe has nothing to say", not "the cap is 0":
+  // the capture's own cap stands.
+  app.set_capture_cap(0, 0);
+  CHECK_EQ(app.frame().recording.cap_s, 5400u);
+
+  // At the cap's second the note is committed - 23 h before the setting would
+  // have stopped it - and the glass goes Home. The runtime's second agrees, which
+  // is what the gate asks for: a screen must not commit a note the card says is
+  // empty.
+  const Outcome stop = app.tick(6000000 - 5399 * 1000 + 5400 * 1000);
+  CHECK(stop.effect == Effect::EndRecording);
+  CHECK(app.screen() == Screen::Home);
+
+  // And under the cap nothing is committed, whatever the setting says.
+  ScreenApp under;
+  under.begin(snap);
+  under.set_capture_cap(5400, 252ull * 1024ull * 1024ull);
+  under.follow_capture(true, 3000, 6000000);
+  const Outcome midway = under.tick(6000000 - 3000 * 1000 + 3000 * 1000);
+  CHECK(midway.effect != Effect::EndRecording);
+  CHECK(under.screen() == Screen::Recording);
+}

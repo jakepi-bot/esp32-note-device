@@ -56,7 +56,14 @@ struct Snapshot {
   int8_t battery_pct = -1;      // -1 unknown
   bool external = false;        // on external power (the bolt)
   bool low_power = false;       // the caller's battery rule, ≤10 % off power
-  uint32_t note_max_s = 86400;  // the recording cap (DeviceConfig::note_max_s)
+  // What a recording will hold: the setting's seconds until the runtime says
+  // otherwise, then the cap the capture actually started with (the setting, the
+  // contract ceiling and the card's room, whichever is smallest). It is both the
+  // recording face's cap line and the point the screen stops the capture at.
+  uint32_t note_max_s = 86400;
+  // The bytes behind that cap (the capture's budget: free space less the reserve,
+  // never past the per-note ceiling), for the face's size. 0 = unknown.
+  uint64_t record_cap_bytes = 0;
   bool recording = false;
   uint32_t record_elapsed_s = 0;
   // Armed, not started: a tap made while an upload was in flight. The glass
@@ -130,10 +137,20 @@ void format_day(const Stamp& stamp, char out[7]);
 void format_when(const Stamp& stamp, char out[13]);
 // "14:02" - Home's LAST line. 5 columns.
 void format_clock(const Stamp& stamp, char out[6]);
-// "0:14", "12:03". 5 columns at most.
-void format_duration(uint32_t seconds, char out[8]);
-// "OF 5:00", and "OF 24:00" when the cap is longer than 99:59. 8 columns.
-void format_of(uint32_t seconds, char out[11]);
+// "0:14", "12:03", and "1:40:05" past an hour - the real length, never a clamp.
+// 9 columns holds "23:59:59" and its terminator. Used for the counter on the
+// recording face and the position on the playing face.
+void format_duration(uint32_t seconds, char out[10]);
+// The same length in 5 columns, for a slot that also carries the clock
+// ("14:02 · 1h40", the note screen): below an hour "M:SS", past it "1h40".
+void format_duration_short(uint32_t seconds, char out[6]);
+// "OF 0:14", "OF 1:40:05": the cap line of a recording or a playing note. 12
+// columns holds "OF 23:59:59" and its terminator.
+void format_of(uint32_t seconds, char out[13]);
+// The recording face's cap line: the time left and the room behind it, from the
+// capture's own budget ("OF 1:40:05 · 2.1G"). `bytes` of 0 leaves the size out,
+// so a caller that knows only the seconds still gets a cap line.
+void format_cap(uint32_t seconds, uint64_t bytes, char out[24]);
 
 // A note.json's `recorded_at` (UTC, "YYYY-MM-DDTHH:MM:SSZ") as local fields.
 // `local` must already be localtime-of(unix), which is why it is passed in:
@@ -207,7 +224,10 @@ bool build_confirm(const Snapshot& snap, uint16_t index, ConfirmView& out);
 
 struct RecordingView {
   uint32_t elapsed_s = 0;
-  uint32_t cap_s = 86400;  // DeviceConfig::note_max_s's default, replaced from the config
+  // The cap this note will hit, and the bytes behind it (Snapshot::note_max_s
+  // and record_cap_bytes: the capture's own budget, not the setting's default).
+  uint32_t cap_s = 86400;
+  uint64_t cap_bytes = 0;
   bool queued = false;     // armed by a tap during an upload; nothing recorded yet
 };
 
@@ -244,7 +264,7 @@ struct PhoneStatus {
 struct PhoneView {
   char name[18] = {};      // the device's name, what the phone's chooser shows
   const char* state = nullptr;  // "WAITING", "CONNECTED", "PAIRING FULL"
-  char countdown[8] = {};  // "4:59"; empty when there is no deadline left
+  char countdown[10] = {};  // "4:59"; empty when there is no deadline left
   char table[20] = {};     // "2 OF 3 PAIRED"; empty when unknown
   const char* note = nullptr;  // "HOLDING WINDOW OPEN", "BLE OFF", or null
 };

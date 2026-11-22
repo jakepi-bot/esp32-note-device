@@ -178,6 +178,7 @@ The USB serial console at 115200 answers these on the notes firmware:
 | `notes list` | the notes on the card, newest first |
 | `notes record`, `notes stop` | record without touching the keys |
 | `notes sync` | run an upload window now |
+| `notes retry <id>` | put a note from `failed/` back in the queue for one pass |
 | `notes poweroff` | the graceful shutdown a PWR tap performs |
 | `notes mount`, `notes format`, `notes prune` | card housekeeping |
 | `screen` | the panel image as hex, 1 bit per pixel (no camera needed) |

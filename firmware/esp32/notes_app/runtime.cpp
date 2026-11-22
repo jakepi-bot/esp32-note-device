@@ -627,7 +627,17 @@ void Runtime::begin_sync(uint32_t now) {
   if (retry_waiting_ && static_cast<int32_t>(now - retry_at_ms_) < 0) return;
   if (pending_ == 0) return;
 
-  for (const auto& id : store_.pending_ids()) {
+  const auto ids = store_.pending_ids();
+  // `notes retry` re-arms one terminal note and pins the queue to it. If that
+  // note has since been deleted or moved on, drop the pin: a stale pin would
+  // skip every other note and stall the queue until a reboot.
+  if (!forced_id_.empty()) {
+    bool present = false;
+    for (const auto& id : ids) present = present || id == forced_id_;
+    if (!present) forced_id_.clear();
+  }
+  for (const auto& id : ids) {
+    if (!forced_id_.empty() && id != forced_id_) continue;
     if (id == sync_id_ && retry_waiting_) continue;  // this one is in its backoff
     notes::Meta meta;
     if (!store_.read_meta(id, meta)) continue;
@@ -688,6 +698,7 @@ void Runtime::step_sync(uint32_t now) {
   const std::string id = sync_id_;
   mode_ = Mode::Idle;
   sync_id_.clear();
+  if (id == forced_id_) forced_id_.clear();
   if (id.empty()) {
     retry_waiting_ = false;
     return;
@@ -958,6 +969,23 @@ std::string Runtime::console(std::string_view args) {
     if (pending_ == 0) return "@ok nothing pending";
     return "@ok window opened, " + std::to_string(pending_) + " pending";
   }
+  if (cmd == "retry") {
+    // Re-send one note that already went to failed/. failed/ is terminal by
+    // design: nothing walks it again, so a note that died on a hub bug stays
+    // dead on the card until someone says otherwise. This puts it back in
+    // pending/ and opens a window, pinned to that one id so the rest of the
+    // queue does not go out in the same pass.
+    if (rest.empty()) return "@error usage: notes retry <note_id>";
+    if (mode_ != Mode::Idle) return "@error busy: a note is recording or uploading";
+    if (!ensure_sd()) return "@error " + (sd_error_.empty() ? std::string("no card") : sd_error_);
+    if (notes_url().empty()) return "@error no notes endpoint (set server, or notes url)";
+    if (!store_.move(rest, notes::NoteState::Failed, notes::NoteState::Pending))
+      return notes::unknown_note_answer(rest);
+    forced_id_ = rest;
+    refresh_counts();
+    sync_now(now);
+    return "@ok requeued " + rest + ", window opened";
+  }
   if (cmd == "url") {
     if (rest.empty()) return "@notes url " + (notes_url().empty() ? std::string("(none)") : notes_url());
     if (!io_.config->set(kNotesUrlKey, rest)) return "@error cannot store the url";
@@ -1061,7 +1089,7 @@ std::string Runtime::console(std::string_view args) {
     shutdown();
     return ready_ ? "@ok still on USB: card remounted" : "@ok power off";
   }
-  return "@error usage: notes [status | record | stop | sync | url | list | delete | retention | mount | prune | ble | battery | wifi | clock | poweroff]";
+  return "@error usage: notes [status | record | stop | sync | retry | url | list | delete | retention | mount | prune | ble | battery | wifi | clock | poweroff]";
 }
 
 }  // namespace hgn

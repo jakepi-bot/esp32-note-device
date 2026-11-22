@@ -206,6 +206,8 @@ class Runtime {
   bool pending_record_ = false;
   notes::Meta meta_;
   std::string sync_id_;
+  // Set by `notes retry`: the one id the next upload pass may send.
+  std::string forced_id_;
   uint32_t attempt_ = 0;
   bool retry_waiting_ = false;
   uint32_t retry_at_ms_ = 0;

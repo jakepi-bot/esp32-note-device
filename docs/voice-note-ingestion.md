@@ -63,7 +63,7 @@ A missing required part, a repeated part, or an empty/non-file `audio` part is
 
 | Header | Required | Rule |
 |---|---|---|
-| `X-Gadget-Ts` | yes | Decimal unix seconds. `abs(now − ts) > 300` → `401`. |
+| `X-Gadget-Ts` | yes | Decimal unix seconds. `abs(now − ts) > 300` → `401`, where `now` is when the request's **headers** arrive — not when the body ends: the device stamps it once, before the first byte (the MAC covers it), and a large note may stream for far longer than 300 s. |
 | `X-Gadget-Mac` | yes | `base64(HMAC-SHA256(device_key, canonical))`, canonical string per [§2.2](#22-canonical-string). |
 | `X-Gadget-Token` | when `GADGET_ACCESS_TOKEN` is set on the host | Exact match, compared in constant time, else `401`. |
 
@@ -193,6 +193,16 @@ Validation precedes authentication on purpose: nothing is read or written
 before step 6 beyond the size-bounded body, the MAC covers the raw field
 values no matter what they contain, and contract tests for steps 4–5 need no
 device key.
+
+**The ts skew at step 6 is measured when the request's headers arrived**, which
+the host records before it starts spooling the body. The window answers "was
+this request made now?", not "did this transfer fit in five minutes": a
+248 MB note takes ~17 minutes to stream from the board, and the device stamps
+`X-Gadget-Ts` once, before its first body byte, because the MAC covers it. A
+host that read the clock after the body rejected every note large enough to
+matter, terminally (`401` is not retryable) — the 248 MB acceptance note
+`hg-…-0188` was dropped that way while the body had arrived in full
+(t_1ea185ed).
 
 ## 5. Ingestion on the host
 
@@ -408,7 +418,8 @@ Environment: `GADGET_ACCESS_TOKEN` — if set, every request must carry it in
 `X-Gadget-Token`.
 
 Fixed constants: audio cap 2 GiB; `duration_seconds` `1..86400`; clock skew
-±300 s for both `X-Gadget-Ts` and a future `recorded_at`; pipeline attempts 8
+±300 s for `X-Gadget-Ts` (measured when the request headers arrive) and for a
+future `recorded_at`; pipeline attempts 8
 with the backoff above; device backoff 5 s → 300 s; idle poll 120 s; staging
 retry ×3 at 100 ms.
 

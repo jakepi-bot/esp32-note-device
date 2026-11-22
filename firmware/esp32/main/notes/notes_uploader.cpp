@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 
 #include <cstring>
+#include <ctime>
 
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
@@ -155,6 +156,13 @@ Uploader::Step Uploader::step() {
       error_ = "note.json is not uploadable";
       return Step::Rejected;
     }
+    // The stamp is what the hub's ±300 s clock window is checked against, and
+    // the MAC covers it, so it cannot be refreshed once the body starts. Take it
+    // here, at the send, not at begin(): hashing a note reads the whole
+    // recording from the card first (minutes for a few hundred MB), and a stamp
+    // from before that pass is already stale when the headers leave
+    // (t_1ea185ed).
+    now_s_ = static_cast<int64_t>(std::time(nullptr));
     const std::string canonical = canonical_string(meta_, now_s_, meta_.sha256);
     const std::string mac = sign_(canonical);
     if (mac.empty()) {

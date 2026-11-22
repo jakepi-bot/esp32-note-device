@@ -510,8 +510,11 @@ Content-Disposition: form-data; name="checksum"
 
 Same key, same HMAC shape as the WS `auth` (`protocol.note_mac` on the host,
 `hg::crypto` on the device; new context string `hermes-gadget/v1|note|…`), so
-enrollment and key storage are reused as-is. Timestamp skew window ±300 s (the
-RTC makes it real). Optional `GADGET_ACCESS_TOKEN` goes in `X-Gadget-Token`.
+enrollment and key storage are reused as-is. Timestamp skew window ±300 s,
+measured against the moment the request's headers arrive (the RTC makes it
+real); the uploader stamps `X-Gadget-Ts` at the send, after the hash pass, so a
+large recording is not already stale when its first byte leaves. Optional
+`GADGET_ACCESS_TOKEN` goes in `X-Gadget-Token`.
 The declared part type and filename are advisory — the server sniffs the
 bytes — and the codec is WAV PCM16 mono as recorded (the server also accepts
 Ogg Opus for boards that record it, contract §2.3).

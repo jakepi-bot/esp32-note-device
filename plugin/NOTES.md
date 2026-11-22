@@ -310,7 +310,7 @@ entry whose `attempts` still reads 8 is re-quarantined on the next pass).
 |---|---|---|
 | curl: connection refused | Is the gadget platform enabled? `notes_port: 0` disables the endpoint; a busy port is logged (`voice-note endpoint not started …`) and skipped rather than crashing the platform | Set `notes_port`, free the port, restart the gateway |
 | 404 from `:8765` or the dashboard | The notes endpoint is its own server (`notes_port`, default 8766), not the hub WebSocket port or the dashboard | Use `http://<host>:8766/notes/v1` |
-| `401 auth` | Device not enrolled (id ↔ key), `X-Gadget-Ts` outside ±300 s (board RTC), MAC over different strings — the canonical string must use the raw transmitted field values and include `\|idempotency_key` **only** when that part was sent — or a token mismatch | Re-pair the device; fix the clock; recompute over exactly the transmitted fields |
+| `401 auth` | Device not enrolled (id ↔ key), `X-Gadget-Ts` outside ±300 s of **header arrival** (board RTC; a body may stream for hours), MAC over different strings — the canonical string must use the raw transmitted field values and include `\|idempotency_key` **only** when that part was sent — or a token mismatch | Re-pair the device; fix the clock; recompute over exactly the transmitted fields |
 | `409 checksum_mismatch` | The `checksum` part ≠ the bytes received: a corrupted transfer | Resend the identical audio |
 | `409 idempotency_conflict` | Same `job_id`, different audio: the firmware re-used a key for another recording | Generate `idempotency_key` once per recording and never change it |
 | `422 invalid_field` | `error.field` names the part — `recorded_at` needs an offset and ≤ 300 s in the future; `duration_seconds` must be `1..86400` | Fix that field |

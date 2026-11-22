@@ -602,11 +602,14 @@ class NotesServer:
 
     def handle_upload(self, headers: Mapping[str, str], content_type: Optional[str],
                       content_length: Optional[int],
-                      body: bytes | bytearray | mmap.mmap) -> tuple[int, dict]:
+                      body: bytes | bytearray | mmap.mmap,
+                      received_at: Optional[float] = None) -> tuple[int, dict]:
         """Validate, authorize, de-duplicate and stage one upload; answer as §3 says.
 
         This is the whole contract minus the byte-moving HTTP layer, which is why
-        tests drive it directly.
+        tests drive it directly. ``received_at`` is when the request's headers
+        arrived (the route's clock); the skew window is measured from it, so a
+        body that streams for longer than the window is not called outdated.
         """
         early = self.precheck(headers, content_type, content_length, len(body))
         if early is not None:
@@ -615,7 +618,7 @@ class NotesServer:
             request = self._validate(body, content_type)
         except _Rejected as rejection:
             return rejection.status, rejection.payload
-        error = self._authorize(dict(headers), request)
+        error = self._authorize(dict(headers), request, received_at)
         if error is not None:
             return error
         return self._accept(request)
@@ -710,19 +713,30 @@ class NotesServer:
                         idempotency_key=idempotency_key, checksum=checksum,
                         audio_sha256=hashlib.sha256(audio_part.value).hexdigest())
 
-    def _authorize(self, headers: Mapping[str, str], request: _Request) -> Optional[tuple[int, dict]]:
+    def _authorize(self, headers: Mapping[str, str], request: _Request,
+                   received_at: Optional[float] = None) -> Optional[tuple[int, dict]]:
         """§4 step 6: timestamp skew, enrollment, MAC, optional access token.
 
         The MAC covers the raw field strings and the digest of the bytes we
         actually received, so a truncated or mangled transfer fails here as well
         as at the checksum step.
+
+        ``received_at`` is when the request's headers arrived, and the clock
+        window is measured from there rather than from now: the body is spooled
+        before this runs, and a note may take far longer to stream than the
+        window is wide (248 MB is ~17 min on the board). The device stamps
+        ``X-Gadget-Ts`` once, before its first byte, and cannot refresh it
+        afterwards because the MAC covers it, so measuring after the body would
+        reject every note that is large or slow rather than outdated
+        (t_1ea185ed).
         """
         h = {str(k).lower(): str(v) for k, v in headers.items()}
         ts_raw = h.get(H_TS, "")
         mac = h.get(H_MAC, "")
         if _TS.fullmatch(ts_raw) is None:
             return _fail(401, "auth", "X-Gadget-Ts must be decimal unix seconds")
-        if abs(time.time() - int(ts_raw)) > MAX_SKEW_S:
+        now = time.time() if received_at is None else received_at
+        if abs(now - int(ts_raw)) > MAX_SKEW_S:
             return _fail(401, "auth", "X-Gadget-Ts is outside the ±300 s window")
         key = self.store.key_for(request.device_id) if self.store is not None else None
         if not key:
@@ -983,6 +997,11 @@ def create_app(server: NotesServer, page_dir: Optional[Path | str] = None):
 
     @app.post(NOTE_PATH)
     async def upload(request: "Request"):
+        # The clock for the ts window: the moment these headers arrived, which is
+        # also when the device stamped X-Gadget-Ts. The body may take far longer
+        # than the window to stream (t_1ea185ed), so this must not be re-read
+        # after the spool (see ``_authorize``).
+        arrived_at = time.time()
         headers = {str(k).lower(): str(v) for k, v in request.headers.items()}
         raw_length = headers.get("content-length")
         try:
@@ -1026,12 +1045,13 @@ def create_app(server: NotesServer, page_dir: Optional[Path | str] = None):
                 os.fsync(spool.fileno())
             if size == 0:  # an empty body is the contract's 400, below
                 status, payload = await asyncio.to_thread(
-                    server.handle_upload, headers, headers.get("content-type"), length, b"")
+                    server.handle_upload, headers, headers.get("content-type"), length, b"", arrived_at)
             else:
                 with open(spool.name, "rb") as handle, \
                         mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
                     status, payload = await asyncio.to_thread(
-                        server.handle_upload, headers, headers.get("content-type"), length, mapped)
+                        server.handle_upload, headers, headers.get("content-type"), length, mapped,
+                        arrived_at)
         finally:
             try:
                 os.unlink(spool.name)

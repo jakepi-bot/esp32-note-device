@@ -467,6 +467,55 @@ def test_a_non_numeric_timestamp_is_401(server):
     assert upload(server, fields(), headers=headers)[0] == 401
 
 
+def test_the_clock_window_is_measured_when_the_request_arrives(server):
+    """A body that outlives the window is not an outdated request (t_1ea185ed).
+
+    The device stamps ``X-Gadget-Ts`` once, before its first body byte, because
+    the MAC covers it: a 248 MB note streams for ~17 min, so a stamp checked
+    after the spool made every note large enough to matter terminally rejected.
+    """
+    arrived = time.time() - 1200
+    body_fields = fields()
+    body = multipart(body_fields)
+    headers = signed(body_fields, ts=int(arrived))
+    status, payload = server.handle_upload(
+        headers, f"multipart/form-data; boundary={BOUNDARY}", len(body), body, arrived)
+    assert status == 202 and payload["status"] == "accepted"
+    staged = server.inbox / payload["job_id"]
+    note = json.loads((staged / "note.json").read_text())
+    assert note["duration_seconds"] == 8
+    assert (staged / "recording.wav").read_bytes() == WAV
+
+
+def test_a_stale_timestamp_is_still_401_at_arrival(server):
+    """The window still catches a request that was made long before it arrived."""
+    arrived = time.time()
+    body_fields = fields()
+    assert upload(server, body_fields, headers=signed(body_fields, ts=int(arrived) - 301))[0] == 401
+    assert upload(server, body_fields, headers=signed(body_fields, ts=int(arrived) - 299))[0] == 202
+
+
+def test_the_route_measures_the_window_from_the_arrival_not_the_body(server, monkeypatch):
+    """The ASGI route hands the authorizer the moment the headers arrived."""
+    seen = {}
+    original = NotesServer._authorize
+
+    def spy(self, headers, request, received_at=None):
+        seen["received_at"] = received_at
+        return original(self, headers, request, received_at)
+
+    monkeypatch.setattr(NotesServer, "_authorize", spy)
+    body_fields = fields()
+    body = multipart(body_fields)
+    headers = signed(body_fields)
+    headers["content-type"] = f"multipart/form-data; boundary={BOUNDARY}"
+    before = time.time()
+    with TestClient(create_app(server)) as client:
+        response = client.post("/notes/v1", content=body, headers=headers)
+    assert response.status_code == 202
+    assert seen["received_at"] is not None and before <= seen["received_at"] <= time.time()
+
+
 def test_access_token_is_required_when_configured(tmp_path):
     server = NotesServer(FakeStore(), tmp_path / "notes", host="127.0.0.1", port=0,
                          obsidian_dir=tmp_path / "vault", access_token="letmein",

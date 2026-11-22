@@ -77,6 +77,9 @@ class NotesUi {
   struct CaptureProbe {
     std::function<bool()> recording;
     std::function<uint32_t()> elapsed_s;
+    // A tap the runtime kept because an upload is in flight: the glass draws the
+    // queued face rather than a counter for a note that is not being made.
+    std::function<bool()> queued;
   };
   void set_capture_probe(CaptureProbe probe) { capture_probe_ = std::move(probe); }
 

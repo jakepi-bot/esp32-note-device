@@ -54,7 +54,17 @@ BOOT-tap on Home starts a note. The screen is one word, `RECORDING`, with an
 elapsed counter that starts at `0:00` and moves every 30 s; the footer says
 `BOOT: stop` and `HOLD: discard`. BOOT-tap keeps the note, BOOT-hold throws it
 away. Recording continues while the radio does whatever it was doing; nothing on
-this screen waits for the network. The screens follow the runtime, not the other
+this screen waits for the network. A tap that lands while a note is already
+uploading is kept, not dropped, but it is not started mid-transfer either: the
+microphone's samples reach the app task, and that task sits inside the upload's
+socket writes for seconds at a time, so a capture begun then stores a fraction of
+what the mic delivered (measured: 21 s of a 36 s capture). The glass says so
+instead - `RECORDING` with `QUEUED` and `FOR THE UPLOAD` where the counter would
+be - and the capture begins by itself on the pass the note in flight finishes,
+not the whole queue (`notes status` reads `mode syncing+record-queued` while it
+waits, then `recording` once it starts). A BOOT tap on the queued face cancels
+the wait; nothing has been recorded yet, so there is no note and no second frame.
+The screens follow the runtime, not the other
 way round: a capture the console ends (`notes stop`) takes the glass back to Home
 instead of leaving a counter running over a note already on the card.
 
@@ -191,8 +201,10 @@ verb is how a transition's ghosting is measured without a camera.
   confirm; the hold and the list order are what protect them.
 - The full-refresh duration of this panel has not been measured; every screen
   change is budgeted at about a second.
-- A tap that lands while a note is uploading is refused, not queued: the runtime
-  is in its syncing mode and the log says `not recording: an upload is in
-  flight`. With the queue long that can be minutes of a BOOT tap doing nothing,
-  so record before the queue grows or wait for `notes status` to say `mode
-  idle`.
+- The upload planner waits for the capture, and a capture waits for the note
+  being uploaded: a tap during a sync is queued (`QUEUED`/`FOR THE UPLOAD` on the
+  glass, `mode syncing+record-queued` at the console) and starts when that one
+  transfer ends, so the wait is one transfer, not the whole queue. A failed
+  attempt releases the tap as well - the runtime is idle between retries, and the
+  capture takes that pass; a very large note in flight is still a long wait for
+  the next capture.

@@ -50,19 +50,29 @@ table:
 
 `ScreenApp` does not decide whether a capture is running: `Runtime::recording()`
 does, and `NotesUi` asks it on every tick and on every runtime change
-(`sync_capture`). Two moves come out of that:
+(`sync_capture`). Three moves come out of that:
 
 * a capture that ends with no key — a console `notes stop`, a microphone or card
   error, the runtime's own abort — takes the glass off the recording face, so the
   counter cannot run on over a note already on the card;
 * a capture no key started — a console `notes record` — puts Home onto the
   recording face, with the runtime's own elapsed second as the counter's origin.
-  Any other screen keeps its place: a person reading the list is not yanked.
+  Any other screen keeps its place: a person reading the list is not yanked;
+* a tap the runtime kept for later — an upload was in flight, so `start_note`
+  armed a pending recording instead of starting one — draws the recording face
+  with `QUEUED` / `FOR THE UPLOAD` where the counter would be, and the footer
+  `BOOT: cancel`. `Runtime::recording_queued()` is the third fact the adapter
+  publishes; when the upload ends the runtime starts the capture and the same
+  face stops saying `QUEUED` and takes the runtime's second as the counter's
+  origin. The counter is not drawn before the capture exists, and a tap on the
+  queued face cancels the wait.
 
-When the runtime refuses a recording at the press (`no microphone`, `no card`, a
-note already in flight), the screen machine undoes the entry (`decline()`), so
-the recording face is never painted for a capture that does not exist, and the
-adapter logs a warning rather than falling through quietly.
+When the runtime refuses a recording at the press (`no microphone`, `no card`),
+the screen machine undoes the entry (`decline()`), so the recording face is never
+painted for a capture that does not exist, and the adapter logs a warning rather
+than falling through quietly. A queued recording is not a refusal: the press
+stands, and the adapter asks `sync_capture` before painting so the first frame is
+the queued face rather than a counter over a note that is not being made.
 
 ## Playback
 

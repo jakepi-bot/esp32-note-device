@@ -57,6 +57,9 @@ inline constexpr const char* kHoldDelete = "HOLD: delete";
 inline constexpr const char* kHoldBack = "HOLD: back";
 inline constexpr const char* kHoldNothing = "HOLD: nothing";
 inline constexpr const char* kTapKeep = "TAP: keep";
+// The queued recording face: the press ends the wait, it does not keep anything.
+inline constexpr const char* kBootCancel = "BOOT: cancel";
+inline constexpr const char* kHoldCancel = "HOLD: cancel";
 }  // namespace key
 
 // Durations, shared by Recording and Playing: "%u:%02u" is M:SS and
@@ -68,6 +71,10 @@ inline constexpr const char* kOfCap = "OF %u:%02u";
 
 namespace recording {
 inline constexpr const char* kLabel = "RECORDING";
+// The queued face: the tap is kept, the capture has not begun. "QUEUED" is the
+// hero, so the glass never shows a counter for a note that is not being made.
+inline constexpr const char* kQueued = "QUEUED";
+inline constexpr const char* kWaiting = "FOR THE UPLOAD";
 }  // namespace recording
 
 namespace menu {

@@ -121,3 +121,69 @@ TEST("capture: stopping a capture that never began owes no second frame") {
   CHECK(!app.decline(Effect::EndRecording).draw);
   CHECK(app.screen() == Screen::Home);
 }
+
+TEST("queue: a tap during an upload draws the wait, then counts when it starts") {
+  ScreenApp app;
+  app.begin(recording_snapshot());
+
+  const Outcome tap = app.press(Key::BootTap, 1000);
+  CHECK(tap.effect == Effect::BeginRecording);
+  CHECK(app.screen() == Screen::Recording);
+
+  // The runtime answered, and its answer is "kept, not started": the glass says
+  // so in the place the counter would be.
+  const Outcome queued = app.follow_capture(false, 0, 3000, true);
+  CHECK(queued.draw);
+  CHECK(queued.refresh == Refresh::Full);
+  CHECK(app.screen() == Screen::Recording);
+  CHECK(app.frame().recording.queued);
+  CHECK(app.frame().recording.elapsed_s == 0);
+
+  // Nothing counts while the tap waits, and the cap cannot arrive before the
+  // capture does.
+  for (uint32_t elapsed = 1; elapsed <= 40; ++elapsed) CHECK(!app.tick(3000 + elapsed * 1000).draw);
+  CHECK(app.frame().recording.queued);
+  CHECK(!app.follow_capture(false, 0, 60000, true).draw);  // already on the queued face
+
+  // The upload ended and the capture began: the face stops saying QUEUED and the
+  // counter takes the runtime's own second as its origin.
+  const Outcome started = app.follow_capture(true, 2, 62000, false);
+  CHECK(started.draw);
+  CHECK(started.refresh == Refresh::Full);
+  CHECK(!app.frame().recording.queued);
+  CHECK(app.frame().recording.elapsed_s == 2);
+  const Outcome at32 = app.tick(62000 + 30 * 1000);
+  CHECK(at32.draw);
+  CHECK(app.frame().recording.elapsed_s == 32);
+}
+
+TEST("queue: a tap on the queued face cancels the wait") {
+  ScreenApp app;
+  app.begin(recording_snapshot());
+  app.press(Key::BootTap, 1000);
+  app.follow_capture(false, 0, 3000, true);
+  CHECK(app.frame().recording.queued);
+
+  // The face says RECORDING, so its own key ends it: the runtime drops the arm
+  // and the glass goes Home, with no note and no second frame owed.
+  const Outcome cancel = app.press(Key::BootTap, 5000);
+  CHECK(cancel.effect == Effect::EndRecording);
+  CHECK(app.screen() == Screen::Home);
+  const Outcome followed = app.follow_capture(false, 0, 6000, false);
+  CHECK(!followed.draw);
+  CHECK(app.screen() == Screen::Home);
+}
+
+TEST("queue: a stale counter origin cannot commit a capture the card says is empty") {
+  ScreenApp app;
+  app.begin(recording_snapshot());  // cap 3600 s
+  app.press(Key::BootTap, 1000);
+  CHECK(app.screen() == Screen::Recording);
+
+  // The runtime says nothing has been written yet, but the screens' origin is old
+  // enough that the local counter is past the cap. A cap commits a note, so the
+  // glass must not be the one to decide the file is that long.
+  const Outcome late = app.tick(1000 + (3600 + 400) * 1000);
+  CHECK(late.effect != Effect::EndRecording);
+  CHECK(app.screen() == Screen::Recording);
+}

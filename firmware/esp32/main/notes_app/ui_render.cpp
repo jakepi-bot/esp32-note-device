@@ -87,6 +87,15 @@ void recording_face(hg::Canvas& c, const ScreenDraw& d) {
   draw_band(c, band.band, band.wifi_up, band.battery_pct, band.external);
   rule(c, grid::kRuleY);
   text_at(c, grid::kLeft, 38, recording::kLabel, grid::kScale, kInk);
+  if (d.recording.queued) {
+    // The tap was kept, not honoured: the capture starts when the upload ends.
+    // No counter and no bar, because nothing has been recorded yet - and a
+    // footer that says what the press does now (cancel the wait).
+    draw_centred(c, 62, recording::kQueued, grid::kHero);
+    draw_centred(c, 94, recording::kWaiting, grid::kScale);
+    draw_footer(c, key::kBootCancel, key::kHoldCancel);
+    return;
+  }
   char elapsed[8], cap[11];
   format_duration(d.recording.elapsed_s, elapsed);
   format_of(d.recording.cap_s, cap);

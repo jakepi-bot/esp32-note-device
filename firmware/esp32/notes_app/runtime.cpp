@@ -245,6 +245,7 @@ void Runtime::shutdown() {
   // the next boot, which is what the queue's idempotency key is for.
   if (mode_ == Mode::Syncing) uploader_.cancel();
   mode_ = Mode::Idle;
+  pending_record_ = false;
   close_net(now);
   if (io_.wifi && io_.wifi->setup_open()) io_.wifi->stop_setup();
   if (io_.wifi && io_.wifi->radio_running()) io_.wifi->radio_off();
@@ -388,6 +389,13 @@ void Runtime::tick(uint32_t now, bool wifi_link) {
   }
   if (static_cast<int32_t>(now - next_retention_ms_) >= 0) run_retention(now, false);
 
+  // A tap that waited for this upload fires before the planner takes the next
+  // note: a person who asked to record is not made to wait for a queue that
+  // refills itself.
+  if (mode_ == Mode::Idle && pending_record_) {
+    pending_record_ = false;
+    start_note(now);
+  }
   if (mode_ == Mode::Idle) begin_sync(now);
   step_window(now);
 }
@@ -451,14 +459,29 @@ std::string Runtime::on_action(int action) {
   switch (a) {
     case hgp::notesui::Action::StartRecording:
       start_note(now);
-      return mode_ == Mode::Recording ? "recording " + meta_.note_id : std::string();
+      if (mode_ == Mode::Recording) return "recording " + meta_.note_id;
+      return pending_record_ ? std::string("recording queued") : std::string();
     case hgp::notesui::Action::StopKeep: {
+      // A tap on the queued face cancels the wait: the glass says RECORDING, so
+      // the press must end it, and there is no capture to stop yet.
+      if (pending_record_) {
+        pending_record_ = false;
+        ESP_LOGI(TAG, "queued recording cancelled before it started");
+        notify_ui();
+        return "queued recording cancelled";
+      }
       if (mode_ != Mode::Recording) return {};
       const std::string id = meta_.note_id;
       finish_note(now, "button");
       return stop_error_.empty() ? "stored " + id : std::string();
     }
     case hgp::notesui::Action::Discard:
+      if (pending_record_) {
+        pending_record_ = false;
+        ESP_LOGI(TAG, "queued recording cancelled before it started");
+        notify_ui();
+        return "queued recording cancelled";
+      }
       if (mode_ != Mode::Recording) return {};
       abort_note("button hold");
       return "dropped";
@@ -474,9 +497,24 @@ void Runtime::start_note(uint32_t now) {
   // Every refusal is logged where it happens, so the console's answer for a
   // BOOT tap that started nothing is never "its reason is above" over an empty
   // log. A quiet return here is what let a tap look like a dead key.
-  if (mode_ != Mode::Idle) {
-    ESP_LOGW(TAG, "not recording: %s",
-             mode_ == Mode::Syncing ? "an upload is in flight" : "a recording is already running");
+  if (mode_ == Mode::Recording) {
+    ESP_LOGW(TAG, "not recording: a recording is already running");
+    return;
+  }
+  // An upload in flight is not a reason to drop the press. It is a reason not to
+  // honour it yet: the microphone's samples reach this task, and this task is
+  // inside the uploader's socket writes for seconds at a time - a capture
+  // started now stores a fraction of what the microphone delivered (measured:
+  // 21 s of a 36 s capture as the app task waited on a 25 KB/s POST). So the tap
+  // is kept, drawn on the glass, and started on the pass the upload ends.
+  if (mode_ == Mode::Syncing) {
+    if (!pending_record_) {
+      pending_record_ = true;
+      ESP_LOGI(TAG, "recording queued: the upload in flight finishes first");
+      notify_ui();
+    } else {
+      ESP_LOGI(TAG, "recording is already queued for this upload");
+    }
     return;
   }
   stop_error_.clear();
@@ -899,7 +937,9 @@ std::string Runtime::console(std::string_view args) {
                   static_cast<unsigned>(sent_), static_cast<unsigned>(failed_),
                   sd_ready_ ? "ok" : (sd_error_.empty() ? "down" : sd_error_.c_str()),
                   notes_url().empty() ? "no url" : notes_url().c_str(),
-                  mode_ == Mode::Recording ? "recording" : mode_ == Mode::Syncing ? "syncing" : "idle",
+                  mode_ == Mode::Recording ? "recording"
+                  : mode_ == Mode::Syncing ? (pending_record_ ? "syncing+record-queued" : "syncing")
+                                           : "idle",
                   static_cast<unsigned>(mode_ == Mode::Idle ? store_.pending_bytes() : meta_.bytes),
                   io_.ble && io_.ble->available() ? (io_.ble->connected() ? "link" : "ready") : "off",
                   net_open(now) ? net_reason() : "closed",
@@ -910,11 +950,19 @@ std::string Runtime::console(std::string_view args) {
   }
   if (cmd == "record" || cmd == "start") {
     if (mode_ == Mode::Recording) return "@ok already recording";
+    if (pending_record_) return "@ok a recording is already queued for this upload";
     start_note(now);
     if (mode_ == Mode::Recording) return "@ok recording " + meta_.note_id;
+    if (pending_record_) return "@ok recording queued: the upload in flight finishes first";
     return "@error " + (error_.empty() ? std::string("cannot record (see log)") : error_);
   }
   if (cmd == "stop") {
+    if (pending_record_) {
+      pending_record_ = false;
+      ESP_LOGI(TAG, "queued recording cancelled before it started");
+      notify_ui();
+      return "@ok queued recording cancelled";
+    }
     if (mode_ != Mode::Recording) return "@error not recording";
     const std::string id = meta_.note_id;
     finish_note(now, "console");

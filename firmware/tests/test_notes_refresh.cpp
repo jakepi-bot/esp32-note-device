@@ -220,3 +220,40 @@ TEST("refresh: the list says when it is not the whole card (QA D7)") {
   CHECK(list.key_line == nullptr);
   CHECK(std::string(list.key_count) == "128+");
 }
+
+TEST("capture: a queued tap survives a publish and counts from the capture, not the tap") {
+  TempDir dir;
+  Store store(dir.path);
+  UiState ui;
+  ui.begin(seed_for(), &store);
+
+  // Home, BOOT tap: the glass moves to the recording face at once.
+  ui.press(Key::BootTap, 1000);
+  CHECK(ui.screen() == Screen::Recording);
+
+  // The runtime kept the tap because an upload was in flight: the glass draws the
+  // wait where the counter would be.
+  const Outcome queued = ui.set_capture(false, 0, true, 2000);
+  CHECK(queued.draw);
+  CHECK(ui.snapshot().record_queued);
+  CHECK(ui.app().frame().recording.queued);
+
+  // The upload steps and republishes the card while the tap waits. The wait has
+  // to survive the publish: the snapshot the adapter hands the screen machine is
+  // its own, and it carried no arm before this test existed.
+  CHECK(make_note(store, "hg-69ffb4e9-20261121T140203-0005", "2026-11-21T14:02:03Z"));
+  ui.publish(3000, static_cast<uint16_t>(DirtyQueue | DirtyList));
+  CHECK(ui.snapshot().record_queued);
+  CHECK(ui.app().frame().recording.queued);
+
+  // Three minutes later the upload ends and the runtime starts the capture. The
+  // counter is the capture's own second, not the 180 s the press waited.
+  const Outcome started = ui.set_capture(true, 0, false, 183000);
+  CHECK(started.draw);
+  CHECK(!ui.app().frame().recording.queued);
+  CHECK(ui.app().frame().recording.elapsed_s == 0);
+  CHECK(!ui.tick(183500).draw);
+  CHECK(ui.app().frame().recording.elapsed_s == 0);
+  CHECK(ui.tick(214000).draw);  // the 30 s partial
+  CHECK(ui.app().frame().recording.elapsed_s == 31);
+}

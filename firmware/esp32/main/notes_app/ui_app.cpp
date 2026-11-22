@@ -322,8 +322,15 @@ Outcome ScreenApp::press(Key key, uint32_t now_ms) {
 Outcome ScreenApp::tick(uint32_t now_ms) {
   Outcome out;
   if (state_.screen == Screen::Recording) {
+    // A queued tap is not a capture: the counter has nothing to count until the
+    // runtime starts the note, and the cap cannot arrive before it.
+    if (snap_.record_queued) return out;
     const uint32_t elapsed = (now_ms - record_start_ms_) / 1000;
-    if (snap_.note_max_s > 0 && elapsed >= snap_.note_max_s) {
+    // A cap commits a note, so the runtime has to agree that the file is that
+    // long: the counter's origin can be stale (a tap kept through an upload, a
+    // clock that moved under it) and a screen must never stop a capture the card
+    // says is empty. The runtime's own second is in `record_elapsed_s`.
+    if (snap_.note_max_s > 0 && elapsed >= snap_.note_max_s && snap_.record_elapsed_s + 2 >= snap_.note_max_s) {
       // The cap reached: the same commit a tap does (§13.2 row 10).
       return run(Action::StopKeep, now_ms);
     }
@@ -352,18 +359,45 @@ Outcome ScreenApp::tick(uint32_t now_ms) {
   return out;
 }
 
-Outcome ScreenApp::follow_capture(bool recording, uint32_t elapsed_s, uint32_t now_ms) {
+Outcome ScreenApp::follow_capture(bool recording, uint32_t elapsed_s, uint32_t now_ms, bool queued) {
   Outcome out;
+  if (queued && !recording) {
+    // A tap that landed while an upload was in flight: the runtime kept it and
+    // will start the capture when the queue is idle. The glass says so, in the
+    // place the counter would be - a person who taps must never be left
+    // wondering whether the press registered. Already drawn: no new frame.
+    if (snap_.record_queued && state_.screen == Screen::Recording) return out;
+    snap_.record_queued = true;
+    snap_.recording = false;
+    snap_.record_elapsed_s = 0;
+    if (state_.screen != Screen::Recording) state_.go(Screen::Recording);
+    out.refresh = Refresh::Full;
+    out.draw = true;
+    return out;
+  }
   if (recording && state_.screen == Screen::Home) {
     // A capture no key started: the console's `notes record`. The runtime asks
     // for the glass on purpose (`notify_ui` says so), so Home hands over. Any
     // other screen keeps its place - a person reading the list is not to be
     // yanked into the recording face, and the capture runs either way.
     snap_.recording = true;
+    snap_.record_queued = false;
     snap_.record_elapsed_s = elapsed_s;
     record_draw_s_ = elapsed_s;
     record_start_ms_ = now_ms - elapsed_s * 1000u;
     state_.go(Screen::Recording);
+    out.refresh = Refresh::Full;
+    out.draw = true;
+    return out;
+  }
+  if (recording && state_.screen == Screen::Recording && snap_.record_queued) {
+    // The queued tap fired: the face stops saying QUEUED and starts counting,
+    // from the runtime's own second so the counter is the length of the file.
+    snap_.record_queued = false;
+    snap_.recording = true;
+    snap_.record_elapsed_s = elapsed_s;
+    record_draw_s_ = elapsed_s;
+    record_start_ms_ = now_ms - elapsed_s * 1000u;
     out.refresh = Refresh::Full;
     out.draw = true;
     return out;
@@ -373,7 +407,10 @@ Outcome ScreenApp::follow_capture(bool recording, uint32_t elapsed_s, uint32_t n
     // card error, the runtime's own abort. The glass was counting a recording
     // that no longer exists, which is what a screen state independent of the
     // runtime state costs - the counter ran on over a note already on the card.
+    // A queued tap the runtime cancelled lands here too: nothing is being
+    // recorded, so the glass goes Home.
     snap_.recording = false;
+    snap_.record_queued = false;
     snap_.record_elapsed_s = 0;
     state_.go(Screen::Home);
     out.refresh = Refresh::Full;
@@ -498,6 +535,7 @@ ScreenDraw ScreenApp::frame() const {
     case Screen::Recording:
       d.recording.elapsed_s = snap_.record_elapsed_s;
       d.recording.cap_s = snap_.note_max_s;
+      d.recording.queued = snap_.record_queued;
       break;
     case Screen::Menu:
       d.menu = build_menu(snap_, state_.menu);

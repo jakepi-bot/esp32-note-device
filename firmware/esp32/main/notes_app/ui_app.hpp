@@ -92,8 +92,10 @@ class ScreenApp {
   // The runtime's own capture, taken as the truth: a capture that ended without
   // a key (a console `notes stop`, a microphone or card error, the cap) takes
   // the glass off the recording face, and one the keys did not start (a console
-  // `notes record`) puts it on. Returns the frame that move owes, if any.
-  Outcome follow_capture(bool recording, uint32_t elapsed_s, uint32_t now_ms);
+  // `notes record`) puts it on. `queued` is a tap the runtime kept for later - it
+  // draws the recording face with the wait on it, no counter. Returns the frame
+  // that move owes, if any.
+  Outcome follow_capture(bool recording, uint32_t elapsed_s, uint32_t now_ms, bool queued = false);
   // The runtime said no to an effect the screens had already acted on: put the
   // screen back where the device really is (Home for a recording that never
   // began), so the frame drawn is the truth and not the intent.

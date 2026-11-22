@@ -50,6 +50,10 @@ struct Snapshot {
   uint32_t note_max_s = 86400;  // the recording cap (DeviceConfig::note_max_s)
   bool recording = false;
   uint32_t record_elapsed_s = 0;
+  // Armed, not started: a tap made while an upload was in flight. The glass
+  // draws RECORDING with the wait on it, and the counter does not move until the
+  // runtime says the capture began.
+  bool record_queued = false;
 
   // Upload progress: what `notes::Queue` is doing, published by the app task.
   bool upload_active = false;
@@ -193,6 +197,7 @@ bool build_confirm(const Snapshot& snap, uint16_t index, ConfirmView& out);
 struct RecordingView {
   uint32_t elapsed_s = 0;
   uint32_t cap_s = 86400;  // DeviceConfig::note_max_s's default, replaced from the config
+  bool queued = false;     // armed by a tap during an upload; nothing recorded yet
 };
 
 struct PlayingView {

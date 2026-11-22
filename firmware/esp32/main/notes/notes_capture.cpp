@@ -149,6 +149,14 @@ bool Capture::finish(Meta& meta, std::string& error) {
   // the byte cap (12.4 h) or to the 24 h time cap still reports a storable
   // duration_seconds, and nothing here truncates it at 15 min any more.
   if (meta.duration_s > kMaxDurationS) meta.duration_s = kMaxDurationS;
+  // The note is the card's now, not this object's. finish() used to leave the
+  // committed paths behind, and start() opens with abort() - so the next
+  // recording deleted the note recorded before it, which is a note already on
+  // the card and, when a tap lands during a sync, the exact file the uploader is
+  // reading. An abandoned capture still owns its files; a committed one does not.
+  part_path_.clear();
+  final_path_.clear();
+  id_.clear();
   store_ = nullptr;
   return true;
 }

@@ -204,7 +204,12 @@ void NotesUi::apply(const notesui::Outcome& outcome, uint32_t now_ms) {
   // The runtime owns the work that is not a screen: recording, the sync window
   // and the shutdown. When it takes an effect the screens do not repeat it.
   if (hook_ && outcome.effect != notesui::Effect::None && hook_(outcome.effect, outcome.note)) {
-    draw(outcome, now_ms);
+    // The runtime's answer is the truth and it can differ from the effect the
+    // screens performed: a BeginRecording taken while an upload is in flight is
+    // kept and queued, not started. Ask it before painting, so the first frame is
+    // the queued face and not a counter over a note that is not being made.
+    const notesui::Outcome truth = sync_capture();
+    draw(truth.draw ? truth : outcome, now_ms);
     return;
   }
   switch (outcome.effect) {
@@ -325,10 +330,19 @@ void NotesUi::tick(uint32_t now_ms) {
 }
 
 notesui::Outcome NotesUi::sync_capture() {
-  if (!capture_probe_.recording) return notesui::Outcome{};
+  if (!capture_probe_.recording) return notesui::Outcome{};  // no probe wired
+  // The value is published every pass, not only while it is true: a capture the
+  // console ended has to reach the glass too (the screen follows the runtime).
+  const bool recording = capture_probe_.recording();
+  // A queued tap is not a capture: `recording()` is false until the upload ends
+  // and the runtime starts the note. The glass still has to draw the wait.
+  const bool queued = capture_probe_.queued ? capture_probe_.queued() : false;
   const uint32_t now = ports_.system != nullptr ? ports_.system->now_ms() : esp_timer_get_time() / 1000;
   const uint32_t elapsed = capture_probe_.elapsed_s ? capture_probe_.elapsed_s() : 0;
-  return state_.set_capture(capture_probe_.recording(), elapsed, now);
+  static bool was_queued = false;
+  if (was_queued && recording) ESP_LOGI(TAG, "a queued tap started: the probe says %u s", static_cast<unsigned>(elapsed));
+  was_queued = queued;
+  return state_.set_capture(recording, elapsed, queued, now);
 }
 
 void NotesUi::start_playback(uint16_t index) {

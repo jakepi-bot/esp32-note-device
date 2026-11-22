@@ -498,6 +498,43 @@ TEST("refresh: a Home hero change is full, a quiet publish draws nothing") {
   CHECK(power.refresh == Refresh::Partial);  // the hero did not move
 }
 
+TEST("capture: recording again keeps the note recorded before it") {
+  // start() opens with abort(), which removes the files it still holds. finish()
+  // used to leave the committed note's paths behind, so every new recording
+  // erased the previous note's recording.wav: a note already on the card with
+  // its note.json, and - when a tap lands during a sync - the file the uploader
+  // was reading. The note that is committed belongs to the card, not to this
+  // object.
+  TempDir dir;
+  Store store(dir.path + "/notes");
+  CHECK(store.ensure());
+  notes::Capture capture;
+  std::vector<int16_t> samples(notes::kSampleRate, 1234);  // 1 s
+  std::string error;
+  struct stat st {};
+
+  Meta first;
+  first.note_id = "hg-a-20261121T140200-0001";
+  CHECK(capture.start(store, first.note_id, 60, error));
+  capture.feed(samples.data(), samples.size());
+  CHECK(capture.finish(first, error));
+  const std::string first_audio = store.audio_path(NoteState::Pending, first.note_id);
+  CHECK(::stat(first_audio.c_str(), &st) == 0);
+  const off_t first_size = st.st_size;
+  CHECK(first_size > 44);
+
+  Meta second;
+  second.note_id = "hg-a-20261121T140300-0002";
+  CHECK(capture.start(store, second.note_id, 60, error));
+  CHECK(::stat(first_audio.c_str(), &st) == 0);
+  CHECK(st.st_size == first_size);
+  capture.feed(samples.data(), samples.size());
+  CHECK(capture.finish(second, error));
+  CHECK(second.bytes > 0);
+  CHECK(::stat(first_audio.c_str(), &st) == 0);
+  CHECK(st.st_size == first_size);
+}
+
 TEST("delete: a hold on the confirm erases the note from the card") {
   TempDir dir;
   Store store(dir.path + "/notes");

@@ -848,6 +848,34 @@ and a strobe; at 5 s it still cost 60 partials for a number nobody reads that
 often. **The counter is driven by a tick count, never by a blocking delay in the
 draw path** (§16).
 
+### 10.4 A tap during an upload: queued, not dropped
+
+The runtime has one enum for capture and upload, so a note cannot start while a
+note is uploading. A tap in that window is kept, not refused: the runtime arms a
+pending recording and starts it on the pass the note in flight finishes (one
+transfer, not the whole queue). On the glass the recording face keeps its label
+and its footer but replaces the counter with the wait, so the press visibly
+landed:
+
+```
+       │ RECORDING                                            │  y=38
+       │                     QUEUED                           │  y=62  hero, scale 3
+       │                  FOR THE UPLOAD                      │  y=94
+       │ BOOT: cancel                                         │  y=152
+       │ HOLD: cancel                                         │  y=170
+```
+
+No counter and no bar, because nothing has been recorded yet; a counter at `0:00`
+over a note that is not being made is the same lie the runtime-follows rule
+exists to prevent. When the upload ends and the capture starts, the counter
+appears at the runtime's own second — the same full refresh an entry takes. A tap
+on this face cancels the wait (`StopKeep` on the runtime's arm), and the glass
+goes Home with no note written. The reason the capture waits rather than
+overlapping the transfer is measured: the capture's PCM reaches the app task, and
+that task is inside the uploader's socket writes for seconds at a time, so a
+capture begun during an upload stores a fraction of what the microphone
+delivered.
+
 ---
 
 ## 11. Pairing, and About

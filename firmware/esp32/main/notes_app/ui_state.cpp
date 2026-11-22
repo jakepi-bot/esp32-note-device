@@ -56,6 +56,10 @@ void UiState::adopt_app_facts() {
   const Snapshot& live = app_.snapshot();
   snap_.recording = live.recording;
   snap_.record_elapsed_s = live.record_elapsed_s;
+  // The arm for a tap during an upload is the screen machine's, not a fact of the
+  // card: a publish that did not carry it back would drop the wait off the glass
+  // and leave the counter counting from the tap.
+  snap_.record_queued = live.record_queued;
   snap_.playing = live.playing;
   snap_.play_total_s = play_total_s_ != 0 ? play_total_s_ : live.play_total_s;
   snap_.play_pos_s = play_pos_s_;
@@ -115,7 +119,7 @@ Outcome UiState::press(Key key, uint32_t now_ms) {
 
 Outcome UiState::tick(uint32_t now_ms) {
   adopt_app_facts();
-  const Outcome followed = app_.follow_capture(capture_recording_, capture_elapsed_s_, now_ms);
+  const Outcome followed = app_.follow_capture(capture_recording_, capture_elapsed_s_, now_ms, capture_queued_);
   const Outcome synced = sync_app();
   Outcome out = app_.tick(now_ms);
   merge(out, synced);
@@ -124,11 +128,12 @@ Outcome UiState::tick(uint32_t now_ms) {
   return out;
 }
 
-Outcome UiState::set_capture(bool recording, uint32_t elapsed_s, uint32_t now_ms) {
+Outcome UiState::set_capture(bool recording, uint32_t elapsed_s, bool queued, uint32_t now_ms) {
   capture_recording_ = recording;
+  capture_queued_ = queued;
   capture_elapsed_s_ = elapsed_s;
   adopt_app_facts();
-  Outcome out = app_.follow_capture(recording, elapsed_s, now_ms);
+  Outcome out = app_.follow_capture(recording, elapsed_s, now_ms, queued);
   adopt_app_facts();
   return out;
 }

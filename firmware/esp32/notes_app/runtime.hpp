@@ -146,6 +146,9 @@ class Runtime {
   Status status(uint32_t now_ms) const;
   std::string console(std::string_view args);
   bool recording() const { return mode_ == Mode::Recording; }
+  // A BOOT tap made while an upload was in flight: kept, not dropped, and armed
+  // to start the capture on the pass the upload ends. The glass draws it.
+  bool recording_queued() const { return pending_record_; }
   // The capture's own elapsed second, read off the WAV the writer has filled.
   // The screens adopt it as their origin when the runtime - not a key - started
   // the capture (`notes record`), so the counter on the glass is the length of
@@ -198,6 +201,9 @@ class Runtime {
   notes::RetentionResult retention_last_;
 
   Mode mode_ = Mode::Idle;
+  // The tap that arrived during a sync: armed, drawn on the glass, and fired on
+  // the first pass the queue is idle again.
+  bool pending_record_ = false;
   notes::Meta meta_;
   std::string sync_id_;
   uint32_t attempt_ = 0;

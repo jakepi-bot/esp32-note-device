@@ -60,8 +60,9 @@ class UiState {
   Outcome tick(uint32_t now_ms);
   // The runtime's own capture state, handed over before a tick or a publish.
   // The screens follow it (ScreenApp::follow_capture): a capture that ended
-  // without a key leaves the recording face, one no key started enters it.
-  Outcome set_capture(bool recording, uint32_t elapsed_s, uint32_t now_ms);
+  // without a key leaves the recording face, one no key started enters it, and a
+  // tap the runtime kept for an upload in flight draws the queued face.
+  Outcome set_capture(bool recording, uint32_t elapsed_s, bool queued, uint32_t now_ms);
   // The runtime declined an effect the screens had acted on: put back the move
   // it was for (ScreenApp::decline) and keep the snapshot honest.
   Outcome decline(Effect effect);
@@ -107,6 +108,7 @@ class UiState {
   // The runtime's last answer about the capture. Nothing here decides whether a
   // recording is running: this is what the device says, and the screens follow.
   bool capture_recording_ = false;
+  bool capture_queued_ = false;
   uint32_t capture_elapsed_s_ = 0;
 };
 

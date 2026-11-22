@@ -583,7 +583,11 @@ void Runtime::start_note(uint32_t now) {
   // The screens moved to the recording face on the key; the runtime says so too,
   // so a console-started recording (`notes record`) reaches the glass.
   notify_ui();
-  ESP_LOGI(TAG, "recording %s (cap %d s)", meta_.note_id.c_str(), io_.config->note_max_s());
+  // The note's real budget, not the setting: the card may be what limits it, and
+  // a log line that says 86400 s while the face says `OF 1:30·2.2G` is the kind
+  // of disagreement that costs an afternoon (t_5adbd726's handoff).
+  ESP_LOGI(TAG, "recording %s (cap %u s, %s of room)", meta_.note_id.c_str(),
+           static_cast<unsigned>(record_cap_s()), notes::human_bytes(record_cap_bytes()).c_str());
 }
 
 void Runtime::finish_note(uint32_t now, const char* why) {

@@ -181,6 +181,45 @@ bool space(uint64_t* total_bytes, uint64_t* free_bytes) {
   return true;
 }
 
+bool format(std::string* error) {
+  lock_init();
+  if (!g_configured || !g_cfg.enabled) {
+    if (error) *error = "this board has no card slot";
+    return false;
+  }
+  // A format is asked for by a person, so the card has to be up first: an
+  // unmounted volume is mounted here (not formatted - the point is the format
+  // below, not a recovery) and then rewritten like any other.
+  if (!g_mounted && !ensure(true, error)) return false;
+  if (xSemaphoreTake(g_lock, pdMS_TO_TICKS(3000)) != pdTRUE) {
+    if (error) *error = "the card is busy";
+    return false;
+  }
+  // In place: the VFS unmounts the FAT volume, writes a new one at the mount's
+  // own cluster size, and mounts it back. It must not run with a file open, which
+  // is why the caller only offers it from an idle device.
+  ESP_LOGW(TAG, "formatting %s: every note on it goes", kMountPoint);
+  const int64_t began = esp_timer_get_time();
+  const esp_err_t err = esp_vfs_fat_sdcard_format(kMountPoint, g_card);
+  const int64_t took_ms = (esp_timer_get_time() - began) / 1000;
+  if (err != ESP_OK) {
+    // The call recycles its own resources when the format fails, so the mount is
+    // gone: report it and let the next ensure() rebuild it.
+    g_card = nullptr;
+    g_mounted = false;
+    g_last_attempt_ms = 0;
+    xSemaphoreGive(g_lock);
+    const std::string why = std::string("format failed: ") + esp_err_to_name(err);
+    if (error) *error = why;
+    ESP_LOGE(TAG, "%s (after %d ms)", why.c_str(), static_cast<int>(took_ms));
+    return false;
+  }
+  xSemaphoreGive(g_lock);
+  g_last_error.clear();
+  ESP_LOGW(TAG, "formatted %s in %d ms", kMountPoint, static_cast<int>(took_ms));
+  return true;
+}
+
 void release() {
   lock_init();
   if (!g_mounted) return;

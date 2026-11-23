@@ -187,6 +187,22 @@ Outcome ScreenApp::run(Action action, uint32_t now_ms) {
           out.refresh = Refresh::Full;
           out.draw = true;
           return out;
+        case MenuItem::WipeNotes:
+          // The ask, never the act: the row opens its confirm and a hold there
+          // is what wipes. The count the screen states is the snapshot's own.
+          state_.go(Screen::ConfirmWipe);
+          out.refresh = Refresh::Full;
+          out.draw = true;
+          return out;
+        case MenuItem::FormatCard:
+          state_.go(Screen::ConfirmFormat);
+          out.refresh = Refresh::Full;
+          out.draw = true;
+          return out;
+        case MenuItem::UnpairPhones:
+          // The row is here and its behaviour is the next task's: selecting it
+          // does nothing yet rather than pretending to have unpaired a phone.
+          return stay(Refresh::None);
         case MenuItem::Back:
         case MenuItem::Count:
           state_.go(Screen::Home);
@@ -239,6 +255,21 @@ Outcome ScreenApp::run(Action action, uint32_t now_ms) {
 
     case Action::KeepNote:
       state_.go(Screen::NoteList);
+      out.refresh = Refresh::Full;
+      out.draw = true;
+      return out;
+
+    case Action::WipeNotes:
+      // ui_keys has already put the screen on Home; the effect empties the store
+      // and the runtime republishes the counts, so this frame (or the publish
+      // that replaces it, on the device) reads 0 NOTES.
+      out.effect = Effect::WipeNotes;
+      out.refresh = Refresh::Full;
+      out.draw = true;
+      return out;
+
+    case Action::FormatCard:
+      out.effect = Effect::FormatCard;
       out.refresh = Refresh::Full;
       out.draw = true;
       return out;
@@ -301,6 +332,16 @@ Outcome ScreenApp::run(Action action, uint32_t now_ms) {
 }
 
 Outcome ScreenApp::press(Key key, uint32_t now_ms) {
+  // The busy guard, before ui_keys moves anything: a wipe or a format is refused
+  // while the device is recording or uploading, and the confirm stays up with
+  // the runtime's reason on it (a recording must not be formatted out from under
+  // itself). The frame is already showing the reason - the snapshot's busy line
+  // was published when it changed - so a refused hold costs no refresh.
+  if (key == Key::BootHold &&
+      (state_.screen == Screen::ConfirmWipe || state_.screen == Screen::ConfirmFormat) &&
+      snap_.busy[0] != '\0') {
+    return stay(Refresh::None);
+  }
   const Screen before = state_.screen;
   const uint16_t note_before = state_.note;
   const uint8_t first_before = list_visible_first(note_before, snap_.note_count);
@@ -568,6 +609,8 @@ Window ScreenApp::window() const {
     case Screen::Pairing:
     case Screen::Phone:
     case Screen::About:
+    case Screen::ConfirmWipe:
+    case Screen::ConfirmFormat:
       // Their glass carries counts and copy, never a note's stamp.
       return w;
   }
@@ -615,6 +658,12 @@ ScreenDraw ScreenApp::frame() const {
         d.screen = Screen::NoteList;
         d.list = build_list(snap_, state_.note);
       }
+      break;
+    case Screen::ConfirmWipe:
+      d.confirm = build_wipe_confirm(snap_);
+      break;
+    case Screen::ConfirmFormat:
+      d.confirm = build_format_confirm(snap_);
       break;
     case Screen::Playing: {
       uint32_t duration = snap_.play_total_s;

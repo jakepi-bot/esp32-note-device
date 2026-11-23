@@ -284,6 +284,15 @@ void UiState::set_play(uint32_t pos_s, uint32_t total_s) {
   if (total_s != 0) play_total_s_ = total_s;
 }
 
+bool UiState::set_busy(std::string_view reason) {
+  const size_t n = std::min(reason.size(), sizeof snap_.busy - 1);
+  const bool same = n == std::strlen(snap_.busy) && std::memcmp(snap_.busy, reason.data(), n) == 0;
+  if (same) return false;
+  std::memcpy(snap_.busy, reason.data(), n);
+  snap_.busy[n] = '\0';
+  return true;
+}
+
 void UiState::set_notice(std::string_view text, uint32_t now_ms, uint32_t ttl_ms) {
   const size_t n = std::min(text.size(), sizeof snap_.notice - 1);
   std::memcpy(snap_.notice, text.data(), n);

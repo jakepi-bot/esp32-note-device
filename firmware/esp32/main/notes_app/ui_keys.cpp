@@ -33,6 +33,13 @@ Action press_power(State& state) {
       return Action::RunNoteAction;
     case Screen::ConfirmDelete:
       return Action::KeepNote;
+    case Screen::ConfirmWipe:
+    case Screen::ConfirmFormat:
+      // The safe answer, and where it goes back to: the menu the row came from.
+      // The screen is set here (ui_keys moves it for the pure key rules) and the
+      // machine draws the frame - nothing outside the glass is touched.
+      state.go(Screen::Menu);
+      return Action::Back;
     case Screen::Playing:
       // Stop the audio and leave the player, and never the device: this tap used
       // to power off, so browsing notes switched the board off with one key and
@@ -81,6 +88,10 @@ Action press_boot(State& state) {
     case Screen::ConfirmDelete:
       // A tap is the safe answer, and it is the same one PWR gives.
       return Action::KeepNote;
+    case Screen::ConfirmWipe:
+    case Screen::ConfirmFormat:
+      state.go(Screen::Menu);
+      return Action::Back;  // a tap cancels: only the hold empties anything
     case Screen::Playing:
       state.playing = false;
       return Action::StopPlay;
@@ -116,6 +127,14 @@ Action hold_boot(State& state) {
     case Screen::ConfirmDelete:
       state.go(Screen::NoteList);
       return Action::DeleteNote;
+    case Screen::ConfirmWipe:
+      // Home is the answer to an empty device: the frame after this says 0 NOTES
+      // rather than leaving the person in the menu to go and look.
+      state.go(Screen::Home);
+      return Action::WipeNotes;
+    case Screen::ConfirmFormat:
+      state.go(Screen::Home);
+      return Action::FormatCard;
     case Screen::Playing:
       state.playing = false;
       return Action::StopPlay;
@@ -139,6 +158,9 @@ const char* menu_label(MenuItem item) {
     case MenuItem::Phone: return "Phone";
     case MenuItem::Wifi: return "Wi-Fi";
     case MenuItem::About: return "About";
+    case MenuItem::WipeNotes: return "Wipe notes";
+    case MenuItem::FormatCard: return "Format card";
+    case MenuItem::UnpairPhones: return "Unpair phones";
     case MenuItem::Back: return "Back";
     case MenuItem::Count: break;
   }

@@ -727,7 +727,9 @@ TEST("render: every screen inks paper only - x 4..196, y <= 186 at 1 bit") {
   std::snprintf(frame.note.day, sizeof frame.note.day, "21 Nov");
   std::snprintf(frame.note.when, sizeof frame.note.when, "14:02 · 0:14");
   frame.note.state = note::kPending;
-  std::snprintf(frame.confirm.when, sizeof frame.confirm.when, "21 Nov 14:02");
+  std::snprintf(frame.confirm.hero, sizeof frame.confirm.hero, "%s", confirm::kHero);
+  std::snprintf(frame.confirm.line1, sizeof frame.confirm.line1, "21 Nov 14:02");
+  frame.confirm.hold = key::kHoldDelete;
   frame.recording.elapsed_s = 42;
   frame.recording.cap_s = 300;
   std::snprintf(frame.playing.when, sizeof frame.playing.when, "21 Nov 14:02");
@@ -743,11 +745,18 @@ TEST("render: every screen inks paper only - x 4..196, y <= 186 at 1 bit") {
   frame.about = build_about(Snapshot{});
 
   static uint16_t fb[200 * 200];
-  const Screen screens[] = {Screen::Home,   Screen::Menu,     Screen::NoteList,
-                            Screen::NoteAction, Screen::ConfirmDelete, Screen::Playing,
-                            Screen::Recording, Screen::Pairing, Screen::Phone, Screen::About};
+  const Screen screens[] = {Screen::Home,     Screen::Menu,          Screen::NoteList,
+                            Screen::NoteAction, Screen::ConfirmDelete, Screen::ConfirmWipe,
+                            Screen::ConfirmFormat, Screen::Playing,   Screen::Recording,
+                            Screen::Pairing,  Screen::Phone,         Screen::About};
   for (Screen screen : screens) {
     frame.screen = screen;
+    if (screen == Screen::ConfirmWipe) {
+      frame.confirm = build_wipe_confirm(Snapshot{});
+    } else if (screen == Screen::ConfirmFormat) {
+      frame.confirm = build_format_confirm(Snapshot{});
+      frame.confirm.why = "BUSY RECORDING";  // the busiest copy this screen has
+    }
     std::memset(fb, 0xFF, sizeof fb);  // paper
     hg::Canvas canvas(fb, 200, 200, false);
     draw(canvas, frame);
@@ -770,13 +779,48 @@ TEST("render: every screen inks paper only - x 4..196, y <= 186 at 1 bit") {
   }
 }
 
+TEST("render: nine menu rows end above the one-line footer rule") {
+  // The menu grew to nine rows. At the list's 18 px pitch the last row would run
+  // under the footer's rule and past the ink limit, so the menu has its own: scale
+  // 1 labels at a 12 px pitch, closing above kRuleTwoLine. This is the check that
+  // the column still fits when a row is added.
+  static uint16_t fb[200 * 200];
+  std::memset(fb, 0xFF, sizeof fb);
+  ScreenDraw frame;
+  frame.screen = Screen::Menu;
+  frame.menu = build_menu(Snapshot{}, static_cast<uint8_t>(kMenuCount - 1));  // Back selected
+  hg::Canvas canvas(fb, 200, 200, false);
+  draw(canvas, frame);
+
+  bool inked_under_the_rows = false;
+  for (int y = grid::kRowTop + grid::kMenuPitch * kMenuCount; y < grid::kRuleTwoLine; ++y) {
+    for (int x = 0; x < 200; ++x) {
+      if (fb[y * 200 + x] == 0x0000) inked_under_the_rows = true;
+    }
+  }
+  CHECK(!inked_under_the_rows);
+
+  // ...and the last row really is on the page: its selection bar starts left of
+  // the margin, the way every selected row does.
+  bool last_row_drawn = false;
+  const int last_y = grid::kRowTop + grid::kMenuPitch * (kMenuCount - 1);
+  for (int y = last_y - 1; y < last_y + grid::kMenuBar; ++y) {
+    for (int x = grid::kLeft - 4; x < grid::kLeft + 4; ++x) {
+      if (fb[y * 200 + x] == 0x0000) last_row_drawn = true;
+    }
+  }
+  CHECK(last_row_drawn);
+}
+
 TEST("render: the confirm has no footer, the list marks the exception") {
   static uint16_t fb[200 * 200];
   std::memset(fb, 0xFF, sizeof fb);
   hg::Canvas canvas(fb, 200, 200, false);
   ScreenDraw frame;
   frame.screen = Screen::ConfirmDelete;
-  std::snprintf(frame.confirm.when, sizeof frame.confirm.when, "21 Nov 14:02");
+  std::snprintf(frame.confirm.hero, sizeof frame.confirm.hero, "%s", confirm::kHero);
+  std::snprintf(frame.confirm.line1, sizeof frame.confirm.line1, "21 Nov 14:02");
+  frame.confirm.hold = key::kHoldDelete;
   draw(canvas, frame);
   // Nothing below the "TAP: keep" line: the rule at 162 and the footer at 172
   // belong to other screens, and this one must stay a question, not a page.
@@ -1274,4 +1318,275 @@ TEST("keys: two PWR taps in the player leave the device running") {
   // proof is a live screen that keeps taking presses.
   CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Full);
   CHECK(app.screen() == Screen::NoteList);
+}
+
+// ---------------------------------------------------------------------------
+// The menu's two destructive rows (Jake, 2026-11-22): wipe every note and format
+// the card, behind the delete confirm's key map, with the busy guard.
+
+namespace {
+
+// Menu -> a row's confirm, the way a person does it: a hold opens the menu, a tap
+// walks to the row, PWR selects it.
+Outcome open_menu_row(ScreenApp& app, MenuItem row) {
+  app.press(Key::BootHold, 0);
+  // The row can be behind the cursor: walk forward until it is under it.
+  while (static_cast<MenuItem>(app.state().menu) != row) {
+    if (app.state().menu >= kMenuCount) break;
+    app.press(Key::BootTap, 0);
+  }
+  return app.press(Key::Power, 0);
+}
+
+}  // namespace
+
+TEST("menu: rows in order, Back last") {
+  // Nine rows: the six the menu had, the two that empty the device, and the row
+  // the unpair task fills in - every one of them before Back, so one hold still
+  // always leaves the menu.
+  CHECK(kMenuCount == 9);
+  const char* expected[kMenuCount] = {"Notes",       "Sync now", "Phone",       "Wi-Fi", "About",
+                                      "Wipe notes",  "Format card", "Unpair phones", "Back"};
+  for (uint8_t i = 0; i < kMenuCount; ++i) {
+    CHECK(std::string(menu_label(static_cast<MenuItem>(i))) == expected[i]);
+    for (uint8_t j = static_cast<uint8_t>(i + 1); j < kMenuCount; ++j) {
+      CHECK(std::string(menu_label(static_cast<MenuItem>(i))) != menu_label(static_cast<MenuItem>(j)));
+    }
+  }
+  CHECK(static_cast<MenuItem>(kMenuCount - 1) == MenuItem::Back);
+  CHECK(std::string(menu_label(MenuItem::Count)).empty());  // the tally is not a row
+
+  // The count the wipe confirm states is the store's own total.
+  Snapshot snap;
+  snap.card = true;
+  snap.count_pending = 100;
+  snap.count_sent = 12;
+  snap.count_failed = 1;
+  const ConfirmView wipe = build_wipe_confirm(snap);
+  CHECK(std::string(wipe.hero) == "WIPE NOTES");
+  CHECK(std::string(wipe.line1) == "113 NOTES GO");
+  CHECK(std::string(wipe.line2) == "THE CARD STAYS");
+  CHECK(wipe.hold != nullptr && std::string(wipe.hold) == "HOLD: wipe");
+  CHECK(wipe.why == nullptr);  // idle: the hold is allowed
+  // The hero has to fit the panel at scale 3 and the lines at the body size: the
+  // wide copy on a 200 px screen is what the ink box below proves.
+  static uint16_t fb[200 * 200];
+  ScreenDraw frame;
+  frame.screen = Screen::ConfirmWipe;
+  frame.confirm = wipe;
+  std::memset(fb, 0xFF, sizeof fb);
+  hg::Canvas canvas(fb, 200, 200, false);
+  draw(canvas, frame);
+  int min_x = 200, max_x = -1;
+  for (int y = 0; y < 200; ++y) {
+    for (int x = 0; x < 200; ++x) {
+      if (fb[y * 200 + x] != 0x0000) continue;
+      if (x < min_x) min_x = x;
+      if (x > max_x) max_x = x;
+    }
+  }
+  CHECK(min_x >= 4);
+  CHECK(max_x <= 196);
+}
+
+TEST("confirm: a BOOT tap cancels wipe and a BOOT hold wipes") {
+  Snapshot snap;
+  snap.card = true;
+  snap.note_count = 2;
+  snap.stub_first = 0;
+  snap.stub_rows = 2;
+  snap.count_pending = 2;
+  std::snprintf(snap.notes[0].day, sizeof snap.notes[0].day, "21 Nov");
+  std::snprintf(snap.notes[0].clock, sizeof snap.notes[0].clock, "14:02");
+
+  ScreenApp app;
+  app.begin(snap);
+  const Outcome ask = open_menu_row(app, MenuItem::WipeNotes);
+  CHECK(ask.refresh == Refresh::Full);
+  CHECK(app.screen() == Screen::ConfirmWipe);
+
+  // The frame is the question: the row's confirm, with the count on it.
+  const ScreenDraw first = app.frame();
+  CHECK(first.screen == Screen::ConfirmWipe);
+  CHECK(std::string(first.confirm.line1) == "2 NOTES GO");
+
+  // A tap is the safe answer, and it is the same one PWR gives: the menu, the
+  // notes untouched, nothing outside the glass to undo.
+  const Outcome tap = app.press(Key::BootTap, 0);
+  CHECK(tap.effect == Effect::None);
+  CHECK(tap.effect != Effect::WipeNotes);
+  CHECK(app.screen() == Screen::Menu);
+  CHECK(app.snapshot().note_count == 2);
+
+  CHECK(app.press(Key::Power, 0).effect == Effect::None);  // the row again
+  CHECK(app.screen() == Screen::ConfirmWipe);
+  const Outcome pwr = app.press(Key::Power, 0);
+  CHECK(pwr.effect == Effect::None);
+  CHECK(app.screen() == Screen::Menu);
+
+  // The hold is the wipe, and the glass lands on Home - where the count the
+  // runtime republishes is the answer (0 NOTES).
+  app.press(Key::Power, 0);
+  CHECK(app.screen() == Screen::ConfirmWipe);
+  const Outcome wipe = app.press(Key::BootHold, 0);
+  CHECK(wipe.effect == Effect::WipeNotes);
+  CHECK(wipe.refresh == Refresh::Full);
+  CHECK(wipe.draw);
+  CHECK(app.screen() == Screen::Home);
+}
+
+TEST("confirm: a BOOT tap cancels format and a BOOT hold formats") {
+  Snapshot snap;
+  snap.card = true;
+  snap.note_count = 2;
+  snap.count_pending = 2;
+
+  ScreenApp app;
+  app.begin(snap);
+  CHECK(open_menu_row(app, MenuItem::FormatCard).refresh == Refresh::Full);
+  CHECK(app.screen() == Screen::ConfirmFormat);
+
+  // A format says what it takes: the card, and the notes and log with it.
+  const ScreenDraw first = app.frame();
+  CHECK(first.screen == Screen::ConfirmFormat);
+  CHECK(std::string(first.confirm.hero) == "FORMAT");
+  CHECK(std::string(first.confirm.line1) == "THE SD CARD");
+  CHECK(std::string(first.confirm.line2) == "NOTES AND LOG GO");
+  CHECK(std::string(first.confirm.hold) == "HOLD: format");
+
+  const Outcome tap = app.press(Key::BootTap, 0);
+  CHECK(tap.effect == Effect::None);
+  CHECK(app.screen() == Screen::Menu);
+
+  app.press(Key::Power, 0);
+  const Outcome pwr = app.press(Key::Power, 0);  // PWR cancels too
+  CHECK(pwr.effect == Effect::None);
+  CHECK(app.screen() == Screen::Menu);
+
+  app.press(Key::Power, 0);
+  const Outcome format = app.press(Key::BootHold, 0);
+  CHECK(format.effect == Effect::FormatCard);
+  CHECK(format.refresh == Refresh::Full);
+  CHECK(app.screen() == Screen::Home);
+}
+
+TEST("guard: wipe and format are refused while the device is busy") {
+  // A recording is what a format must never run over. The screen says so once,
+  // from the runtime's own words, and the hold does nothing.
+  Snapshot snap;
+  snap.card = true;
+  snap.note_count = 3;
+  snap.count_pending = 3;
+  std::snprintf(snap.busy, sizeof snap.busy, "BUSY RECORDING");
+
+  ScreenApp app;
+  app.begin(snap);
+  open_menu_row(app, MenuItem::WipeNotes);
+  CHECK(app.screen() == Screen::ConfirmWipe);
+  const Outcome held = app.press(Key::BootHold, 0);
+  CHECK(held.effect == Effect::None);
+  CHECK(held.effect != Effect::WipeNotes);
+  CHECK(app.screen() == Screen::ConfirmWipe);  // the ask stays up
+  CHECK(!held.draw);                           // the reason is already on it
+  const ScreenDraw frame = app.frame();
+  CHECK(frame.screen == Screen::ConfirmWipe);
+  CHECK(frame.confirm.why != nullptr);
+  CHECK(std::string(frame.confirm.why) == "BUSY RECORDING");
+  CHECK(app.snapshot().note_count == 3);  // nothing was emptied
+
+  // The upload case, on the format confirm.
+  Snapshot uploading = snap;
+  std::snprintf(uploading.busy, sizeof uploading.busy, "BUSY UPLOADING");
+  ScreenApp other;
+  other.begin(uploading);
+  open_menu_row(other, MenuItem::FormatCard);
+  CHECK(other.screen() == Screen::ConfirmFormat);
+  const Outcome refused = other.press(Key::BootHold, 0);
+  CHECK(refused.effect == Effect::None);
+  CHECK(other.screen() == Screen::ConfirmFormat);
+  CHECK(std::string(other.frame().confirm.why) == "BUSY UPLOADING");
+
+  // The same confirm, once the runtime is idle: the hold goes through.
+  Snapshot idle = snap;
+  idle.busy[0] = '\0';
+  ScreenApp free;
+  free.begin(idle);
+  open_menu_row(free, MenuItem::WipeNotes);
+  CHECK(free.press(Key::BootHold, 0).effect == Effect::WipeNotes);
+}
+
+TEST("home: shows 0 NOTES after a wipe") {
+  TempDir dir;
+  Store store(dir.path + "/notes");
+  CHECK(!make_note(store, "hg-a-20261121T140200-0001", "2026-11-21T14:02:00Z", 14).empty());
+  CHECK(!make_note(store, "hg-a-20261120T091100-0002", "2026-11-20T09:11:00Z", 60, NoteState::Sent).empty());
+
+  Cache cache;
+  CHECK(cache.reload(store));
+  Snapshot snap = snapshot_for(cache, store, Screen::Home, 0);
+  snap.card = true;
+  snap.count_pending = cache.pending();
+  snap.count_sent = cache.sent();
+  snap.count_failed = cache.failed();
+  snap.note_count = static_cast<uint16_t>(cache.note_count());
+
+  ScreenApp app;
+  app.begin(snap);
+  CHECK(std::string(build_menu(snap, 0).rows[0].value) == "2");
+
+  open_menu_row(app, MenuItem::WipeNotes);
+  const Outcome wipe = app.press(Key::BootHold, 0);
+  CHECK(wipe.effect == Effect::WipeNotes);
+
+  // What the device's effect does (ui_device -> Runtime::wipe_notes), and the
+  // publish that follows it: the counts and the list are re-read from the card.
+  CHECK(store.wipe() == 2);
+  CHECK(cache.reload(store));
+  Snapshot after = snapshot_for(cache, store, Screen::Home, 0);
+  after.card = true;
+  after.count_pending = cache.pending();
+  after.count_sent = cache.sent();
+  after.count_failed = cache.failed();
+  after.note_count = static_cast<uint16_t>(cache.note_count());
+  CHECK(after.notes_total() == 0);
+
+  const Outcome publish = app.publish(after, static_cast<uint16_t>(DirtyQueue | DirtyList));
+  CHECK(app.screen() == Screen::Home);
+  CHECK(publish.draw);
+  const ScreenDraw frame = app.frame();
+  CHECK(std::string(frame.home.band) == "ALL SENT");
+  CHECK(std::string(frame.home.sub) == "BOOT TO RECORD");  // no LAST, nothing left
+  CHECK(std::string(build_menu(after, 0).rows[0].value) == "0");
+
+  // The store itself: every state emptied, the folders kept, so the device is
+  // usable straight after a wipe.
+  CHECK(store.count(NoteState::Pending) == 0);
+  CHECK(store.count(NoteState::Sent) == 0);
+  CHECK(store.count(NoteState::Failed) == 0);
+  for (NoteState state : {NoteState::Pending, NoteState::Sent, NoteState::Failed}) {
+    CHECK(access(store.state_dir(state).c_str(), F_OK) == 0);
+  }
+}
+
+TEST("store: wipe removes every note and leaves the folders") {
+  TempDir dir;
+  Store store(dir.path + "/notes");
+  store.ensure();
+  CHECK(!make_note(store, "hg-a-20261121T140200-0001", "2026-11-21T14:02:00Z", 14, NoteState::Pending).empty());
+  CHECK(!make_note(store, "hg-a-20261120T091100-0002", "2026-11-20T09:11:00Z", 3, NoteState::Failed).empty());
+  CHECK(!make_note(store, "hg-a-20261119T184000-0003", "2026-11-19T18:40:00Z", 60, NoteState::Sent).empty());
+  CHECK(store.count(NoteState::Pending) == 1);
+
+  CHECK(store.wipe() == 3);
+  CHECK(store.count(NoteState::Pending) == 0);
+  CHECK(store.count(NoteState::Sent) == 0);
+  CHECK(store.count(NoteState::Failed) == 0);
+  CHECK(store.list(NoteState::Pending).empty());
+  // Nothing to wipe twice, and nothing lost that the store needs: the three
+  // state folders are there, so the next note has somewhere to land.
+  CHECK(store.wipe() == 0);
+  for (NoteState state : {NoteState::Pending, NoteState::Sent, NoteState::Failed}) {
+    CHECK(access(store.state_dir(state).c_str(), F_OK) == 0);
+  }
+  CHECK(store.ensure());
 }

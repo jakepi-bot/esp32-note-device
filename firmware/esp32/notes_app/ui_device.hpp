@@ -91,6 +91,10 @@ class NotesUi {
     // probe has no answer (the snapshot's own cap stands).
     std::function<uint32_t()> cap_s;
     std::function<uint64_t()> cap_bytes;
+    // Why the device may not be emptied right now ("BUSY RECORDING"), in the
+    // runtime's words, or nullptr when it is idle. The wipe/format confirms draw
+    // it and the busy guard refuses their hold while it is set.
+    std::function<const char*()> busy;
   };
   void set_capture_probe(CaptureProbe probe) { capture_probe_ = std::move(probe); }
 
@@ -144,6 +148,8 @@ class NotesUi {
   // own cadence while that screen is up (and never from the draw path).
   notesui::PhoneStatus read_phone() const;
   void poll_phone(uint32_t now_ms);
+  // The runtime's busy answer, adopted on every key and tick.
+  void poll_busy(uint32_t now_ms);
   void render(notesui::Refresh refresh);
   void apply(const notesui::Outcome& outcome, uint32_t now_ms);
   // Draws the frame an effect left behind - or, when the effect moved the card,

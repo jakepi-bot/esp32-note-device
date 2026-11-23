@@ -254,6 +254,11 @@ MenuView build_menu(const Snapshot& snap, uint8_t selected) {
         break;
       case MenuItem::Phone:
       case MenuItem::About:
+      // The three destructive rows are sentences, not values: what they would
+      // take is on their own confirm, where a hold means it.
+      case MenuItem::WipeNotes:
+      case MenuItem::FormatCard:
+      case MenuItem::UnpairPhones:
       case MenuItem::Back:
       case MenuItem::Count:
         view.rows[i].value[0] = '\0';  // a deliberate empty column
@@ -332,8 +337,38 @@ bool build_note(const Snapshot& snap, uint16_t index, uint8_t selected, NoteView
 bool build_confirm(const Snapshot& snap, uint16_t index, ConfirmView& out) {
   const NoteStub* note = stub_at(snap, index);
   if (note == nullptr) return false;
-  std::snprintf(out.when, sizeof out.when, "%s %s", note->day, note->clock);
+  out = ConfirmView{};
+  copy_out(confirm::kHero, out.hero, sizeof out.hero);
+  std::snprintf(out.line1, sizeof out.line1, "%s %s", note->day, note->clock);
+  out.hold = key::kHoldDelete;
   return true;
+}
+
+ConfirmView build_wipe_confirm(const Snapshot& snap) {
+  // The count is the whole question: a person holding BOOT has to know what
+  // they are about to lose, in numbers, not in a word like "everything". The
+  // card itself survives - the notes are the thing that goes.
+  ConfirmView out;
+  copy_out(confirm::kWipeHero, out.hero, sizeof out.hero);
+  std::snprintf(out.line1, sizeof out.line1, confirm::kWipeCount,
+                static_cast<unsigned>(snap.card ? snap.notes_total() : 0));
+  copy_out(confirm::kWipeKeeps, out.line2, sizeof out.line2);
+  out.hold = key::kHoldWipe;
+  if (snap.busy[0] != '\0') out.why = snap.busy;
+  return out;
+}
+
+ConfirmView build_format_confirm(const Snapshot& snap) {
+  // A format is the row that takes more than the notes: whatever else lives on
+  // the volume goes with them, so the screen says so rather than reusing the
+  // wipe's copy with a different hero.
+  ConfirmView out;
+  copy_out(confirm::kFormatHero, out.hero, sizeof out.hero);
+  copy_out(confirm::kFormatTarget, out.line1, sizeof out.line1);
+  copy_out(confirm::kFormatLoss, out.line2, sizeof out.line2);
+  out.hold = key::kHoldFormat;
+  if (snap.busy[0] != '\0') out.why = snap.busy;
+  return out;
 }
 
 // The Phone screen: the port's phase as one word, the window's clock, and the

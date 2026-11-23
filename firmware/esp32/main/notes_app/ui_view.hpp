@@ -99,6 +99,12 @@ struct Snapshot {
   // explain; the caller clears it when its few seconds are up.
   char notice[18] = {};
 
+  // Why the device cannot be emptied right now, in the runtime's words
+  // ("BUSY RECORDING", "BUSY UPLOADING"), or empty when it is idle. It is the
+  // busy guard's copy: a wipe or a format confirm draws it and refuses the hold,
+  // so a recording or an upload cannot be formatted out from under itself.
+  char busy[20] = {};
+
   // About. Strings copied, not pointed at, so a snapshot is self-contained.
   char firmware[12] = {};
   char device[16] = {};
@@ -230,10 +236,21 @@ struct NoteView {
 };
 bool build_note(const Snapshot& snap, uint16_t index, uint8_t selected, NoteView& out);
 
+// A confirm screen: one question, what it is about, and (when the device is
+// busy) why the hold will be refused. All three lines are copies, so the frame
+// is self-contained like the rest of the snapshot.
 struct ConfirmView {
-  char when[16] = {};      // the note about to go
+  char hero[20] = {};      // "DELETE?" / "WIPE NOTES" / "FORMAT"
+  char line1[24] = {};     // the note's stamp / "%u NOTES GO" / "THE SD CARD"
+  char line2[24] = {};     // what else goes: empty for a delete
+  const char* hold = nullptr; // the legend: "HOLD: delete" / "HOLD: wipe" / "HOLD: format"
+  const char* why = nullptr;  // Snapshot::busy, or null when the hold is allowed
 };
 bool build_confirm(const Snapshot& snap, uint16_t index, ConfirmView& out);
+// The two rows that empty the device: the count for a wipe, and for a format
+// exactly what is lost (every note and the card's log).
+ConfirmView build_wipe_confirm(const Snapshot& snap);
+ConfirmView build_format_confirm(const Snapshot& snap);
 
 struct RecordingView {
   uint32_t elapsed_s = 0;

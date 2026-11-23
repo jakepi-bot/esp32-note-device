@@ -432,21 +432,31 @@ USB is indistinguishable from an empty one. Never label it `CHARGING`.
 ## 5. Menu
 
 **Keys:** PWR tap `MenuSelect` · BOOT tap `MenuNext` (wraps) · BOOT hold `Back` to Home.
-**Job:** six destinations, and a summary of the device's state in the right column
+**Job:** nine destinations, and a summary of the device's state in the right column
 so the menu answers questions as well as asking them.
 
 ### 5.1 Layout
+
+Nine rows since 2026-11-22 (wipe notes, format card, unpair phones). They do not
+fit at the list's 18 px pitch — at nine rows the last one would start at 176, under
+the footer's rule at 144 — so the menu draws its own rows: **scale 1 labels at a
+12 px pitch**, with an 11 px selection bar. The footer keeps both bindings, because
+the menu is how a person moves; the label is the one thing that gave way, and 5 × 7
+pixels is still a word at reading distance on this panel.
 
 ```
 y=0    ┌──────────────────────────────────────────────────────┐
        │ MENU                                                 │  y=8
 y=27   ├──────────────────────────────────────────────────────┤
        │ ████ Notes                                      12   │  y=32   selected
-       │      Sync now                                    3   │  y=50
-       │      Phone                                           │  y=68
-       │      Wi-Fi                                     on    │  y=86
-       │      About                                           │  y=104
-       │      Back                                            │  y=122
+       │      Sync now                                    3   │  y=44
+       │      Phone                                           │  y=56
+       │      Wi-Fi                                     on    │  y=68
+       │      About                                           │  y=80
+       │      Wipe notes                                      │  y=92
+       │      Format card                                     │  y=104
+       │      Unpair phones                                   │  y=116
+       │      Back                                            │  y=128
 y=144  ├──────────────────────────────────────────────────────┤
        │ BOOT: next                                           │  y=152
        │ PWR: select                                          │  y=170
@@ -457,14 +467,14 @@ y=194  └───────────────────────�
 |---|---|---|---|---|
 | title `MENU` | 12 | 8 | 58 × 14 | scale 2 |
 | rule | 12 | 27 | 176 × 1 | |
-| rows 0–5 | 12 | 32 + 18n | label ≤ 106, value right to 188 | §3.4 |
+| rows 0–8 | 12 | 32 + 12n | label ≤ 106, value right to 188 | scale 1, §3.4 |
 | rule | 12 | 144 | 176 × 1 | |
 | footer | 12 | 152, 170 | ≤ 166 × 14 each | two lines |
 
-Six rows at 18 px occupy y 32 … 137 and the bar reaches y 138; the rule is at 144,
-so the column closes with 6 px of paper. That is the tightest screen in the set and
-it is why the menu takes the two-line footer: at a one-line footer there would be
-room for a seventh row, and there is no seventh row to show.
+Nine rows at 12 px occupy y 32 … 134 and the bar reaches y 137; the rule is at 144,
+so the column closes with 6 px of paper — the same margin the six-row menu had. A
+`static_assert` in `ui_render.cpp` refuses a tenth row rather than letting one run
+under the footer.
 
 ### 5.2 The right column
 
@@ -478,6 +488,9 @@ right-aligned to x = 188 and always at scale 2, in the same `kInk`:
 | `Phone` | *blank* | it opens a window; there is no state to show |
 | `Wi-Fi` | `on` / `off` | the Wi-Fi port's link state |
 | `About` | *blank* | |
+| `Wipe notes` | *blank* | what it would take is on its own confirm |
+| `Format card` | *blank* | likewise |
+| `Unpair phones` | *blank* | likewise |
 | `Back` | *blank* | |
 
 A blank value is a deliberate empty column, not a missing one: three rows with
@@ -737,6 +750,34 @@ worth it for a collision that requires two notes in the same minute.
 This screen is **immobile by design**: the note identity and the two key verbs are
 fixed for as long as the question is on the glass. It is the one place in the UI
 where a partial refresh never happens, which also means it never ghosts.
+
+### 8.4 ConfirmWipe and ConfirmFormat
+
+The menu's two destructive rows use the same face, the same key map (PWR tap,
+BOOT tap → cancel; BOOT hold → the act) and the same "no footer, no rows" rule:
+
+| Screen | Hero (scale 3) | Line 1 (scale 2) | Line 2 (scale 2) | Hold legend |
+|---|---|---|---|---|
+| `ConfirmWipe` | `WIPE NOTES` | `113 NOTES GO` | `THE CARD STAYS` | `HOLD: wipe` |
+| `ConfirmFormat` | `FORMAT` | `THE SD CARD` | `NOTES AND LOG GO` | `HOLD: format` |
+
+The hero is ten columns at most because 11 columns at scale 3 is 195 px and the ink
+rule keeps 4 px of margin; the rest of each sentence is on the body lines, where
+the count (from `Snapshot::notes_total()`) and what is lost are stated plainly. A
+wipe keeps the filesystem and the settings (they are NVS); a format takes the volume
+and everything on it.
+
+Both screens carry the **busy guard**: while the runtime is not idle (recording or
+uploading) `Snapshot::busy` holds its own words — `BUSY RECORDING`,
+`BUSY UPLOADING` — drawn at scale 1 above the rule, and `ScreenApp::press()` refuses
+the hold before the key map can move the screen. The confirm stays up; a recording
+or an upload cannot be formatted out from under itself. The guard is re-evaluated on
+every key and tick, so a capture that starts while the question is open puts the
+line on the glass.
+
+The layout shifts up from §8.1 to make room for the second body line and the
+reason: hero y=42, line 1 y=72, line 2 y=90, reason y=108, rule y=118, legend
+y=126 and y=144.
 
 ---
 

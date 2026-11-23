@@ -109,11 +109,14 @@ BOOT-hold on Home opens it. PWR selects; BOOT moves down; BOOT-hold goes home.
 
 ```
 MENU
-Notes        12
-Sync now      3
+Notes       12
+Sync now     3
 Phone
-Wi-Fi       off
+Wi-Fi      off
 About
+Wipe notes
+Format card
+Unpair phones
 Back
 ```
 
@@ -124,7 +127,19 @@ Back
   glass until the window closes.
 - **Wi-Fi** - open the phone's setup page (`on`/`off` is the station state).
 - **About** - battery, firmware version, device id, notes, card free space.
+- **Wipe notes** - asks first (`WIPE NOTES`, the count, `THE CARD STAYS`); BOOT-hold
+  on the question removes every note from `pending/`, `sent/` and `failed/` and
+  lands on Home with `0 NOTES`. The settings are NVS, so they survive, and the
+  three folders stay.
+- **Format card** - asks first (`FORMAT`, `THE SD CARD`, `NOTES AND LOG GO`);
+  BOOT-hold rewrites the volume and re-creates the note tree. Everything on the
+  card goes.
+- **Unpair phones** - the paired-phone list (the row is on the menu; the list and
+  its confirm are the next change).
 - **Back** - Home.
+
+Both destructive rows refuse while the device is busy - a note recording or
+uploading - and the question says why (`BUSY RECORDING`, `BUSY UPLOADING`).
 
 ## The note list
 

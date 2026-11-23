@@ -127,12 +127,27 @@ void recording_face(hg::Canvas& c, const ScreenDraw& d) {
   draw_footer(c, key::kBootStop, key::kHoldDiscard);
 }
 
+// Nine rows do not fit at the list's pitch: at 18 px the last row would start at
+// 176, under the two-line footer's rule and past the 186 px ink limit. The menu
+// therefore draws its own rows (scale 1, a 12 px pitch, an 11 px bar) and this
+// is the check that the column still closes above the footer's rule when a row
+// is added or the pitch moves.
+static_assert(grid::kRowTop + grid::kMenuPitch * (kMenuCount - 1) + grid::kMenuBar - 1 < grid::kRuleTwoLine,
+              "menu rows must end above the two-line footer rule");
+
 void menu_face(hg::Canvas& c, const ScreenDraw& d) {
   text_at(c, grid::kLeft, grid::kBandY, menu::kTitle, grid::kScale, kInk);
   rule(c, grid::kRuleY);
   for (uint8_t i = 0; i < kMenuCount; ++i) {
-    row(c, grid::kRowTop + grid::kRowPitch * i, d.menu.rows[i].label, d.menu.rows[i].value,
-        i == d.menu.selected);
+    const int y = grid::kRowTop + grid::kMenuPitch * i;
+    const bool selected = i == d.menu.selected;
+    if (selected) c.fill_rect(grid::kLeft - 4, y - 1, grid::kWidth + 8, grid::kMenuBar, kInk);
+    const uint16_t colour = selected ? kPaper : kInk;
+    text_at(c, grid::kLeft, y, d.menu.rows[i].label, grid::kMenuLabelScale, colour);
+    if (d.menu.rows[i].value[0] != '\0') {
+      c.text(grid::kRight - text_width(d.menu.rows[i].value, grid::kMenuLabelScale), y,
+             d.menu.rows[i].value, grid::kMenuLabelScale, colour);
+    }
   }
   draw_footer(c, key::kBootNext, key::kPwrSelect);
 }
@@ -173,12 +188,19 @@ void note_face(hg::Canvas& c, const ScreenDraw& d) {
 }
 
 void confirm_face(hg::Canvas& c, const ScreenDraw& d) {
-  draw_centred(c, 46, confirm::kHero, grid::kHero);
-  draw_centred(c, 78, d.confirm.when, grid::kScale);
-  rule(c, 104);
+  const ConfirmView& v = d.confirm;
+  // The question, then what it is about: one line for a note's stamp, two for a
+  // wipe (the count, and that the card stays) or a format (the card, and what
+  // goes with it). The refusal sits above the rule at the small size - it is a
+  // reason, not part of the question.
+  draw_centred(c, 42, v.hero, grid::kHero);
+  draw_centred(c, 72, v.line1, grid::kScale);
+  draw_centred(c, 90, v.line2, grid::kScale);
+  if (v.why != nullptr) draw_centred(c, 108, v.why, 1);
+  rule(c, 118);
   // The body is the legend: this screen has no footer and no rows (§8.2).
-  draw_centred(c, 118, key::kHoldDelete, grid::kScale);
-  draw_centred(c, 140, key::kTapKeep, grid::kScale);
+  draw_centred(c, 126, v.hold != nullptr ? v.hold : key::kHoldDelete, grid::kScale);
+  draw_centred(c, 144, key::kTapKeep, grid::kScale);
 }
 
 void playing_face(hg::Canvas& c, const ScreenDraw& d) {
@@ -298,7 +320,9 @@ void draw(hg::Canvas& c, const ScreenDraw& d) {
     case Screen::Menu: menu_face(c, d); break;
     case Screen::NoteList: list_face(c, d); break;
     case Screen::NoteAction: note_face(c, d); break;
-    case Screen::ConfirmDelete: confirm_face(c, d); break;
+    case Screen::ConfirmDelete:
+    case Screen::ConfirmWipe:
+    case Screen::ConfirmFormat: confirm_face(c, d); break;
     case Screen::Playing: playing_face(c, d); break;
     case Screen::Pairing: pairing_face(c, d); break;
     case Screen::Phone: phone_face(c, d); break;

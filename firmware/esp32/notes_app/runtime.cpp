@@ -461,6 +461,71 @@ void Runtime::on_clock_synced() {
 // ---------------------------------------------------------------------------
 // Recording
 
+const char* Runtime::busy_reason() const {
+  switch (mode_) {
+    case Mode::Recording: return "BUSY RECORDING";
+    case Mode::Syncing: return "BUSY UPLOADING";
+    case Mode::Idle: break;
+  }
+  return nullptr;
+}
+
+// Every note, and nothing else: the settings are NVS, and the three state folders
+// survive, so the store is usable the moment this returns.
+bool Runtime::wipe_notes(std::string* error) {
+  const char* why = busy_reason();
+  if (why != nullptr) {
+    if (error) *error = why;
+    return false;
+  }
+  if (!ensure_sd()) {
+    if (error) *error = sd_error_.empty() ? std::string("no card") : sd_error_;
+    return false;
+  }
+  const uint32_t gone = store_.wipe();
+  refresh_counts();
+  ESP_LOGI(TAG, "wiped %u notes from the card (the settings stay)", static_cast<unsigned>(gone));
+  return true;
+}
+
+// The volume itself, through sd_mount's own format: the note tree is gone with
+// it, so it is re-created before the counts are read (an empty tree is what Home
+// draws the number from).
+bool Runtime::format_card(std::string* error) {
+  const char* why = busy_reason();
+  if (why != nullptr) {
+    if (error) *error = why;
+    return false;
+  }
+  std::string reason;
+  if (!sd_mount::format(&reason)) {
+    // The format call recycles its own mount when it fails: let the next ensure()
+    // rebuild it rather than trusting sd_ready_.
+    sd_ready_ = false;
+    sd_probe_ms_ = 0;
+    sd_probes_ = 0;
+    sd_error_ = reason.empty() ? std::string("format failed") : reason;
+    if (error) *error = sd_error_;
+    notify_ui();
+    return false;
+  }
+  sd_ready_ = true;
+  sd_error_.clear();
+  if (!store_.ensure()) {
+    // A formatted card that will not take the note tree is a card problem: say
+    // so rather than reporting a wiped device.
+    sd_ready_ = false;
+    sd_error_ = "the card is not writable";
+    if (error) *error = sd_error_;
+    notify_ui();
+    return false;
+  }
+  pending_ = sent_ = failed_ = 0;
+  refresh_counts();
+  ESP_LOGI(TAG, "formatted the card: every note and the log are gone");
+  return true;
+}
+
 std::string Runtime::on_action(int action) {
   const auto a = static_cast<hgp::notesui::Action>(action);
   const uint32_t now = now_ms();
@@ -496,6 +561,22 @@ std::string Runtime::on_action(int action) {
     case hgp::notesui::Action::PowerOff:
       shutdown();
       return "power off";
+    case hgp::notesui::Action::WipeNotes: {
+      std::string why;
+      if (!wipe_notes(&why)) {
+        ESP_LOGW(TAG, "wipe refused: %s", why.c_str());
+        return {};
+      }
+      return "wiped every note";
+    }
+    case hgp::notesui::Action::FormatCard: {
+      std::string why;
+      if (!format_card(&why)) {
+        ESP_LOGW(TAG, "format refused: %s", why.c_str());
+        return {};
+      }
+      return "formatted the card";
+    }
     default:
       return {};
   }

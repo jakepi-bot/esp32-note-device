@@ -159,7 +159,7 @@ y=186  └───────────────────────�
 
 | Zone | x | first row | content budget | carries |
 |---|---|---|---|---|
-| A · facts | 12 … 188 | glyph top **y = 8** | band height 15 px, ink to y = 22 | queue state, the clock, Wi-Fi / Bluetooth, battery |
+| A · facts | 12 … 188 | glyph top **y = 8** | band height 15 px, ink to y = 22 | queue state, the clock, the Wi-Fi glyph, battery |
 | rule | 12 … 188 | **y = 27** | 1 px | the only rule on a one-rule screen |
 | B · content | 12 … 188 | **y = 32** | to y = 138 (2-line footer) or y = 156 (1-line) | everything the screen is *about* |
 | rule | 12 … 188 | **y = 144** or **y = 162** | 1 px | closes the page |
@@ -177,7 +177,7 @@ The band carries four things, all of them event-driven:
 |---|---|---|---|
 | queue | 12 | text at scale 1, ≤ 21 cols | `3 TO SEND` / `ALL SENT` / `NO CARD` / blank |
 | clock | right of queue | text at scale 1 | `14:02`, blank until the clock has been set once |
-| Wi-Fi / Bluetooth | 136 | 16 × 15 bitmap | Wi-Fi up (uncut) or down (2 px cut); the Bluetooth rune while the radio has a window open (thin = advertising, 2 px stem = a phone connected) |
+| Wi-Fi | 136 | 16 × 15 bitmap | up (uncut) or down (2 px cut — the rune with the cut); blank when the Wi-Fi is off |
 | battery | 160 | 28 × 15 procedural | fill, bolt, or `?` |
 
 **The clock is the one exception, and it is bounded.** The original rule was no
@@ -194,11 +194,11 @@ ADC's own noise — is not a change. Measured on the board: two minutes on Home
 produced exactly two refreshes, one per minute; two minutes in a menu produced
 none from the poll.
 
-**Bluetooth is drawn in the Wi-Fi glyph's box, never beside it.** The mark is the
-radio's answer, the same three states `radio` prints (off / advertising /
-connected), and the box is the reason the band does not shift when it appears.
-The Wi-Fi glyph keeps the slot whenever the radio is off, which is every state
-except the boot window, a note's window and the Phone screen's window.
+**The 16 × 15 box is the Wi-Fi glyph's, and nothing else's.** The band reports the
+station, not the Bluetooth radio: a phone's window is the Phone screen's own page
+(§11.5), which draws no band at all, so there is no rune to keep in this slot and
+no state in which the box changes owner. When the Wi-Fi is off the box is paper,
+not a placeholder mark.
 
 This is the single most useful rule in the document: **nothing redraws unless
 something changed.** The only timers in the whole UI are the recording counter,
@@ -223,6 +223,7 @@ user stuck if they guessed wrong:
 | Playing | `BOOT: stop` | the stop that stays on the note; PWR stops too but leaves the player |
 | Pairing | `HOLD: nothing` | the question is answered on the keys; a hold is not consent |
 | About | `HOLD: back` | the only way out |
+| Phone | `PWR: close` / `HOLD: back` | two lines: the tap is the discoverable way out and the hold is the same exit — the window ends with the page, so both bindings must say so |
 
 `HOLD:` always means **BOOT** held. **PWR is never a power gesture on a tap**:
 a tap opens, selects, refuses, stops or leaves, and the only power-off is a PWR
@@ -489,7 +490,7 @@ right-aligned to x = 188 and at the same scale 1 as the labels (§5.1), in the s
 |---|---|---|
 | `Notes` | `Store::count(Pending) + count(Sent) + count(Failed)` | the card |
 | `Sync now` | `Store::count(Pending)` — what it would upload | the card |
-| `Phone` | *blank* | it opens a window; there is no state to show |
+| `Phone` | *blank* | it opens its own page (§11.5); the row itself has no state to show |
 | `Wi-Fi` | `on` / `off` | the Wi-Fi port's link state |
 | `About` | *blank* | |
 | `Wipe notes` | *blank* | what it would take is on its own confirm |
@@ -1116,10 +1117,16 @@ TEST("about: a hold goes back to the menu, a tap does nothing, and a tap is not 
 | Pairing | anything while open | nothing — the ask is immobile |
 | About | entering / leaving | **FULL** |
 | About | anything while open | nothing — the page is a snapshot at entry |
+| Phone | entering / leaving | **FULL** both ways |
+| Phone | the state word, a refusal or the bond count moves | **FULL** — a fact changed, not a tick |
+| Phone | the countdown crosses a 5 s boundary | **P** |
+| Phone | a poll finds nothing new | nothing — no flush at all |
 
-Both are static pages. About is deliberately **not live**: a battery percentage
-that ticks while you watch it would cost a panel refresh to tell you something you
-can already see in the band of every other screen.
+Pairing and About are static pages. About is deliberately **not live**: a battery
+percentage that ticks while you watch it would cost a panel refresh to tell you
+something you can already see in the band of every other screen. The Phone page is
+the one live page here, and only in one line: its countdown is a deadline, so it
+moves, and it moves at most once per 5 s (§11.5.2).
 
 ### 11.4 Unpair — the bonded phones
 
@@ -1201,28 +1208,126 @@ under it, and a footer that offers only `HOLD: back` — a list that advertises
 "next" with nothing in it is a lie the user tests once (the note list's own rule).
 PWR does nothing there.
 
+### 11.5 Phone — the Bluetooth window's own page
+
+**Keys:** PWR tap `ClosePhone` to Menu · BOOT hold `ClosePhone` to Menu · BOOT tap
+does nothing.
+**Job:** show that a window is open, what the radio is doing, how long it has left
+and how many phones are already bonded — so a window that failed to open says why
+on the glass instead of looking like a flash and a step back.
+
+```
+y=0    ┌──────────────────────────────────────────────────────┐
+       │ PHONE                                                │  y=8
+y=27   ├──────────────────────────────────────────────────────┤
+       │                   Hermes Gadget                      │  y=36   name, scale 2
+       │                      WAITING                         │  y=54   state, scale 2
+       │                       4:57                           │  y=74   countdown, scale 3
+       │                    1 OF 3 PAIRED                     │  y=104  bond table
+       │                                                      │  y=124  reason (empty here)
+y=144  ├──────────────────────────────────────────────────────┤
+       │ PWR: close                                           │  y=152
+       │ HOLD: back                                           │  y=170
+y=194  └──────────────────────────────────────────────────────┘
+```
+
+| Element | x | y | size | note |
+|---|---|---|---|---|
+| title `PHONE` | 12 | 8 | 58 × 14 | scale 2 |
+| rule | 12 | 27 | 176 × 1 | |
+| device name | centred | 36 | ≤ 154 × 14 | `snap.device`: the name a phone's chooser lists |
+| state | centred | 54 | ≤ 154 × 14 | one of seven states, §11.5.1 |
+| countdown | centred | 74 | ≤ 87 × 21 | scale 3, `M:SS`, only while a deadline runs |
+| bond table | centred | 104 | ≤ 154 × 14 | `%u OF %u PAIRED`, empty when `slots` is 0 |
+| reason | centred | 124 | ≤ 106 × 14 | `Held open` / `Radio off`, empty otherwise |
+| rule | 12 | 144 | 176 × 1 | the two-line footer's rule |
+| footer | 12 | 152, 170 | ≤ 118 × 14 each | `PWR: close` / `HOLD: back` |
+
+The page has **no band**. Pairing and About do the same: a page that owns the whole
+panel puts its title in the band's slot at y = 8, draws the rule at 27, and spends
+the rest on its own content. Nothing here reports the queue, the station or the
+battery, so a glance at this page tells you about the window and nothing else.
+
+**11.5.1 Five lines, and the three that come and go.** The name is the configured device
+name, the string the pairing chooser shows on the phone (`Hermes Gadget` by
+default; the line is simply absent when the snapshot carries no name). The state
+line is the port's phase, uppercase:
+
+| Phase | State line | Countdown | Bond table | Reason line |
+|---|---|---|---|---|
+| controller still coming up | `ADVERTISING` | the deadline | when `slots` is known | — |
+| advertising, no link | `WAITING` | the deadline | when `slots` is known | — |
+| a phone is on it | `CONNECTED` | never — a link holds the window open | when `slots` is known | `Held open` |
+| refused: no bond slot free | `PAIRING FULL` | never | `3 OF 3 PAIRED` | — |
+| refused: controller would not start | `RADIO BUSY` | never | `n OF 3 PAIRED` | — |
+| refused: this build has no Bluetooth | `BLE OFF` | never | — (`slots` = 0) | — |
+| the deadline passed | `WINDOW CLOSED` | never | when `slots` is known | `Radio off` |
+
+The countdown is `M:SS`, rounded **up**, so a window that has just opened reads
+`5:00` rather than `4:59`. It is drawn only while `left_ms` is not zero and the
+phone is not connected: a connected phone keeps the window open, so a clock there
+would count down to nothing. The bond table is drawn only when the port knows the
+slots (`slots != 0`); `0` means the build has no Bluetooth, and `0 OF 0 PAIRED`
+would be a lie about a table that does not exist. The reason line is the same
+discipline: it carries only the two states that need a second sentence, so the
+countdown at scale 3 ends at y = 95 with 9 px of paper above the table.
+
+**11.5.2 The countdown is the only thing that moves.** The app task polls the port
+every 250 ms while this screen is up (`poll_phone()`), and `set_phone()` asks three
+questions of the answer: did the phase or refusal move, did the bond count move, did
+the countdown cross a 5 s boundary. The first two are facts, so they take a full
+refresh; the countdown takes a partial; if none of the three moved there is no
+flush at all. A five-minute window is therefore about sixty partial refreshes, not
+three hundred. Applying the port's answer when the screen is not up changes the
+stored status and draws nothing.
+
+**11.5.3 The port owns the radio, not the page.** `Effect::OpenPhoneWindow` asks
+`port_ble` for the window and `PhoneStatus` is the port's answer; `set_phone()`
+"turns the port's answer into a frame and nothing else". The window is five minutes
+(`RadioWindow::Timing::phone_ms = 300000`). Leaving the page closes it
+(`close_phone_window()`), so the radio is never left advertising behind a page
+nobody is on. A window that runs out on its own does **not** close the page: the
+word becomes `WINDOW CLOSED`, the reason `Radio off`, and the page waits for PWR or
+the hold, so the person still sees why their phone stopped finding the device.
+
+**11.5.4 A refusal is the whole point.** The three refusals are the reasons a window
+can fail to open: the bond table is full, the controller would not start, or this
+build has no Bluetooth. Each is the state word itself, and where the table exists
+the row under it says how full it is. That is the defect this page removed: the row
+used to hand the panel to the port and stay on the menu, so a refusal was a flash
+and a step back, indistinguishable from a key that missed (t_9972e2a1).
+
+The name is the one variable-length line. The default is 13 columns (154 px); the
+snapshot carries up to 15, which is 178 px, one pixel past the column — the open
+item in §17.2 item 9.
+
 
 ---
 
 ## 12. Frames outside the screen machine
 
-Two of these are drawn by code this spec only hands off to; the third is drawn by
+One of these is drawn by code this spec only hands off to; the other is drawn by
 the notes app itself, on the way to a power cut, and no key can leave it.
 
-### 12.1 The port-owned frames
+### 12.1 The port-owned frame
 
-Two menu rows hand the panel to code that already exists and is proven. They are
-**out of scope**, they must not be re-implemented, and the notes app owns only the
+One menu row hands the panel to code that already exists and is proven. It is
+**out of scope**, it must not be re-implemented, and the notes app owns only the
 hand-off:
 
 | Row | Screen | Owner |
 |---|---|---|
 | `Wi-Fi` | network list and the phone-based setup AP | `port_wifi_setup` |
-| `Phone` | the 30 s advertising window | `port_ble` (`radio_window`) |
 
 The contract at the boundary: the app calls `display->request_full_refresh()`
 before the hand-off and again on return, because both directions change the whole
-page. Nothing else about those screens changes.
+page. Nothing else about that screen changes.
+
+The `Phone` row is **not** one of these. It opens `Screen::Phone` and the page in
+§11.5; `port_ble` owns the radio behind it, and `set_phone()` turns the port's
+answer into a frame and nothing else. It used to be a hand-off, and the difference
+is exactly what a refused window looked like: a flash and a step back rather than
+the reason (t_9972e2a1).
 
 ### 12.2 The sleeping face — the last frame, and not a screen
 
@@ -1331,7 +1436,7 @@ covered by eight host cases.
  ┌──────────┐  ┌────────┐      ┌───────┐                                 │
  │RECORDING │  │  MENU  │      │  OFF  │  graceful power off (Home only)  │
  └────┬─────┘  └─┬──┬──┬┘      └───────┘                                 │
-      │          │  │  └──────────────► PHONE_WINDOW ──► (port) ─────────┤
+      │          │  │  └──────────────► PHONE ──► PWR/HOLD: back to MENU
  BOOT │          │  └───────────────► WIFI_SETUP ─────► (port) ─────────┤
  tap  │          │                                                        │
  stop │       PWR│ BOOT tap = next row, BOOT hold = back                  │
@@ -1388,7 +1493,7 @@ driver's partial path handle it. `—` = no flush at all.
 | 11 | `MENU` | BOOT tap | `MenuNext` | — | `MENU` | `P` (bar) |
 | 12 | `MENU` | PWR tap, row `Notes` | `MenuSelect` | read the store's three folders once | `LIST` | `F` |
 | 13 | `MENU` | PWR tap, row `Sync now` | `MenuSelect` | connect, upload every pending note | `HOME`/SYNCING | `F` |
-| 14 | `MENU` | PWR tap, row `Phone` | `MenuSelect` | `port_ble` opens a 30 s window | `PHONE_WINDOW` | `F` |
+| 14 | `MENU` | PWR tap, row `Phone` | `MenuSelect` | `state.go(Screen::Phone)`, `phone_ = PhoneStatus{}`, `Effect::OpenPhoneWindow`; the port's answer becomes the frame | `PHONE` | `F` |
 | 15 | `MENU` | PWR tap, row `Wi-Fi` | `MenuSelect` | `port_wifi_setup` | `WIFI_SETUP` | `F` |
 | 16 | `MENU` | PWR tap, row `About` | `MenuSelect` | gather 5 values | `ABOUT` | `F` |
 | 17 | `MENU` | PWR tap, row `Back` | `MenuSelect` | — | `HOME` | `F` |
@@ -1415,7 +1520,7 @@ driver's partial path handle it. `—` = no flush at all.
 | 38 | `ABOUT` | BOOT hold | `Back` | — | `MENU` | `F` |
 | 39 | `ABOUT` | PWR tap | `None` | nothing at all | `ABOUT` | — |
 | 40 | `ABOUT` | BOOT tap | `None` | nothing | `ABOUT` | `—` |
-| 41 | `WIFI_SETUP` / `PHONE_WINDOW` | the port returns | — | — | `MENU` | `F` |
+| 41 | `WIFI_SETUP` | the port returns | — | — | `MENU` | `F` |
 | 42 | *any* | a display transfer fails (`take_redraw_request()`) | — | rebuild the view model and redraw | same | `F` (driver already forced it) |
 | 43 | `MENU` | PWR tap, row `Unpair phones` | `MenuSelect` | read the bond store once | `UNPAIR` | `F` |
 | 44 | `UNPAIR` | BOOT tap | `NextPeer` | — | `UNPAIR` | `P` (bar) |
@@ -1424,13 +1529,18 @@ driver's partial path handle it. `—` = no flush at all.
 | 47 | `CONFIRM_UNPAIR` | BOOT hold | `UnpairPeer` | `ble_store_util_delete_peer(addr)`, read the table, republish | `UNPAIR` | `F` |
 | 48 | `CONFIRM_UNPAIR` | BOOT tap / PWR tap | `Back` | nothing outside the glass | `UNPAIR` | `F` |
 | 49 | `CONFIRM_UNPAIR` | BOOT hold while `mode_ != Idle` | `None` | nothing at all; the reason is already on the glass | `CONFIRM_UNPAIR` | `—` |
+| 50 | `PHONE` | PWR tap | `ClosePhone` | `port_ble` closes the window (`Effect::ClosePhoneWindow`) | `MENU` | `F` |
+| 51 | `PHONE` | BOOT hold | `ClosePhone` | same as 50: out the way the row came in | `MENU` | `F` |
+| 52 | `PHONE` | BOOT tap | `None` | nothing at all; the window is PWR's to close | `PHONE` | `—` |
+| 53 | `PHONE` | *(auto)* `set_phone()` gets the port's answer | — | phase/refusal or bond count moved: `F`; countdown crossed 5 s: `P`; nothing moved: no draw | `PHONE` | `F` / `P` / `—` |
 
-**Rows 4a, 9, 37, 39 and 40 are the gestures in the whole UI that produce no panel
-activity at all.** A PWR hold outside Home is the nearest thing to one: the screens
-answer it with nothing, and the only frame it draws is the sleeping face the loop
-puts up on its way to the shutdown (§12.2) — never a screen change. They matter: a
-hold at a pairing prompt is a common panic response, and a tap on Home or About must
-not look like it did something — least of all switch the device off.
+**Rows 4a, 9, 37, 39, 40 and 52 are the gestures in the whole UI that produce no
+panel activity at all.** A PWR hold outside Home is the nearest thing to one: the
+screens answer it with nothing, and the only frame it draws is the sleeping face the
+loop puts up on its way to the shutdown (§12.2) — never a screen change. They
+matter: a hold at a pairing prompt is a common panic response, and a tap on Home,
+About or Phone must not look like it did something — least of all switch the device
+off.
 
 ### 13.3 Upload progress is not a screen
 
@@ -1844,9 +1954,10 @@ that wrong once.
 | 3 | The bolt cannot distinguish charging from charged | hardware limit (`charging = -1`); labelled ON EXTERNAL POWER, never `CHARGING` |
 | 4 | Two notes in the same minute are indistinguishable on the confirm | accepted, §8.2; mitigated by the hold and deterministic order |
 | 5 | 8 consecutive bar moves before a forced full | a starting value, not a measurement. Tune against the real panel; the constant belongs next to `kFullEvery` |
-| 6 | `Phone` and `Wi-Fi` frames are owned by the ports | out of scope by design (§12.1); only the `F` hand-off is specified |
+| 6 | The `Wi-Fi` frame is owned by `port_wifi_setup` | out of scope by design (§12.1); only the `F` hand-off is specified. The `Phone` row is not a hand-off: it has its own page (§11.5), and `port_ble` owns only the radio behind it |
 | 7 | `note_max_s` cap shown as `OF 5:00` | read it from the setting, do not hard-code the default; past 99:59 it reads `OF 24:00` |
 | 8 | `confirm.format.loss` is 16 columns | **gap**: 190 px centred at x = 5, so the format confirm breaks the 12 px margin by 7 px a side where §3.1 lets only the selection bar break it (§14). Shorten the line, or give §3.1 the exception and the host test |
+| 9 | The Phone page's device name is up to 15 columns | **gap**: 178 px centred at x = 11, one pixel past the 176 px column and the 12 px margin, when the configured name is that long. The default `Hermes Gadget` is 13 (154 px). Shorten the stored name, or clip it to 14 columns on this page (§11.5) |
 
 ---
 ---

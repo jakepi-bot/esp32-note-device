@@ -95,7 +95,11 @@ void begin() {
   // registration esp_console answers "Unrecognized command" before the app ever
   // sees the line: the boot face's battery, clock and link could not be read
   // back from a host at all. `ui` is the screens' own report (`ui`, `ui home`).
-  for (const char* name : {"about", "battery", "clock", "power", "radio", "sd", "keys", "ui"}) {
+  // `wifi-set <ssid> <password>` writes the same credentials the phone's setup
+  // page does, so a device whose NVS was wiped can be put back on the network
+  // from a host (2026-11-22). Without the registration esp_console answers
+  // "Unrecognized command" and the handler is never reached.
+  for (const char* name : {"about", "battery", "clock", "power", "radio", "sd", "keys", "ui", "wifi-set"}) {
     esp_console_cmd_t cmd = {};
     cmd.command = name;
     cmd.help = "Notes app status (see: notes status)";

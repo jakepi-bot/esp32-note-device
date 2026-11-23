@@ -35,6 +35,12 @@ void Wifi::begin(NvsStorage& storage) {
   ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &Wifi::on_event, this));
   ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &Wifi::on_event, this));
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+  // The driver logs "Haven't to connect to a suitable AP now!" once per internal
+  // reconnect, five times a second, and on the UART console that flood starved
+  // every console answer (2026-11-22: `wifi-set` produced no reply at all). Its
+  // own retry cadence is not information worth five lines a second; our retry
+  // policy logs its attempts.
+  esp_log_level_set("wifi", ESP_LOG_ERROR);
 #if CONFIG_PM_ENABLE
   if (esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "hg-wifi-join", &attempt_lock_) != ESP_OK) attempt_lock_ = nullptr;
 #endif
@@ -199,6 +205,10 @@ void Wifi::disconnected() {
       retry_.lost(now_ms(), on_battery && on_battery());
     }
   }
+  // Stop the driver's own reconnect loop. Left alone it retries every 200 ms for
+  // an access point that is not there, which floods the console and keeps the
+  // radio busy between our attempts; `retry_` above is the cadence that counts.
+  esp_wifi_disconnect();
   hold_while_attempting();
 }
 
@@ -249,6 +259,18 @@ void Wifi::connected() {
     if (close_setup) close_setup();
     else stop_setup();
   }
+}
+
+void Wifi::set_credentials(const std::string& ssid, const std::string& password) {
+  if (ssid.empty() || ssid.size() > 32 || password.size() > 64) return;
+  // Save first, so a reboot still has the network even if this join fails; then
+  // put it at the head of the list and join it now.
+  networks_ = hg::WifiNetworks::load(*storage_);
+  networks_.add(ssid, password);
+  networks_.move_first(ssid);
+  networks_.save(*storage_);
+  pick_.reset(networks_.size());
+  join(ssid, password);
 }
 
 void Wifi::provision(const hg::WifiCredentials& credentials) {

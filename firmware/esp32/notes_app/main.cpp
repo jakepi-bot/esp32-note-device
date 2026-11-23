@@ -495,7 +495,7 @@ std::string console_line(std::string_view line) {
       return "@error too long for the stored field";
     std::snprintf(cred.ssid, sizeof cred.ssid, "%s", ssid.c_str());
     std::snprintf(cred.password, sizeof cred.password, "%s", psk.c_str());
-    g_net.provision(cred);
+    g_net.set_credentials(ssid, psk);
     return "@ok credentials stored; joining";
   }
   if (line.rfind("set ", 0) == 0) return set_line(line.substr(4));

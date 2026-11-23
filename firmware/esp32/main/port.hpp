@@ -969,6 +969,9 @@ class Wifi {
   // The temporary network's credentials, for the setup screen's QR code.
   hg::WifiSetupAp setup_ap();
   void provision(const hg::WifiCredentials& credentials);
+  // The console's path: save a network and join it, with no setup page open.
+  // provision() belongs to the page and returns without one.
+  void set_credentials(const std::string& ssid, const std::string& password);
 
  private:
   static void on_event(void* arg, const char* base, int32_t id, void* data);

@@ -1359,6 +1359,58 @@ TEST("parts: a twelve-minute note is three parts of five, five and two") {
   CHECK_EQ(parts[0].audio_bytes + parts[1].audio_bytes + parts[2].audio_bytes, info.data_bytes);
 }
 
+TEST("parts: a part's read stops at the part, not at the end of the recording") {
+  // t_666a4273, from the unit: a 359 s note (17,247,360 B of PCM) planned part 0
+  // at 14,400,000 B, then every attempt died with `cannot read recording.wav:
+  // stopped at 17247360 of 14400000 bytes` before a request was opened — `fread`
+  // ran from the part's offset to EOF. `part_read_len` is the clamp the device
+  // read loop uses (both the hash and the send pass); hold the walk here.
+  const WavLayout info = header_for(359);  // 17,232,000 B at 24 kHz mono 16-bit
+  const std::vector<Part> parts = plan_parts(info);
+  CHECK_EQ(parts.size(), size_t(2));
+  CHECK_EQ(parts[0].audio_bytes, uint32_t(kPartSeconds * 48000));  // 14,400,000
+  CHECK(info.data_bytes > parts[0].audio_bytes);
+
+  // The whole recording read in one go is what the unit did, and it is not this
+  // part: the short-read rule fires on it.
+  CHECK(audio_read_short(info.data_bytes, parts[0].audio_bytes));
+
+  // One part at a time, one chunk per read, never past the part and never into
+  // the next one.
+  const std::vector<uint8_t> file(info.data_offset + info.data_bytes, 0x5a);
+  for (const Part& part : parts) {
+    size_t pos = part.audio_offset;
+    size_t done = 0;
+    size_t reads = 0;
+    while (true) {
+      const size_t want = part_read_len(part.audio_bytes, static_cast<uint32_t>(done), 65536);
+      if (want == 0) break;
+      CHECK(want <= 65536);
+      CHECK(pos + want <= file.size());
+      CHECK(pos + want <= size_t(part.audio_offset) + part.audio_bytes);
+      pos += want;
+      done += want;
+      ++reads;
+      CHECK(reads < 4096);
+    }
+    CHECK_EQ(done, size_t(part.audio_bytes));
+    CHECK(!audio_read_short(static_cast<uint32_t>(done), part.audio_bytes));
+    // The part ends where its bytes end, so the next part starts after it.
+    CHECK_EQ(pos, size_t(part.audio_offset) + part.audio_bytes);
+  }
+
+  // A part shorter than one chunk is one read of exactly its bytes; a part that
+  // is a whole number of chunks ends on a zero-length read, not a short one.
+  CHECK_EQ(part_read_len(48000, 0, 65536), size_t(48000));  // one second of PCM
+  CHECK_EQ(part_read_len(2 * 65536, 0, 65536), size_t(65536));
+  CHECK_EQ(part_read_len(2 * 65536, 65536, 65536), size_t(65536));
+  CHECK_EQ(part_read_len(2 * 65536, 2 * 65536, 65536), size_t(0));
+  CHECK_EQ(part_read_len(45, 0, 65536), size_t(45));
+  CHECK_EQ(part_read_len(45, 45, 65536), size_t(0));
+  // A read already past the part asks for nothing: no overrun, no wrap.
+  CHECK_EQ(part_read_len(100, 200, 65536), size_t(0));
+}
+
 TEST("parts: four fifty-nine and five minutes exactly are one part each") {
   for (const uint32_t seconds : {uint32_t(299), uint32_t(300)}) {
     const WavLayout info = header_for(seconds);

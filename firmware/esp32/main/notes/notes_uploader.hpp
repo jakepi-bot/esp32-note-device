@@ -16,6 +16,7 @@
 // the ones the hub already stored.
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
@@ -40,6 +41,17 @@ namespace hgp::notes {
 // failed read arrives as a short file, so the count is the only signal there
 // is. Inline so the host tests can hold the rule without the device HTTP stack.
 inline bool audio_read_short(uint32_t read_bytes, uint32_t file_bytes) { return read_bytes != file_bytes; }
+
+// How many bytes one read may take for the part in flight: never past the part's
+// own bytes. `fread` alone runs to the end of the recording, so part 0 of a
+// 359 s note read 17,247,360 bytes where its share is 14,400,000, the
+// short-read rule below fired ("stopped at 17247360 of 14400000 bytes") and no
+// request was ever opened (t_666a4273). Inline, like the rules above, so the
+// host tests can hold the walk without the device HTTP stack.
+inline size_t part_read_len(uint32_t part_bytes, uint32_t done, size_t chunk) {
+  if (done >= part_bytes) return 0;
+  return std::min<size_t>(chunk, static_cast<size_t>(part_bytes - done));
+}
 
 // Where a resumed upload starts. A retry after part N failed must send part N
 // and nothing before it — replaying 0..N-1 costs the hub nothing (each is a
@@ -93,6 +105,12 @@ class Uploader {
 
  private:
   void close();
+  // The POST is over but the note is not: a part that was accepted is followed
+  // by the next one, which is read from the same open recording. Closing the
+  // whole transfer here left `begin_part()` seeking a NULL file — the unit
+  // panicked (LoadProhibited, `fseek` from `begin_part`) right after part 0 was
+  // accepted, so no segmented note could ever reach part 1 (t_666a4273).
+  void close_transfer();
   bool write_all(const void* data, size_t len);
   // The hub's answer to "do you take parts?" — asked once per boot, and only
   // for a note that needs them. An old hub ignores unknown parts and would

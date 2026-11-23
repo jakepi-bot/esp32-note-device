@@ -35,14 +35,18 @@ void drain(esp_http_client_handle_t client, std::string& body) {
 Uploader::~Uploader() { cancel(); }
 
 void Uploader::close() {
+  close_transfer();
+  if (file_) {
+    std::fclose(file_);
+    file_ = nullptr;
+  }
+}
+
+void Uploader::close_transfer() {
   if (client_) {
     esp_http_client_close(static_cast<esp_http_client_handle_t>(client_));
     esp_http_client_cleanup(static_cast<esp_http_client_handle_t>(client_));
     client_ = nullptr;
-  }
-  if (file_) {
-    std::fclose(file_);
-    file_ = nullptr;
   }
 }
 
@@ -138,6 +142,9 @@ bool Uploader::begin(const Meta& meta, std::string_view audio_path, std::string_
 
 bool Uploader::begin_part() {
   if (part_at_ >= parts_.size()) return false;
+  // A part is read from the open recording: a caller that has already closed
+  // the transfer gets the retry, not a NULL stream in fseek (t_666a4273).
+  if (!file_) return false;
   part_ = parts_[part_at_];
   part_read_ = 0;
   part_sent_ = 0;
@@ -250,7 +257,10 @@ Uploader::Step Uploader::step() {
   const bool segmented = parts_.size() > 1;
 
   if (phase_ == Phase::Hashing) {
-    const size_t n = std::fread(buf_, 1, kChunk, file_);
+    // Bounded to this part: a note in parts reads `part_.audio_bytes`, not the
+    // rest of the file (t_666a4273).
+    const size_t want = segmented ? part_read_len(part_.audio_bytes, part_read_, kChunk) : kChunk;
+    const size_t n = std::fread(buf_, 1, want, file_);
     if (n > 0) {
       hasher_.update(buf_, n);
       if (segmented) part_read_ += static_cast<uint32_t>(n); else read_ += static_cast<uint32_t>(n);
@@ -272,7 +282,15 @@ Uploader::Step Uploader::step() {
                std::to_string(expected) + " bytes";
       return Step::Retry;
     }
-    if (!segmented) std::fseek(file_, 0, SEEK_SET);
+    // The body is read from this part's first PCM byte: the hash pass has just
+    // read the part to its end, and for a segmented note that is not byte 0 of
+    // the recording, so the single-part rewind is not enough (t_666a4273).
+    const long body_start = segmented ? static_cast<long>(part_.audio_offset) : 0L;
+    if (std::fseek(file_, body_start, SEEK_SET) != 0) {
+      phase_ = Phase::Finished;
+      error_ = "cannot read recording.wav";
+      return Step::Retry;
+    }
     const auto digest = hasher_.finish();
     part_sha256_ = hg::crypto::hex(digest.data(), digest.size());
     if (!segmented) sha256_ = part_sha256_;  // the note's own digest, as v1 sent it
@@ -380,7 +398,9 @@ Uploader::Step Uploader::step() {
   }
 
   if (phase_ == Phase::Sending) {
-    const size_t n = std::fread(buf_, 1, kChunk, file_);
+    // Same bound as the hash pass: the body is this part and nothing past it.
+    const size_t want = segmented ? part_read_len(part_.audio_bytes, part_sent_, kChunk) : kChunk;
+    const size_t n = std::fread(buf_, 1, want, file_);
     if (n > 0) {
       if (segmented) part_sent_ += static_cast<uint32_t>(n); else read_ += static_cast<uint32_t>(n);
       if (!write_all(buf_, n)) {
@@ -419,7 +439,10 @@ Uploader::Step Uploader::step() {
     std::string body;
     drain(client, body);
     http_status_ = esp_http_client_get_status_code(client);
-    close();
+    // The POST is over; the note is not. The recording stays open for the part
+    // after this one (`begin_part` seeks it), and each outcome below closes the
+    // whole transfer when there is no next part (t_666a4273).
+    close_transfer();
     const SyncResult result = classify_response(http_status_);
     if (segmented) {
       ESP_LOGI(TAG, "note %s part %u/%u: HTTP %d -> %s", meta_.note_id.c_str(), part_.index + 1,
@@ -444,6 +467,7 @@ Uploader::Step Uploader::step() {
           ++part_at_;
           tail_sent_ = false;
           if (!begin_part()) {
+            close();
             phase_ = Phase::Finished;
             error_ = "cannot read recording.wav";
             return Step::Retry;
@@ -451,13 +475,16 @@ Uploader::Step Uploader::step() {
           phase_ = Phase::Hashing;
           return Step::Running;
         }
+        close();
         phase_ = Phase::Finished;
         return Step::Done;
       case SyncResult::Rejected:
+        close();
         phase_ = Phase::Finished;
         error_ = body.empty() ? "rejected" : body;
         return Step::Rejected;
       case SyncResult::Retry:
+        close();
         phase_ = Phase::Finished;
         error_ = body.empty() ? "retry" : body;
         return Step::Retry;

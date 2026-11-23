@@ -109,9 +109,12 @@ artefact is more conspicuous on a black field.
 
 `Canvas::text_width(s, scale) == columns(s) * 6 * scale - scale`.
 
-**The rule: scale 2 is the floor, scale 3 is the only display size, scale 1 and 4
-are not used.** Two sizes on a 200 px screen is already a lot; a third would read
-as accident. Scale 2 is 1.94 mm, which at 25–30 cm viewing distance is
+**The rule: scale 2 is the body size, scale 3 the only display size, scale 1 is
+the exception and scale 4 is not used.** Scale 1 appears only where a row set has
+to close under a two-line footer — the nine-row menu (§5.1) and the unpair table
+(§11.4) — and on the fourteen rows §14 measures at scale 1 (the menu's, Home's
+menu hint, the unpair empty hint, the sleep face's line). Two sizes on a 200 px
+screen is already a lot; a third would read as accident. Scale 2 is 1.94 mm, which at 25–30 cm viewing distance is
 comfortably above the ~1.2 mm floor where 5 × 7 bitmap text stops resolving.
 
 Fourteen columns is the hard content budget. It is the number that shapes every
@@ -845,8 +848,8 @@ y=194  └───────────────────────�
 | band | — | 8 | — | facts continue to be true while audio plays |
 | rule | 12 | 27 | | |
 | title | 12 | 40 | ≤ 154 × 14 | the note's `DD MMM HH:MM` |
-| elapsed | centred | 60 | ≤ 88 × 21 | scale 3, `M:SS` |
-| total | centred | 92 | ≤ 106 × 14 | `OF M:SS` |
+| elapsed | centred | 60 | ≤ 141 × 21 | scale 3, `M:SS`, `H:MM:SS` past an hour |
+| total | centred | 92 | ≤ 130 × 14 | `OF M:SS`, `OF H:MM:SS` past an hour |
 | bar | 12 | 132 | 176 × 9 | track; fill inset 2 px, 5 px tall |
 | rule | 12 | 162 | | |
 | footer | 12 | 172 | | one line |
@@ -924,8 +927,8 @@ y=194  └───────────────────────�
 | band | — | 8 | — | queue count of the *previous* notes |
 | rule | 12 | 27 | | |
 | label `RECORDING` | 12 | 38 | 106 × 14 | scale 2, sentence case is wrong here — uppercase |
-| elapsed | centred | 62 | ≤ 88 × 21 | scale 3, `M:SS` and `H:MM:SS` past an hour — the hero, the real length, never a clamp |
-| cap | centred | 94 | ≤ 88 × 14 | `OF M:SS` and `OF H:MM` past an hour, plus the room behind it: `OF 1:30·2.2G`. The cap is the capture's own budget — the setting, the 2 GiB ceiling and the card's free space less its 256 MB reserve, whichever is smallest — not the setting alone |
+| elapsed | centred | 62 | ≤ 141 × 21 | scale 3, `M:SS` and `H:MM:SS` past an hour — the hero, the real length, never a clamp (`24:00:00` at the ceiling is 8 columns of 18 px) |
+| cap | centred | 94 | ≤ 154 × 14 | `OF M:SS` and `OF H:MM` past an hour, plus the room behind it: `OF 1:30·2.2G`. The cap is the capture's own budget — the setting, the 2 GiB ceiling and the card's free space less its 256 MB reserve, whichever is smallest — not the setting alone |
 | bar | 12 | 118 | 176 × 9 | `elapsed / cap` |
 | rule | 12 | 144 | | |
 | footer | 12 | 152, 170 | | **two lines** |
@@ -1017,7 +1020,7 @@ y=194  └───────────────────────�
 | title `PAIRING` | 12 | 8 | 82 × 14 | |
 | rule | 12 | 27 | | |
 | passkey | centred | 44 | ≤ 123 × 21 | scale 3, `NNN NNN` |
-| body 1 | centred | 86 | 154 × 14 | `Same as phone?` |
+| body 1 | centred | 86 | 166 × 14 | `Same as phone?` |
 | body 2 | centred | 108 | 130 × 14 | `BOOT: allow` |
 | body 3 | centred | 130 | 142 × 14 | `PWR: refuse` |
 | rule | 12 | 162 | | |
@@ -1463,13 +1466,17 @@ one gesture the user wanted to record with.
 ## 14. UI strings
 
 **These replace the i18n table.** There is no locale layer, no `i18n.cpp`, no
-table of translated pairs. The whole surface is the **57 strings** below, and nine of
-them already exist in `ui_keys.cpp` (`menu_label()`, `action_label()`) — those must
-**not** be duplicated in the app.
+table of translated pairs. The whole surface is the **104 strings** below: 92
+`constexpr const char*` in `strings.hpp`, and twelve that already exist in
+`ui_keys.cpp` (`menu_label()`'s nine row labels, `action_label()`'s three) — those
+twelve must **not** be duplicated in the app.
 
-Every width below was computed with `Canvas::text_width()` against the slot in
-§3–§11 that holds it, at the stated scale. `cols` is display columns; at scale 2
-one column is 12 px, at scale 3 it is 18 px.
+Every width below was measured with `Canvas::text_width()` against the slot in
+§3–§12 that holds it, at the stated scale. `cols` is display columns; at scale 2
+one column is 12 px, at scale 3 it is 18 px. A `%u` row is measured at the widest
+value the screen can put in it (a three-digit count reads `999`; a bond count stops
+at the pairing table's three). A row that sits at the edge of its slot — the widest
+string that slot can hold, or one past it — is marked **←**.
 
 | Key | English | Scale | Cols | px | Slot | Screen | Source |
 |---|---|---:|---:|---:|---:|---|---|
@@ -1489,7 +1496,10 @@ one column is 12 px, at scale 3 it is 18 px.
 | `home.sub.plug_in` | `PLUG IN SOON` | 2 | 12 | 142 | 168 | Home | new |
 | `home.sub.no_audio` | `NO AUDIO SAVED` | 2 | 14 | 166 | 168 **←** | Home | new |
 | `home.label.recording` | `RECORDING` | 2 | 9 | 106 | 106 **←** | Recording | new |
-| `fmt.of_cap` | `OF %u:%02u`, `OF %u:%02u:%02u` past an hour, `OF %u:%02u·%s` with the size | 2 | 7..13 | 156 | 106 | Recording, Playing | new |
+| `recording.hero.queued` | `QUEUED` | 3 | 6 | 105 | 176 | Recording | new |
+| `recording.sub.waiting` | `FOR THE UPLOAD` | 2 | 14 | 166 | 176 | Recording | new |
+| `fmt.of_cap` | `OF %u:%02u`, `OF %u:%02u:%02u` past an hour, `OF %u:%02u·%s` with the size | 2 | 7..13 | 82..154 | 176 | Recording, Playing | new |
+| `fmt.clock` | `%u:%02u` | 3 | 8 | 141 | 176 | Recording, Playing | new |
 | `key.boot.record` | `BOOT: record` | 2 | 12 | 142 | 166 | Home | new |
 | `key.boot.next` | `BOOT: next` | 2 | 10 | 118 | 166 | Menu, List, Note | new |
 | `key.boot.stop` | `BOOT: stop` | 2 | 10 | 118 | 166 | Recording, Playing | new |
@@ -1502,14 +1512,26 @@ one column is 12 px, at scale 3 it is 18 px.
 | `key.hold.back` | `HOLD: back` | 2 | 10 | 118 | 166 | About | new |
 | `key.hold.nothing` | `HOLD: nothing` | 2 | 13 | 154 | 166 | Pairing | new |
 | `key.tap.keep` | `TAP: keep` | 2 | 9 | 106 | 118 | Confirm | new |
-| `menu.notes` | `Notes` | 2 | 5 | 58 | 106 | Menu | ui_keys.cpp |
-| `menu.sync_now` | `Sync now` | 2 | 8 | 94 | 106 | Menu | ui_keys.cpp |
-| `menu.phone` | `Phone` | 2 | 5 | 58 | 106 | Menu | ui_keys.cpp |
-| `menu.wifi` | `Wi-Fi` | 2 | 5 | 58 | 106 | Menu | ui_keys.cpp |
-| `menu.about` | `About` | 2 | 5 | 58 | 106 | Menu | ui_keys.cpp |
-| `menu.back` | `Back` | 2 | 4 | 46 | 106 | Menu | ui_keys.cpp |
-| `menu.value.wifi_on` | `on` | 2 | 2 | 22 | 60 | Menu | new |
-| `menu.value.wifi_off` | `off` | 2 | 3 | 34 | 60 | Menu | new |
+| `key.hold.wipe` | `HOLD: wipe` | 2 | 10 | 118 | 176 | ConfirmWipe | new |
+| `key.hold.format` | `HOLD: format` | 2 | 12 | 142 | 176 | ConfirmFormat | new |
+| `key.please_wait` | `PLEASE WAIT` | 2 | 11 | 130 | 166 | Wiping | new |
+| `key.boot.cancel` | `BOOT: cancel` | 2 | 12 | 142 | 166 | Recording | new |
+| `key.hold.cancel` | `HOLD: cancel` | 2 | 12 | 142 | 166 | Recording | new |
+| `key.pwr.close` | `PWR: close` | 2 | 10 | 118 | 166 | Phone | new |
+| `key.pwr.unpair` | `PWR: unpair` | 2 | 11 | 130 | 166 | Unpair | new |
+| `key.hold.menu_hint` | `hold BOOT for menu` | 1 | 18 | 107 | 176 | Home | new |
+| `menu.title` | `MENU` | 2 | 4 | 46 | 58 | Menu | new |
+| `menu.notes` | `Notes` | 1 | 5 | 29 | 106 | Menu | ui_keys.cpp |
+| `menu.sync_now` | `Sync now` | 1 | 8 | 47 | 106 | Menu | ui_keys.cpp |
+| `menu.phone` | `Phone` | 1 | 5 | 29 | 106 | Menu | ui_keys.cpp |
+| `menu.wifi` | `Wi-Fi` | 1 | 5 | 29 | 106 | Menu | ui_keys.cpp |
+| `menu.about` | `About` | 1 | 5 | 29 | 106 | Menu | ui_keys.cpp |
+| `menu.wipe_notes` | `Wipe notes` | 1 | 10 | 59 | 106 | Menu | ui_keys.cpp |
+| `menu.format_card` | `Format card` | 1 | 11 | 65 | 106 | Menu | ui_keys.cpp |
+| `menu.unpair_phones` | `Unpair phones` | 1 | 13 | 77 | 106 | Menu | ui_keys.cpp |
+| `menu.back` | `Back` | 1 | 4 | 23 | 106 | Menu | ui_keys.cpp |
+| `menu.value.wifi_on` | `on` | 1 | 2 | 11 | 60 | Menu | new |
+| `menu.value.wifi_off` | `off` | 1 | 3 | 17 | 60 | Menu | new |
 | `list.title` | `NOTES` | 2 | 5 | 58 | 58 **←** | List | new |
 | `list.key.to_send` | `* TO SEND` | 2 | 9 | 106 | 106 **←** | List | new |
 | `list.key.failed` | `! FAILED` | 2 | 8 | 94 | 106 | List | new |
@@ -1522,14 +1544,59 @@ one column is 12 px, at scale 3 it is 18 px.
 | `note.action.delete` | `Delete` | 2 | 6 | 70 | 106 | Note | ui_keys.cpp |
 | `note.action.back` | `Back` | 2 | 4 | 46 | 106 | Note | ui_keys.cpp |
 | `confirm.hero` | `DELETE?` | 3 | 7 | 123 | 176 | Confirm | new |
+| `confirm.wipe.hero` | `WIPE NOTES` | 3 | 10 | 177 | 176 **←** | ConfirmWipe | new |
+| `confirm.wipe.count` | `%u NOTES GO` | 2 | 12 | 142 | 176 | ConfirmWipe | new |
+| `confirm.wipe.keeps` | `THE CARD STAYS` | 2 | 14 | 166 | 176 | ConfirmWipe | new |
+| `confirm.format.hero` | `FORMAT` | 3 | 6 | 105 | 176 | ConfirmFormat | new |
+| `confirm.format.target` | `THE SD CARD` | 2 | 11 | 130 | 176 | ConfirmFormat | new |
+| `confirm.format.loss` | `NOTES AND LOG GO` | 2 | 16 | 190 | 176 **←** | ConfirmFormat | new |
+| `busy.wipe.hero` | `WIPING` | 3 | 6 | 105 | 176 | Wiping | new |
+| `busy.format.hero` | `FORMATTING` | 3 | 10 | 177 | 176 **←** | Wiping | new |
+| `busy.count` | `%u OF %u` | 2 | 10 | 118 | 176 | Wiping | new |
+| `busy.reading` | `READING CARD` | 2 | 12 | 142 | 176 | Wiping | new |
+| `busy.card_stays` | `THE CARD STAYS` | 2 | 14 | 166 | 176 | Wiping | new |
+| `busy.format_target` | `THE SD CARD` | 2 | 11 | 130 | 176 | Wiping | new |
+| `busy.dont_unplug` | `DO NOT UNPLUG` | 2 | 13 | 154 | 176 | Wiping | new |
 | `pair.title` | `PAIRING` | 2 | 7 | 82 | 82 **←** | Pairing | new |
-| `pair.same` | `Same as phone?` | 2 | 15 | 178 | 176 **←** | Pairing | new |
+| `pair.same` | `Same as phone?` | 2 | 14 | 166 | 176 | Pairing | new |
+| `unpair.title` | `UNPAIR` | 2 | 6 | 70 | 70 **←** | Unpair | new |
+| `unpair.count` | `%u PAIRED` | 2 | 8 | 94 | 106 | Unpair | new |
+| `unpair.empty` | `NOTHING PAIRED` | 2 | 14 | 166 | 176 | Unpair | new |
+| `unpair.empty_hint` | `open PHONE to pair` | 1 | 18 | 107 | 176 | Unpair | new |
+| `unpair.confirm_hero` | `UNPAIR?` | 3 | 7 | 123 | 176 | ConfirmUnpair | new |
+| `unpair.hold` | `HOLD: unpair` | 2 | 12 | 142 | 176 | ConfirmUnpair | new |
+| `phone.title` | `PHONE` | 2 | 5 | 58 | 176 | Phone | new |
+| `phone.advertising` | `ADVERTISING` | 2 | 11 | 130 | 176 | Phone | new |
+| `phone.waiting` | `WAITING` | 2 | 7 | 82 | 176 | Phone | new |
+| `phone.connected` | `CONNECTED` | 2 | 9 | 106 | 176 | Phone | new |
+| `phone.closed` | `WINDOW CLOSED` | 2 | 13 | 154 | 176 | Phone | new |
+| `phone.table_full` | `PAIRING FULL` | 2 | 12 | 142 | 176 | Phone | new |
+| `phone.radio_busy` | `RADIO BUSY` | 2 | 10 | 118 | 176 | Phone | new |
+| `phone.ble_off` | `BLE OFF` | 2 | 7 | 82 | 176 | Phone | new |
+| `phone.holding` | `Held open` | 2 | 9 | 106 | 176 | Phone | new |
+| `phone.off` | `Radio off` | 2 | 9 | 106 | 176 | Phone | new |
+| `phone.table` | `%u OF %u PAIRED` | 2 | 13 | 154 | 176 | Phone | new |
 | `about.title` | `ABOUT` | 2 | 5 | 58 | 70 | About | new |
 | `about.battery` | `Battery` | 2 | 7 | 82 | 106 | About | new |
 | `about.firmware` | `Firmware` | 2 | 8 | 94 | 106 | About | new |
 | `about.device` | `Device` | 2 | 6 | 70 | 106 | About | new |
 | `about.card` | `Card free` | 2 | 9 | 106 | 106 **←** | About | new |
 | `about.notes` | `Notes` | 2 | 5 | 58 | 106 | About | new |
+| `sleep.zzz` | `zzz` | 3 | 3 | 51 | 51 | Sleep | new |
+| `sleep.hint` | `asleep - hold PWR 2 s` | 1 | 21 | 125 | 200 | Sleep | new |
+
+Three rows run past the 176 px column. `confirm.wipe.hero` and `busy.format.hero`
+are ten columns at scale 3 — 177 px — which centred puts at x = 11, one pixel
+outside the 12 px margin and well inside the 4 px ink box (§3.1); §8.4 accepts that
+so a wipe's hero can be two words. `confirm.format.loss` is the one body string
+over the fourteen-column budget: sixteen columns, 190 px, centred at x = 5, which
+breaks the margin by 7 px a side where §3.1 lets only the selection bar break it.
+`build_format_confirm()` copies it whole and the confirm draws it as it is, so this
+is an open item (§17.2) rather than something the draw path fits.
+
+The nine menu labels are scale 1 (§5.1) — the menu is the one screen whose labels
+gave way to a smaller size when the rows went from six to nine, which is why their
+`px` column is half what the same words cost on About.
 
 ### 14.1 The four formatting rules
 
@@ -1543,16 +1610,21 @@ one column is 12 px, at scale 3 it is 18 px.
    can act on" versus "this is what the device is doing".
 3. **No plurals machinery.** `%u TO SEND` is correct at 0, 1 and 40. Where a plural
    would be needed the string is phrased to avoid it (`ALL SENT`, not `0 NOTES`).
-4. **The only punctuation is `:`, `.`, `·`, `!`, `?` and `*`.** All render. `…`,
-   em dashes, curly quotes and arrows do not — do not introduce them.
+4. **The only punctuation is `:`, `.`, `·`, `!`, `?`, `*` and `-`.** All render.
+   `-` appears only in the sleep face's line (`asleep - hold PWR 2 s`). `…`, em
+   dashes, curly quotes and arrows do not — do not introduce them.
 
 ### 14.2 Where each string is sourced
 
 | Group | Source |
 |---|---|
-| `menu.*`, `note.action.*` | `ui_keys.cpp` — already implemented, do not copy |
-| `home.*`, `key.*`, `list.*`, `confirm.*`, `play.*`, `pair.*`, `about.*` | new; one `strings.hpp` of `constexpr const char*` |
-| `%u` values | `Store::count()`, `Store::pending_ids()`, the uploader's `i/n`, `Meta::duration_s` |
+| the nine menu row labels, `note.action.*` | `ui_keys.cpp` (`menu_label()`, `action_label()`) — already implemented, do not copy |
+| `menu.title`, `menu.value.*`, `home.*`, `key.*`, `list.*`, `note.state.*`, `fmt.*`, `recording.*`, `pair.*`, `about.*`, `confirm.*` | new; one `strings.hpp` of `constexpr const char*` |
+| `busy.*` | new, `strings.hpp`: §8.5's work behind the two confirms — the same count and the same warning, in the present tense |
+| `unpair.*` | new, `strings.hpp`: §11.4 — the bonded table, its empty page, and the question one phone gets |
+| `phone.*` | new, `strings.hpp`: the Bluetooth window's own face, `ui_render.cpp`'s `phone_face()` |
+| `sleep.*` | new, `strings.hpp`: §12.2 — the two that belong to no screen, and the only two drawn outside `frame()` |
+| `%u` values | `Store::count()`, `Store::pending_ids()`, the uploader's `i/n`, `Meta::duration_s`, `Store::wipe()`'s `(done, total)`, the bond table's count |
 | `LAST %02u:%02u` | the newest note's `Meta::recorded_at`, parsed with `notes::parse_iso8601()`, rendered in local time |
 
 No string is built at draw time with `std::string` concatenation in a loop. Format
@@ -1727,8 +1799,12 @@ that wrong once.
 
 1. All nine screens are reachable with the keys in §13.2 and every row's refresh
    class is stated.
-2. Every string in §14 has a slot width ≥ its computed width, at the stated scale.
-3. No screen uses scale 1 or scale 4.
+2. Every string in §14 fits the slot beside it, measured with `Canvas::text_width()`
+   at the stated scale, except the three §14's note under the table names — the two
+   heroes at 177 px and `NOTES AND LOG GO` at 190 px (§17.2 item 8).
+3. No screen uses scale 4, and scale 1 appears only where §14 marks it: the menu's
+   nine rows (§5.1), the unpair table, the sleep face's line, the unpair empty
+   hint, and Home's menu hint.
 4. Nothing is inked outside x 4 … 196 or below y 186.
 5. Every screen change is `F`; no in-screen transition is `F` except the seven in
    §15.2.
@@ -1770,6 +1846,7 @@ that wrong once.
 | 5 | 8 consecutive bar moves before a forced full | a starting value, not a measurement. Tune against the real panel; the constant belongs next to `kFullEvery` |
 | 6 | `Phone` and `Wi-Fi` frames are owned by the ports | out of scope by design (§12.1); only the `F` hand-off is specified |
 | 7 | `note_max_s` cap shown as `OF 5:00` | read it from the setting, do not hard-code the default; past 99:59 it reads `OF 24:00` |
+| 8 | `confirm.format.loss` is 16 columns | **gap**: 190 px centred at x = 5, so the format confirm breaks the 12 px margin by 7 px a side where §3.1 lets only the selection bar break it (§14). Shorten the line, or give §3.1 the exception and the host test |
 
 ---
 ---

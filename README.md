@@ -158,7 +158,7 @@ give it a network, open its setup access point.
    that it has no internet.
 4. Open `http://192.168.4.1` and enter the 2.4 GHz network name, its password, and
    the Hermes address from `hermes gadget info`, for example
-   `ws://hermes.local:8765/gadget` or `ws://192.168.1.20:8765/gadget`. The notes
+   `ws://hermes.local:8765/gadget` or `ws://192.0.2.10:8765/gadget`. The notes
    app uses only the **host** of that address: it posts to
    `http://<host>:8766/notes/v1`. To point somewhere else, set the URL explicitly
    on the console with `set notes_url http://host:port/notes/v1`.

@@ -12,7 +12,7 @@ hg::WifiFastAp home() {
   const uint8_t bssid[6] = {0x24, 0x0a, 0xc4, 0x01, 0xfe, 0x7b};
   for (int i = 0; i < 6; ++i) ap.bssid[i] = bssid[i];
   ap.channel = 11;
-  ap.ip = 0x0501a8c0;  // 192.168.1.5, as lwIP stores it
+  ap.ip = 0x0501a8c0;  // 192.0.2.5, as lwIP stores it
   ap.netmask = 0x00ffffff;
   ap.gateway = 0x0101a8c0;
   ap.dns = 0x0101a8c0;

@@ -14,7 +14,7 @@ First [connect Hermes](connect-hermes.md) and keep its gateway running. Install 
    hermes gadget info
    ```
 
-   Note its port and path. For example, `ws://192.168.1.20:8765/gadget` uses port `8765` and path `/gadget`.
+   Note its port and path. For example, `ws://192.0.2.10:8765/gadget` uses port `8765` and path `/gadget`.
 
 2. Publish that port. Replace `8765` if your plugin uses another port:
 

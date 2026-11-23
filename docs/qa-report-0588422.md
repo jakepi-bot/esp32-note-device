@@ -102,7 +102,7 @@ failure; NOT TESTED = could not be exercised with the equipment in this run.
 **Symptom on hardware (deterministic; observed on the boot after flashing `0588422`):**
 
 ```text
-I (1282) BLE_INIT: Bluetooth MAC: ac:27:6e:d3:75:ca
+I (1282) BLE_INIT: Bluetooth MAC: aa:bb:cc:dd:ee:05
 E (1282) NimBLE: ble_gatts_count_resources rc=3
 E (1282) hg.phone: can't register the phone service (3)
 ```

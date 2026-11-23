@@ -64,9 +64,9 @@ RELAY_HOST=hermes.local
 # (Leave the paths alone unless you are changing the compose file.)
 
 # Transcription and summaries, if you have them:
-STT_URL=http://192.168.1.20:8081/v1
+STT_URL=http://192.0.2.10:8081/v1
 STT_MODEL=whisper-1
-LLM_URL=http://192.168.1.20:11434/v1
+LLM_URL=http://192.0.2.10:11434/v1
 LLM_MODEL=qwen2.5:7b
 ```
 
@@ -125,7 +125,7 @@ docker compose logs -f note-sync
 ```
 
 ```
-note sync on :8766  |  complete: whisper at http://192.168.1.20:8081/v1, summaries at http://192.168.1.20:11434/v1
+note sync on :8766  |  complete: whisper at http://192.0.2.10:8081/v1, summaries at http://192.0.2.10:11434/v1
 page at /  |  notes at /notes/v1  |  keys from /data/gadget/devices.json
 listening on :8766
 ```

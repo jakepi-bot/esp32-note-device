@@ -9,7 +9,7 @@
 #        error and the page never loads.
 #
 # RELAY_HOST is the name or address the phone types: the host's LAN IP
-# (192.168.1.20), a DNS name, or a tailnet name. It must match exactly.
+# (192.0.2.10), a DNS name, or a tailnet name. It must match exactly.
 {
 	admin off
 	auto_https disable_redirects

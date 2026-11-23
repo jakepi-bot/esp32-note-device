@@ -302,7 +302,7 @@ def test_info_says_where_a_local_gadget_connects(api, monkeypatch):
 @pytest.mark.parametrize("host, url", [
     ("0.0.0.0", "ws://127.0.0.1:8765/gadget"),       # a wildcard bind includes loopback
     ("::", "ws://127.0.0.1:8765/gadget"),
-    ("192.168.1.20", "ws://192.168.1.20:8765/gadget"),  # a specific address does not
+    ("192.0.2.10", "ws://192.0.2.10:8765/gadget"),  # a specific address does not
     ("::1", "ws://[::1]:8765/gadget"),
 ])
 def test_info_connects_where_the_gateway_listens(api, monkeypatch, host, url):

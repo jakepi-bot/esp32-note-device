@@ -276,7 +276,7 @@ const FIELDS = {
 function formProblem(values) {
   if (!values.wifi_ssid) return ["ssid", "Enter the name of your Wi-Fi network."];
   if (!validServer(values.server)) {
-    return ["server", "Enter the Hermes address, starting with ws:// or wss://, for example ws://192.168.1.20:8765/gadget."];
+    return ["server", "Enter the Hermes address, starting with ws:// or wss://, for example ws://192.0.2.10:8765/gadget."];
   }
   for (const [key, [field, label]] of Object.entries(FIELDS)) {
     if (!consoleSafe(values[key])) {

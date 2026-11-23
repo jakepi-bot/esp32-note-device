@@ -297,7 +297,7 @@ BusyView build_busy(bool format, uint32_t done, uint32_t total);
 // it when the table knew one. `title` and the count line are the screen's own;
 // an empty table is a line, never a blank page.
 struct PeerRowView {
-  char addr[18] = {};   // "A4:C1:38:7F:12:9B", 17 columns
+  char addr[18] = {};   // "AA:BB:CC:DD:EE:01", 17 columns
   char name[13] = {};   // empty when the radio never knew one
 };
 struct UnpairView {
@@ -313,7 +313,7 @@ UnpairView build_unpair(const Snapshot& snap, uint8_t selected);
 // the table (a phone unpaired from the console while the question was up), so the
 // frame can fall back to the list rather than asking about nobody.
 bool build_unpair_confirm(const Snapshot& snap, uint8_t index, ConfirmView& out);
-// "A4:C1:38:7F:12:9B" from the six octets, in print order. 18 columns with the
+// "AA:BB:CC:DD:EE:01" from the six octets, in print order. 18 columns with the
 // terminator.
 void format_peer_addr(const Peer& peer, char out[18]);
 

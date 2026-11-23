@@ -51,7 +51,7 @@ test("phone setup sends the tailnet choice and key on a board that can join a ta
   await page.route("http://192.168.4.1/**", async route => {
     if (route.request().url().endsWith("/api/setup")) {
       if (route.request().method() === "POST") posted = route.request().postDataJSON();
-      await route.fulfill({json:{nonce:"n",ssid:"Phone",server:"ws://100.101.102.103:8765/gadget",state:posted ? "connected" : "ready",
+      await route.fulfill({json:{nonce:"n",ssid:"Phone",server:"ws://100.64.0.10:8765/gadget",state:posted ? "connected" : "ready",
                                  tailnet:{on:false,key:true}}});
     } else await route.fulfill({contentType:"text/html",body:html});
   });
@@ -63,7 +63,7 @@ test("phone setup sends the tailnet choice and key on a board that can join a ta
   await page.getByLabel("Tailscale auth key").fill("tskey-auth-kTEST-abcdefghijklmnop");
   await page.getByRole("button", {name:"Check connection and save"}).click();
   await expect(page.getByRole("status")).toContainText("Wi-Fi connected and settings saved");
-  expect(posted).toEqual({nonce:"n",ssid:"Phone",password:"hotspot password",server:"ws://100.101.102.103:8765/gadget",
+  expect(posted).toEqual({nonce:"n",ssid:"Phone",password:"hotspot password",server:"ws://100.64.0.10:8765/gadget",
                           tailnet:true,ts_key:"tskey-auth-kTEST-abcdefghijklmnop"});
   await expect(page.getByLabel("Tailscale auth key")).toHaveValue("");
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);

@@ -528,7 +528,7 @@ Boards whose firmware enables Bluetooth (the ePaper-1.54 build does; see [hardwa
 - **Advertising:** the device advertises its name and **one** service while pairing is open, about once a second while a phone is paired, and not at all otherwise. One phone connects at a time. The service in the packet has to be the one the caller filters on, because Chrome and iOS drop every device whose advertisement does not carry it: on boards with note sync that is `…00a0`, everywhere else `…0001`. Both 128-bit UUIDs do not fit a 31-byte packet beside the flags.
 - **Commands:** subscribe to Reply, then write one console line (UTF-8, up to 256 bytes) to Command. Wait for its reply before writing the next; a third pending line is refused with "insufficient resources".
 - **Replies:** the reply text arrives in notifications sized to the link's MTU, ending with a single `0x00` byte. `@error device busy` means the device didn't answer within 3 s.
-- **State:** `status` includes `"phone": {"paired": 1, "connected": true, "pairing": false}` on these boards, plus `"confirm": "A4:C1:38:…"` while a phone is waiting for the acknowledgement and `"code": "123456"` once one is allowed; `phone` alone returns the same object as `@phone {...}`.
+- **State:** `status` includes `"phone": {"paired": 1, "connected": true, "pairing": false}` on these boards, plus `"confirm": "AA:BB:CC:…"` while a phone is waiting for the acknowledgement and `"code": "123456"` once one is allowed; `phone` alone returns the same object as `@phone {...}`.
 - **Console:** `phone pair`, `phone pair close`, `phone allow`, `phone deny`, `phone forget`; a command that arrives with no phone waiting answers `@error no phone is asking to pair`.
 
 ### Note sync (voice notes off the card)

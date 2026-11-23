@@ -10,7 +10,7 @@ import pytest
 from hermes_gadget_plugin import cli, setup
 
 DESK, KITCHEN = "hg-0123456789abcdef", "hg-fedcba9876543210"
-SERVER = "ws://192.168.1.20:8765/gadget"
+SERVER = "ws://192.0.2.10:8765/gadget"
 
 
 def test_the_installer_link_carries_the_server_in_the_fragment():
@@ -30,7 +30,7 @@ def _setup(monkeypatch, answer: str, extra: dict, *, writable: bool = True):
     monkeypatch.setattr(setup, "_ui", lambda: (shown.append, shown.append, shown.append, shown.append, prompt))
     monkeypatch.setattr(setup, "_set_config", lambda key, value: writes.append((key, value)) or writable)
     monkeypatch.setattr(cli, "_gadget_extra", lambda: dict(extra))
-    monkeypatch.setattr(cli, "_lan_address", lambda: "192.168.1.20")
+    monkeypatch.setattr(cli, "_lan_address", lambda: "192.0.2.10")
     setup.interactive_setup()
     return writes, shown
 
@@ -46,12 +46,12 @@ def test_setup_enables_the_platform_and_points_at_the_installer(monkeypatch):
 def test_setup_writes_a_changed_port_and_keeps_the_old_one_for_nonsense(monkeypatch):
     writes, shown = _setup(monkeypatch, "9000", {})
     assert writes == [("platforms.gadget.enabled", "true"), ("platforms.gadget.extra.port", "9000")]
-    assert "Devices connect to ws://192.168.1.20:9000/gadget" in shown
+    assert "Devices connect to ws://192.0.2.10:9000/gadget" in shown
 
     writes, shown = _setup(monkeypatch, "http", {"port": 8800})
     assert writes == [("platforms.gadget.enabled", "true")]
     assert "'http' isn't a port number; keeping 8800" in shown
-    assert "Devices connect to ws://192.168.1.20:8800/gadget" in shown
+    assert "Devices connect to ws://192.0.2.10:8800/gadget" in shown
 
 
 def test_setup_says_what_to_run_when_it_cannot_write_the_config(monkeypatch):

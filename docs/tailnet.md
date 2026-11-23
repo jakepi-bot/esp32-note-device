@@ -24,10 +24,10 @@ If you would rather not build firmware, [Tailscale Funnel](tailscale-funnel.md) 
    platforms:
      gadget:
        extra:
-         host: 100.101.102.103   # this computer's tailnet address
+         host: 100.64.0.10   # this computer's tailnet address
    ```
 
-4. The gadget's Hermes address is `ws://` with that address, the port and the path from `hermes gadget info`, for example `ws://100.101.102.103:8765/gadget`.
+4. The gadget's Hermes address is `ws://` with that address, the port and the path from `hermes gadget info`, for example `ws://100.64.0.10:8765/gadget`.
 
 Use the numeric address. The gadget doesn't look up MagicDNS names, and a `wss://` address would fail its certificate check on a bare IP. Plain `ws://` is fine here: WireGuard encrypts everything between the gadget and the Hermes computer.
 
@@ -46,7 +46,7 @@ For example, this tailnet policy lets gadgets reach only the gadget port on the 
 {
   "tagOwners": {"tag:gadget": ["autogroup:admin"]},
   "grants": [
-    {"src": ["tag:gadget"], "dst": ["100.101.102.103"], "ip": ["tcp:8765"]}
+    {"src": ["tag:gadget"], "dst": ["100.64.0.10"], "ip": ["tcp:8765"]}
   ]
 }
 ```
@@ -59,7 +59,7 @@ From the [USB console](setup-board.md#manage-an-existing-gadget):
 
 ```text
 set ts_key tskey-auth-...
-set server ws://100.101.102.103:8765/gadget
+set server ws://100.64.0.10:8765/gadget
 set tailnet on
 ```
 

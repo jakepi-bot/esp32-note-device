@@ -27,7 +27,9 @@
 #include "notes_app/strings.hpp"
 #include "notes_app/ui_app.hpp"
 #include "notes_app/ui_cache.hpp"
+#include "notes_app/ui_peers.hpp"
 #include "notes_app/ui_render.hpp"
+#include "notes_app/ui_state.hpp"
 #include "notes_app/ui_view.hpp"
 #include "notes_app/wav_player.hpp"
 
@@ -108,6 +110,52 @@ Snapshot snapshot_for(const Cache& cache, Store& store, Screen screen, uint16_t 
   cache.fill(store, snap, first, rows);
   return snap;
 }
+
+// "A4:C1:38:7F:12:9B" -> a Peer. The tests read like the glass.
+Peer make_peer(const char* text, const char* name = nullptr) {
+  Peer peer;
+  unsigned octet[6] = {};
+  if (std::sscanf(text, "%x:%x:%x:%x:%x:%x", &octet[0], &octet[1], &octet[2], &octet[3], &octet[4],
+                  &octet[5]) == 6) {
+    for (int i = 0; i < 6; ++i) peer.addr[i] = static_cast<uint8_t>(octet[i]);
+  }
+  if (name != nullptr) std::snprintf(peer.name, sizeof peer.name, "%s", name);
+  return peer;
+}
+
+// The bond store without a radio: the table the screen lists and the deletes it
+// asked for, which is how "the erase is called exactly once" is asserted.
+struct FakeBonds : BondPort {
+  std::vector<Peer> peers;
+  int erases = 0;
+  int refused = 0;  // the store says no to the next deletes
+  bool answers = true;  // false: the radio is asleep and does not speak
+
+  uint8_t list(Peer* out, uint8_t capacity, bool* answered = nullptr) override {
+    if (answered != nullptr) *answered = answers;
+    if (!answers) return 0;
+    uint8_t n = 0;
+    for (const Peer& peer : peers) {
+      if (n >= capacity) break;
+      out[n++] = peer;
+    }
+    return n;
+  }
+  bool erase(const Peer& peer) override {
+    ++erases;
+    if (refused > 0) {
+      --refused;
+      return false;
+    }
+    for (auto it = peers.begin(); it != peers.end(); ++it) {
+      if (std::memcmp(it->addr, peer.addr, sizeof peer.addr) == 0) {
+        peers.erase(it);
+        return true;
+      }
+    }
+    return false;
+  }
+};
 
 }  // namespace
 
@@ -745,12 +793,19 @@ TEST("render: every screen inks paper only - x 4..196, y <= 186 at 1 bit") {
   frame.about = build_about(Snapshot{});
   frame.busy = build_busy(false, 57, 114);  // the busiest copy a wipe has
 
+  // The unpair list and its question, with the widest copy they can carry: a
+  // 17-column address, a 12-column name beside it, and a busy line above the rule.
+  Snapshot peers;
+  peers.peers[0] = make_peer("A4:C1:38:7F:12:9B", "Annas iPhone");
+  peers.peers[1] = make_peer("E0:5A:1B:22:9C:04", "Pixel 8 Pro");
+  peers.peer_count = 2;
+
   static uint16_t fb[200 * 200];
   const Screen screens[] = {Screen::Home,     Screen::Menu,          Screen::NoteList,
                             Screen::NoteAction, Screen::ConfirmDelete, Screen::ConfirmWipe,
                             Screen::ConfirmFormat, Screen::Wiping,   Screen::Playing,
                             Screen::Recording, Screen::Pairing,       Screen::Phone,
-                            Screen::About};
+                            Screen::About, Screen::UnpairList,        Screen::ConfirmUnpair};
   for (Screen screen : screens) {
     frame.screen = screen;
     if (screen == Screen::ConfirmWipe) {
@@ -758,6 +813,11 @@ TEST("render: every screen inks paper only - x 4..196, y <= 186 at 1 bit") {
     } else if (screen == Screen::ConfirmFormat) {
       frame.confirm = build_format_confirm(Snapshot{});
       frame.confirm.why = "BUSY RECORDING";  // the busiest copy this screen has
+    } else if (screen == Screen::UnpairList) {
+      frame.unpair = build_unpair(peers, 1);
+    } else if (screen == Screen::ConfirmUnpair) {
+      build_unpair_confirm(peers, 1, frame.confirm);
+      frame.confirm.why = "BUSY RECORDING";
     }
     std::memset(fb, 0xFF, sizeof fb);  // paper
     hg::Canvas canvas(fb, 200, 200, false);
@@ -1629,6 +1689,294 @@ TEST("guard: wipe and format are refused while the device is busy") {
   free.begin(idle);
   open_menu_row(free, MenuItem::WipeNotes);
   CHECK(free.press(Key::BootHold, 0).effect == Effect::WipeNotes);
+}
+
+TEST("unpair: the list names every bonded phone, and says so when there are none") {
+  // One phone whose name the radio knew and one known only by its address. The
+  // address is always there - it is the one thing a person can compare with the
+  // phone in their hand - and the name is the second column when it exists.
+  Snapshot snap;
+  snap.peers[0] = make_peer("A4:C1:38:7F:12:9B", "Annas iPhone");
+  snap.peers[1] = make_peer("E0:5A:1B:22:9C:04");
+  snap.peer_count = 2;
+
+  ScreenApp app;
+  app.begin(snap);
+  CHECK(open_menu_row(app, MenuItem::UnpairPhones).refresh == Refresh::Full);
+  CHECK(app.screen() == Screen::UnpairList);
+
+  const ScreenDraw frame = app.frame();
+  CHECK(frame.screen == Screen::UnpairList);
+  CHECK(!frame.unpair.empty);
+  CHECK(frame.unpair.count == 2);
+  CHECK(std::string(frame.unpair.row[0].addr) == "A4:C1:38:7F:12:9B");
+  CHECK(std::string(frame.unpair.row[0].name) == "Annas iPhone");
+  CHECK(std::string(frame.unpair.row[1].addr) == "E0:5A:1B:22:9C:04");
+  CHECK(frame.unpair.row[1].name[0] == '\0');
+  CHECK(std::string(frame.unpair.count_line) == "2 PAIRED");
+
+  // BOOT walks the rows, the way the note list does.
+  CHECK(app.press(Key::BootTap, 0).refresh == Refresh::Partial);
+  CHECK(app.frame().unpair.selected == 1);
+  CHECK(app.press(Key::BootTap, 0).refresh == Refresh::Partial);
+  CHECK(app.frame().unpair.selected == 0);  // two rows wrap
+
+  // The empty table is its own page: a line saying so, the hint where a phone is
+  // paired, and no "next" in the footer - a list that advertises a row it does
+  // not have is a lie the user tests once.
+  Snapshot none;
+  ScreenApp empty;
+  empty.begin(none);
+  CHECK(open_menu_row(empty, MenuItem::UnpairPhones).refresh == Refresh::Full);
+  CHECK(empty.screen() == Screen::UnpairList);
+  const ScreenDraw blank = empty.frame();
+  CHECK(blank.unpair.empty);
+  CHECK(blank.unpair.count == 0);
+  CHECK(std::string(unpair::kEmpty) == "NOTHING PAIRED");
+
+  static uint16_t fb[200 * 200];
+  std::memset(fb, 0xFF, sizeof fb);
+  hg::Canvas canvas(fb, 200, 200, false);
+  draw(canvas, blank);
+  int ink_mid = 0, ink_rows = 0;
+  for (int y = 0; y < 200; ++y) {
+    for (int x = 0; x < 200; ++x) {
+      if (fb[y * 200 + x] != 0x0000) continue;
+      if (y >= 60 && y <= 100) ++ink_mid;   // the empty line and its hint
+      if (y >= 32 && y < 60) ++ink_rows;    // where rows would be
+    }
+  }
+  CHECK(ink_mid > 0);   // the line is on the glass
+  CHECK(ink_rows == 0); // and nothing pretends to be a row
+
+  // A tap on an empty table asks about nobody and stays; the hold is the way out.
+  CHECK(empty.press(Key::Power, 0).effect == Effect::None);
+  CHECK(empty.screen() == Screen::UnpairList);
+  CHECK(empty.press(Key::BootHold, 0).refresh == Refresh::Full);
+  CHECK(empty.screen() == Screen::Menu);
+}
+
+TEST("unpair: entering the screen reads the table then, not at boot") {
+  // The radio rests until somebody asks for it: its store answers nothing at
+  // boot, and by the time the row is selected it holds a phone (the device wakes
+  // the radio on the way in for exactly this reason). The screen must draw what
+  // the store says now - a table cached from boot would tell a person looking at
+  // the phone in their hand that nothing is paired.
+  TempDir dir;
+  Store store(dir.path + "/notes");
+  CHECK(store.ensure());
+  FakeBonds bonds;  // the radio is asleep: no table yet
+
+  UiState ui;
+  Snapshot seed;
+  seed.card = true;
+  ui.begin(seed, &store, &bonds);
+  ui.press(Key::BootHold, 0);  // Home -> menu
+  while (static_cast<MenuItem>(ui.app().state().menu) != MenuItem::UnpairPhones) {
+    ui.press(Key::BootTap, 0);
+  }
+  bonds.peers.push_back(make_peer("A4:C1:38:7F:12:9B"));  // the radio came up
+
+  ui.press(Key::Power, 0);  // select the row
+  CHECK(ui.screen() == Screen::UnpairList);
+  CHECK(ui.snapshot().peer_count == 1);
+  const ScreenDraw list = ui.app().frame();
+  CHECK(list.unpair.count == 1);
+  CHECK(std::string(list.unpair.row[0].addr) == "A4:C1:38:7F:12:9B");
+  CHECK(bonds.erases == 0);
+}
+
+TEST("unpair: a store that does not answer leaves the table on the glass") {
+  // The radio can be asleep when the screen is already up (its window closed
+  // under the question). The read then comes back with nothing to say, which is
+  // not the same as an empty table: the list must keep the phones it named rather
+  // than telling a person their device holds none.
+  TempDir dir;
+  Store store(dir.path + "/notes");
+  CHECK(store.ensure());
+  FakeBonds bonds;
+  bonds.peers.push_back(make_peer("A4:C1:38:7F:12:9B"));
+  bonds.peers.push_back(make_peer("E0:5A:1B:22:9C:04"));
+
+  UiState ui;
+  Snapshot seed;
+  seed.card = true;
+  ui.begin(seed, &store, &bonds);
+  ui.press(Key::BootHold, 0);
+  while (static_cast<MenuItem>(ui.app().state().menu) != MenuItem::UnpairPhones) {
+    ui.press(Key::BootTap, 0);
+  }
+  ui.press(Key::Power, 0);
+  CHECK(ui.snapshot().peer_count == 2);
+
+  bonds.answers = false;                // the radio rested under the screen
+  ui.press(Key::BootTap, 0);            // a press still reads the table
+  CHECK(ui.snapshot().peer_count == 2); // the answer it could not get changes nothing
+  const ScreenDraw list = ui.app().frame();
+  CHECK(list.unpair.count == 2);
+  CHECK(std::string(list.unpair.row[1].addr) == "E0:5A:1B:22:9C:04");
+
+  // And the store speaking again is believed, empty or not.
+  bonds.answers = true;
+  bonds.peers.clear();
+  ui.press(Key::BootTap, 0);
+  CHECK(ui.snapshot().peer_count == 0);
+  CHECK(ui.app().frame().unpair.empty);
+}
+
+TEST("unpair: a BOOT hold removes the selected phone once, and the list shrinks") {
+  TempDir dir;
+  Store store(dir.path + "/notes");
+  CHECK(store.ensure());
+  FakeBonds bonds;
+  bonds.peers.push_back(make_peer("A4:C1:38:7F:12:9B"));
+  bonds.peers.push_back(make_peer("E0:5A:1B:22:9C:04"));
+
+  // The adapter owns the card, the machine and the bond store together: this is
+  // the same path the device runs, with the radio replaced by FakeBonds.
+  UiState ui;
+  Snapshot seed;
+  seed.card = true;
+  ui.begin(seed, &store, &bonds);
+
+  ui.press(Key::BootHold, 0);  // Home -> menu
+  CHECK(ui.screen() == Screen::Menu);
+  while (static_cast<MenuItem>(ui.app().state().menu) != MenuItem::UnpairPhones) {
+    ui.press(Key::BootTap, 0);
+  }
+  ui.press(Key::Power, 0);  // select the row
+  CHECK(ui.screen() == Screen::UnpairList);
+  CHECK(ui.snapshot().peer_count == 2);  // the table was read on the way in
+  CHECK(std::string(ui.app().frame().unpair.row[0].addr) == "A4:C1:38:7F:12:9B");
+  CHECK(bonds.erases == 0);
+
+  // The second phone, asked about: the question states the address it removes.
+  ui.press(Key::BootTap, 0);
+  CHECK(ui.app().frame().unpair.selected == 1);
+  CHECK(ui.press(Key::Power, 0).effect == Effect::None);
+  CHECK(ui.screen() == Screen::ConfirmUnpair);
+  const ConfirmView ask = ui.app().frame().confirm;
+  CHECK(std::string(ask.hero) == "UNPAIR?");
+  CHECK(std::string(ask.line1) == "E0:5A:1B:22:9C:04");
+  CHECK(std::string(ask.hold) == "HOLD: unpair");
+  CHECK(ask.why == nullptr);
+  CHECK(bonds.erases == 0);  // the question deletes nothing
+
+  // The hold: one erase, and the list the glass comes back to is one row shorter.
+  const Outcome hold = ui.press(Key::BootHold, 0);
+  CHECK(hold.effect == Effect::UnpairPeer);
+  CHECK(hold.peer == 1);
+  CHECK(ui.screen() == Screen::UnpairList);
+  const Outcome after = ui.unpair(hold.peer, 0);
+  CHECK(bonds.erases == 1);
+  CHECK(bonds.peers.size() == 1);
+  CHECK(std::string(bonds.peers[0].name) == "");  // the one left is the other phone
+  CHECK(after.draw);
+  CHECK(after.refresh == Refresh::Full);
+  CHECK(ui.snapshot().peer_count == 1);
+  const ScreenDraw list = ui.app().frame();
+  CHECK(list.unpair.count == 1);
+  CHECK(std::string(list.unpair.row[0].addr) == "A4:C1:38:7F:12:9B");
+
+  // Doing it again with nothing selected but the last phone leaves an empty list:
+  // the hold is one erase per press, never a loop that empties the table.
+  ui.press(Key::Power, 0);
+  CHECK(ui.screen() == Screen::ConfirmUnpair);
+  const Outcome last = ui.press(Key::BootHold, 0);
+  CHECK(last.effect == Effect::UnpairPeer);
+  CHECK(last.peer == 0);
+  ui.unpair(last.peer, 0);
+  CHECK(bonds.erases == 2);
+  CHECK(ui.snapshot().peer_count == 0);
+  CHECK(ui.app().frame().unpair.empty);
+}
+
+TEST("unpair: a tap keeps the phone, and a store that refuses keeps the row") {
+  TempDir dir;
+  Store store(dir.path + "/notes");
+  CHECK(store.ensure());
+  FakeBonds bonds;
+  bonds.peers.push_back(make_peer("A4:C1:38:7F:12:9B"));
+
+  UiState ui;
+  Snapshot seed;
+  seed.card = true;
+  ui.begin(seed, &store, &bonds);
+  ui.press(Key::BootHold, 0);
+  while (static_cast<MenuItem>(ui.app().state().menu) != MenuItem::UnpairPhones) {
+    ui.press(Key::BootTap, 0);
+  }
+  ui.press(Key::Power, 0);
+  CHECK(ui.screen() == Screen::UnpairList);
+
+  // BOOT tap on the question: the safe answer, the list back, nothing deleted.
+  CHECK(ui.press(Key::Power, 0).effect == Effect::None);
+  CHECK(ui.screen() == Screen::ConfirmUnpair);
+  const Outcome tap = ui.press(Key::BootTap, 0);
+  CHECK(tap.effect == Effect::None);
+  CHECK(ui.screen() == Screen::UnpairList);
+  CHECK(bonds.erases == 0);
+  CHECK(bonds.peers.size() == 1);
+
+  // PWR tap is the same safe answer (the delete confirm's rule).
+  CHECK(ui.press(Key::Power, 0).effect == Effect::None);
+  CHECK(ui.screen() == Screen::ConfirmUnpair);
+  CHECK(ui.press(Key::Power, 0).effect == Effect::None);
+  CHECK(ui.screen() == Screen::UnpairList);
+  CHECK(bonds.erases == 0);
+
+  // The store says no (a phone unpaired from the console a moment earlier): the
+  // erase is asked once, and no row leaves the glass.
+  bonds.refused = 1;
+  CHECK(ui.press(Key::Power, 0).effect == Effect::None);  // the question again
+  CHECK(ui.screen() == Screen::ConfirmUnpair);
+  const Outcome hold = ui.press(Key::BootHold, 0);
+  CHECK(hold.effect == Effect::UnpairPeer);
+  const Outcome refused = ui.unpair(hold.peer, 0);
+  CHECK(bonds.erases == 1);
+  CHECK(bonds.peers.size() == 1);
+  CHECK(!refused.draw);
+  CHECK(ui.snapshot().peer_count == 1);
+
+  // And the hold on the list itself leaves for the menu with the bond intact.
+  CHECK(ui.press(Key::BootHold, 0).refresh == Refresh::Full);
+  CHECK(ui.screen() == Screen::Menu);
+  CHECK(bonds.erases == 1);
+  CHECK(bonds.peers.size() == 1);
+}
+
+TEST("guard: an unpair is refused while the device is busy") {
+  Snapshot snap;
+  snap.peers[0] = make_peer("A4:C1:38:7F:12:9B");
+  snap.peer_count = 1;
+  std::snprintf(snap.busy, sizeof snap.busy, "BUSY UPLOADING");
+
+  ScreenApp app;
+  app.begin(snap);
+  open_menu_row(app, MenuItem::UnpairPhones);
+  CHECK(app.screen() == Screen::UnpairList);
+  CHECK(app.press(Key::Power, 0).effect == Effect::None);
+  CHECK(app.screen() == Screen::ConfirmUnpair);
+
+  // The reason is on the question, and the hold does nothing at all.
+  const ScreenDraw frame = app.frame();
+  CHECK(frame.confirm.why != nullptr);
+  CHECK(std::string(frame.confirm.why) == "BUSY UPLOADING");
+  const Outcome held = app.press(Key::BootHold, 0);
+  CHECK(held.effect == Effect::None);
+  CHECK(held.effect != Effect::UnpairPeer);
+  CHECK(app.screen() == Screen::ConfirmUnpair);
+  CHECK(!held.draw);  // the line is already on the glass
+
+  // Idle again: the same hold goes through.
+  Snapshot idle = snap;
+  idle.busy[0] = '\0';
+  ScreenApp free;
+  free.begin(idle);
+  open_menu_row(free, MenuItem::UnpairPhones);
+  free.press(Key::Power, 0);
+  CHECK(free.frame().confirm.why == nullptr);
+  CHECK(free.press(Key::BootHold, 0).effect == Effect::UnpairPeer);
 }
 
 TEST("home: shows 0 NOTES after a wipe") {

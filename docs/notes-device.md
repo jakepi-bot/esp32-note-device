@@ -139,10 +139,27 @@ Back
   ~23 s it takes (no bar: there is no number the firmware can honestly report).
 - **Unpair phones** - the paired-phone list (the row is on the menu; the list and
   its confirm are the next change).
+  card goes.
+- **Unpair phones** - the bonded phones, one address a row (`A4:C1:38:7F:12:9B`,
+  the form a phone's own settings show), with a name beside it when the radio
+  knew one. BOOT tap walks the rows, PWR tap asks about the selected phone, BOOT
+  hold goes back to the menu. The question states the address; BOOT hold there
+  removes that bond (and drops the phone's link if it is connected), BOOT tap or
+  PWR tap keeps it. An empty table says `NOTHING PAIRED`. It refuses while the
+  device is recording or uploading, with the reason on the question. Opening the
+  row wakes the radio if it has gone to rest, because the bond store is the
+  radio's own and it is unreadable while the stack is down; the phones on the
+  glass are the ones the store holds right now.
 - **Back** - Home.
 
 Both destructive rows refuse while the device is busy - a note recording or
-uploading - and the question says why (`BUSY RECORDING`, `BUSY UPLOADING`).
+uploading - and the question says why (`BUSY RECORDING`, `BUSY UPLOADING`), and
+so does `Unpair phones`.
+
+Removing a phone's bond is what makes a sold or borrowed device safe: the phone
+shows the device as not paired afterwards and has to pair again (BOOT hold, then
+`Phone`, then the passkey) before it can write a note. The console shows the same
+table with `ui peers`, and `phone forget` still removes all of them at once.
 
 ## The note list
 
@@ -276,7 +293,8 @@ notes/
 Over USB at 115200: `notes status|list|record|stop|sync|poweroff|mount|format|prune`,
 `screen` for the panel image as hex, `about`, `battery`, `clock`, `power`, `radio`,
 `sd`, `wifi [on|off]`, `keys`, `ui` (`ui home` forces a full-refresh hand-over,
-`ui press boot|hold|pwr` presses a key from a host with no finger on the board;
+`ui press boot|hold|pwr` presses a key from a host with no finger on the board,
+`ui peers` prints the bond table the Unpair screen lists;
 the plain `ui` line also answers `ble off|advertising|connected` for the band's
 radio mark and `frames N`, the panel refreshes since boot, which is how an idle
 face is shown never to redraw),

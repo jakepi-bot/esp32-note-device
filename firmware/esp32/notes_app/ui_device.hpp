@@ -28,6 +28,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -191,6 +192,10 @@ class NotesUi {
   CaptureProbe capture_probe_;
   CardJobProbe card_job_probe_;
   notesui::UiState state_;
+  // The bond store the Unpair screen reaches (ui_peers.hpp), over PhoneLink.
+  // Empty on a build with no Bluetooth, where the screen then says the table is
+  // empty - the port answers nothing because there is nothing to ask.
+  std::unique_ptr<notesui::BondPort> bonds_;
   notesui::Facts facts_;
 
   std::string device_name_;

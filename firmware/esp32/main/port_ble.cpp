@@ -56,6 +56,11 @@ const char* PhoneLink::radio_reason() const { return "none"; }
 void PhoneLink::answer_pairing(bool) {}
 void PhoneLink::close_pairing() {}
 void PhoneLink::forget() {}
+bool PhoneLink::bonded_peers(BondInfo*, uint8_t, uint8_t* count) {
+  if (count != nullptr) *count = 0;
+  return false;
+}
+bool PhoneLink::forget_peer(const BondInfo&) { return false; }
 void PhoneLink::set_name(const std::string&) {}
 
 // The note sync lives on the same stack; without NimBLE there is nothing to
@@ -156,6 +161,27 @@ struct Ask {
 std::mutex g_ask_mutex;
 Ask g_ask;
 std::atomic<bool> g_allow{false};
+
+// The bond table, for the Unpair screen. The store's own API (ble_store_util_*)
+// belongs to the host task: it walks the host's cached copy of the bond store.
+// The screens ask from the app task, so the work goes onto the host's event queue
+// and the app waits a second for the answer. With the radio at rest there is no
+// host to hand it to and none to read either - nimble_port_deinit() took the store
+// and its lock with it - so the call reports "no answer" and the screen keeps the
+// table it already had. One job at a time: the app task is the only caller.
+constexpr uint8_t kBondCap = 6;        // notesui::kMaxPeerRows
+constexpr uint32_t kBondWaitMs = 1000;  // NVS plus a RAM cache, and the host's lock
+
+struct BondJob {
+  bool erase = false;
+  ble_addr_t target{};
+  bool ok = false;  // the erase was accepted (false when there was none)
+  uint8_t count = 0;
+  BondInfo peers[kBondCap];
+  std::atomic<bool> done{false};
+};
+BondJob g_bond_job;
+ble_npl_event g_bond_ev;
 
 void make_uuid(ble_uuid128_t& uuid, uint8_t n) {
   uuid.u.type = BLE_UUID_TYPE_128;
@@ -274,6 +300,77 @@ void on_forget(ble_npl_event*) {
   post(PhoneSample::Kind::Status);
   if (g_conn.load() != kNone) ble_npl_callout_reset(&g_drop, ble_npl_time_ms_to_ticks32(kForgetDropMs));
   else advertise();
+}
+
+// Host task (or the app task with the radio at rest). One walk of the store for
+// both questions: the erase first when the job carries one, then the table as it
+// is now - which is the answer the screen draws.
+void schedule(ble_npl_event* event);
+
+void run_bond_job() {
+  if (g_bond_job.erase) {
+    const int rc = ble_store_util_delete_peer(&g_bond_job.target);
+    g_bond_job.ok = rc == 0;
+    if (rc != 0) {
+      ESP_LOGW(TAG, "the bond store refused the delete (%d)", rc);
+    } else {
+      // The keys are gone, so the link must go with them: the phone itself keeps
+      // its side of the bond until it notices, and a link kept over keys this
+      // device no longer has is a connection that can never be encrypted again.
+      const uint16_t conn = g_conn.load();
+      if (conn != kNone) {
+        ble_gap_conn_desc d;
+        if (ble_gap_conn_find(conn, &d) == 0 && ble_addr_cmp(&d.peer_id_addr, &g_bond_job.target) == 0) {
+          ESP_LOGI(TAG, "the unpaired phone was connected: dropping the link");
+          ble_gap_terminate(conn, BLE_ERR_REM_USER_CONN_TERM);
+        }
+      }
+    }
+  }
+  ble_addr_t found[kBondCap];
+  int n = 0;
+  if (ble_store_util_bonded_peers(found, &n, kBondCap) == 0) {
+    if (n < 0) n = 0;
+    if (n > kBondCap) n = kBondCap;
+    g_bond_job.count = static_cast<uint8_t>(n);
+    for (int i = 0; i < n; ++i) {
+      g_bond_job.peers[i].type = found[i].type;
+      // NimBLE keeps an address little-endian; the screen prints it the way the
+      // phone's own settings do.
+      for (int b = 0; b < 6; ++b) g_bond_job.peers[i].addr[b] = found[i].val[5 - b];
+    }
+  } else {
+    g_bond_job.count = 0;
+  }
+  g_bonds = g_bond_job.count;  // the Phone screen's count line reads this
+  g_bond_job.done = true;
+  post(PhoneSample::Kind::Status);
+  advertise();
+}
+
+void on_bond_job(ble_npl_event*) { run_bond_job(); }
+
+// App task: the job, run on the host when there is one (the store is its) and
+// inline when the radio is at rest.
+bool ask_bond_store(bool erase, const ble_addr_t* target) {
+  g_bond_job.erase = erase;
+  g_bond_job.ok = false;
+  g_bond_job.count = 0;
+  if (erase && target != nullptr) g_bond_job.target = *target;
+  g_bond_job.done = false;
+  if (g_started) {
+    schedule(&g_bond_ev);
+    for (uint32_t waited = 0; waited < kBondWaitMs && !g_bond_job.done.load(); ++waited) {
+      vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    if (!g_bond_job.done.load()) {
+      ESP_LOGW(TAG, "the bond store did not answer in %u ms", static_cast<unsigned>(kBondWaitMs));
+      return false;
+    }
+  } else {
+    run_bond_job();  // no host task, and nothing else reads the store
+  }
+  return true;
 }
 
 void schedule(ble_npl_event* event) { ble_npl_eventq_put(nimble_port_get_dflt_eventq(), event); }
@@ -538,6 +635,7 @@ bool start_radio() {
   ble_npl_event_init(&g_update_ev, on_update, nullptr);
   ble_npl_event_init(&g_forget_ev, on_forget, nullptr);
   ble_npl_event_init(&g_answer_ev, on_answer, nullptr);
+  ble_npl_event_init(&g_bond_ev, on_bond_job, nullptr);
   ble_npl_callout_init(&g_drop, nimble_port_get_dflt_eventq(), on_drop, nullptr);
   nimble_port_freertos_init(host_task);
   g_up = true;
@@ -580,6 +678,7 @@ bool stop_radio() {
   g_update_ev.event = nullptr;
   g_forget_ev.event = nullptr;
   g_answer_ev.event = nullptr;
+  g_bond_ev.event = nullptr;
   g_drop.co = nullptr;
   ESP_LOGI(TAG, "Bluetooth radio off: %s", "the chip can light-sleep again");
   return true;
@@ -749,6 +848,35 @@ void PhoneLink::close_pairing() {
 
 void PhoneLink::forget() {
   if (g_started) schedule(&g_forget_ev);
+}
+
+bool PhoneLink::bonded_peers(BondInfo* out, uint8_t capacity, uint8_t* count) {
+  if (count != nullptr) *count = 0;
+  // The store is the host's: nimble_port_deinit() frees it with the rest of the
+  // stack, so a read while the radio rests is a read of freed memory (the app
+  // task panicked on ble_hs_lock the moment the Unpair row was selected with the
+  // radio off). A caller that needs the table brings the radio up first.
+  if (out == nullptr || capacity == 0 || !g_started) return false;
+  if (!ask_bond_store(false, nullptr)) return false;
+  const uint8_t n = capacity < g_bond_job.count ? capacity : g_bond_job.count;
+  for (uint8_t i = 0; i < n; ++i) out[i] = g_bond_job.peers[i];
+  if (count != nullptr) *count = n;
+  return true;
+}
+
+bool PhoneLink::forget_peer(const BondInfo& peer) {
+  if (!g_started) return false;  // no host, no store (see bonded_peers)
+  ble_addr_t target{};
+  target.type = peer.type;
+  for (int b = 0; b < 6; ++b) target.val[b] = peer.addr[5 - b];  // back to NimBLE's order
+  if (!ask_bond_store(true, &target)) return false;
+  if (!g_bond_job.ok) return false;
+  // The answer the screen draws is the table the store holds now: the phone has
+  // to be gone from it, or the delete did not take.
+  for (uint8_t i = 0; i < g_bond_job.count; ++i) {
+    if (std::memcmp(g_bond_job.peers[i].addr, peer.addr, sizeof peer.addr) == 0) return false;
+  }
+  return true;
 }
 
 void PhoneLink::set_name(const std::string& name) {

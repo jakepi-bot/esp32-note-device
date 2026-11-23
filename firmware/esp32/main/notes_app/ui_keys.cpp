@@ -43,6 +43,16 @@ Action press_power(State& state) {
     case Screen::Wiping:
       // The work owns the device: no tap can cut it short or start another.
       return Action::None;
+    case Screen::UnpairList:
+      // Nothing to ask about with an empty table: the list's only move is the
+      // hold back to the menu (the note list's empty case keeps the same rule).
+      if (state.peer_count == 0) return Action::None;
+      state.go(Screen::ConfirmUnpair);
+      return Action::OpenUnpairConfirm;
+    case Screen::ConfirmUnpair:
+      // The safe answer: the phone stays paired, the list comes back.
+      state.go(Screen::UnpairList);
+      return Action::Back;
     case Screen::Playing:
       // Stop the audio and leave the player, and never the device: this tap used
       // to power off, so browsing notes switched the board off with one key and
@@ -97,6 +107,13 @@ Action press_boot(State& state) {
       return Action::Back;  // a tap cancels: only the hold empties anything
     case Screen::Wiping:
       return Action::None;  // the work is running; a tap is not an answer
+    case Screen::UnpairList:
+      if (state.peer_count == 0) return Action::None;
+      state.peer = static_cast<uint8_t>((state.peer + 1) % state.peer_count);
+      return Action::NextPeer;
+    case Screen::ConfirmUnpair:
+      state.go(Screen::UnpairList);
+      return Action::Back;  // a tap keeps the phone: only the hold removes it
     case Screen::Playing:
       state.playing = false;
       return Action::StopPlay;
@@ -145,6 +162,16 @@ Action hold_boot(State& state) {
       // A hold cannot cut the job short: the runtime is emptying the card and
       // has no cancellation a key should be able to reach.
       return Action::None;
+    case Screen::UnpairList:
+      // Out the way the row came in. The list is the menu's, so a hold here is
+      // the same hold that leaves the note list.
+      state.go(Screen::Menu);
+      return Action::Back;
+    case Screen::ConfirmUnpair:
+      // The bond goes, and the list it came from is what the glass shows next -
+      // with the phone gone. Exactly one erase per hold.
+      state.go(Screen::UnpairList);
+      return Action::UnpairPeer;
     case Screen::Playing:
       state.playing = false;
       return Action::StopPlay;

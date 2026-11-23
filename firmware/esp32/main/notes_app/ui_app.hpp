@@ -42,6 +42,7 @@ enum class Effect : uint8_t {
   DeleteNote,
   WipeNotes,       // every note, both folders: the store's wipe, the settings stay
   FormatCard,      // the volume itself goes: every note and whatever else it held
+  UnpairPeer,      // the bonded phone the question named: its keys leave the store
 };
 
 // The refresh class, straight from the spec's transition table (§13.2).
@@ -68,6 +69,7 @@ struct Outcome {
   Refresh refresh = Refresh::None;
   bool draw = false;
   uint16_t note = 0;  // DeleteNote / StartPlayback: the index into the snapshot
+  uint8_t peer = 0;   // UnpairPeer: the index into the snapshot's peer table
 };
 
 // The stubs the frame about to be drawn will read: [first, first + rows).

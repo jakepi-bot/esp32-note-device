@@ -63,6 +63,7 @@ struct ScreenDraw {
   PlayingView playing;
   PairingView pairing;
   PhoneView phone;
+  UnpairView unpair;
   AboutView about;
 };
 

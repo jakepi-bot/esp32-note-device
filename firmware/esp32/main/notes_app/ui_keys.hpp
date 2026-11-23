@@ -19,6 +19,8 @@
 //   ConfirmWipe  cancel, menu     (nothing)    cancel, menu       wipe every note
 //   ConfirmFormat cancel, menu    (nothing)    cancel, menu       format the card
 //   Wiping     (nothing)          (nothing)    (nothing)          (nothing)
+//   UnpairList ask about the phone (nothing)   next phone         back to the menu
+//   ConfirmUnpair keep the phone  (nothing)    keep the phone     remove the bond
 //   Playing    stop, to the list  (nothing)    stop               stop
 //   Pairing    refuse the phone   (nothing)    allow the phone    (nothing)
 //   Phone      close the window   (nothing)    (nothing)          back to the menu
@@ -48,6 +50,8 @@ enum class Screen : uint8_t {
   ConfirmWipe,    // empty the device: every note, the card left as filesystem
   ConfirmFormat,  // format the SD card: every note and the card's log
   Wiping,         // the work behind those two confirms, while it runs
+  UnpairList,     // the bonded phones, one address a row
+  ConfirmUnpair,  // drop one phone's bond: its address is the question
   Playing,
   Pairing,
   Phone,  // the Bluetooth window a person opened from the menu
@@ -88,6 +92,11 @@ enum class Action : uint8_t {
   // nothing outside the glass to undo.
   WipeNotes,
   FormatCard,
+  // The Unpair list and its question. The list is the menu's row, and the row
+  // the question names is State::peer.
+  NextPeer,
+  OpenUnpairConfirm,
+  UnpairPeer,
   Play,
   StopPlay,         // BOOT: stop and stay on the note's own screen
   StopPlayToList,   // PWR: stop and leave the player for the list
@@ -103,6 +112,8 @@ struct State {
   uint8_t action = 0;             // NoteActionItem, while a note is open
   uint16_t note = 0;              // the selected note, newest first
   uint16_t note_count = 0;        // what the card holds
+  uint8_t peer = 0;               // the selected bonded phone, index into the table
+  uint8_t peer_count = 0;         // what the radio's table holds
   bool playing = false;
   Screen after_pairing = Screen::Home;  // where the ask lands when answered
 

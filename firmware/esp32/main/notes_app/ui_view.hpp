@@ -24,6 +24,10 @@ namespace hgp::notesui {
 inline constexpr uint8_t kMaxListRows = 128;
 // Six rows at the two-line footer, seven at the one-line footer (§3.4).
 inline constexpr uint8_t kListRows = 6;
+// The bonded phones the screens can hold. The pairing table keeps three
+// (CONFIG_BT_NIMBLE_MAX_BONDS); six is the panel's own row count, so even a
+// build with a bigger table lists without a scroll.
+inline constexpr uint8_t kMaxPeerRows = 6;
 
 // What a list row's right margin says: mark the exception, not the rule (§6.2).
 enum class NoteMark : uint8_t { None, Pending, Failed };
@@ -41,6 +45,17 @@ struct NoteStub {
   char clock[6] = {};        // "14:02", 5 columns
   uint16_t duration_s = 0;
   NoteMark mark = NoteMark::None;
+};
+
+// A bonded phone as the screens need it: its Bluetooth identity address - which
+// is what a phone's own settings show, so it is the thing a person can match -
+// and a name when something knew one. The bond store keeps keys, not names, so
+// `name` is empty for a phone this device never saw named, and the address is
+// then the whole answer (docs/notes-ui-spec.md §11.4).
+struct Peer {
+  uint8_t type = 0;      // BLE address type: public or random
+  uint8_t addr[6] = {};  // print order: addr[0] is the first octet shown
+  char name[13] = {};    // 12 columns, the room beside an address at scale 1
 };
 
 // Everything the screens can show, cached by the caller. Plain data so the
@@ -124,6 +139,13 @@ struct Snapshot {
   // True when the card holds more notes than the list keeps: the count line then
   // says "128+" rather than pretending that is the whole card (QA D7).
   bool list_truncated = false;
+
+  // The bonded phones, in the radio's own table order. Filled by the adapter on
+  // the event that opens or returns to the Unpair screen - the bond store is the
+  // radio's like the card is the store's, so this is cached data, never a read
+  // from the draw path.
+  Peer peers[kMaxPeerRows];
+  uint8_t peer_count = 0;
 
   uint32_t notes_total() const { return count_pending + count_sent + count_failed; }
 };
@@ -240,11 +262,15 @@ bool build_note(const Snapshot& snap, uint16_t index, uint8_t selected, NoteView
 // busy) why the hold will be refused. All three lines are copies, so the frame
 // is self-contained like the rest of the snapshot.
 struct ConfirmView {
-  char hero[20] = {};      // "DELETE?" / "WIPE NOTES" / "FORMAT"
+  char hero[20] = {};      // "DELETE?" / "WIPE NOTES" / "FORMAT" / "UNPAIR?"
   char line1[24] = {};     // the note's stamp / "%u NOTES GO" / "THE SD CARD"
   char line2[24] = {};     // what else goes: empty for a delete
   const char* hold = nullptr; // the legend: "HOLD: delete" / "HOLD: wipe" / "HOLD: format"
   const char* why = nullptr;  // Snapshot::busy, or null when the hold is allowed
+  // The body size is the default. An unpair states a 17-column address, which
+  // the body size (12 px a column) would run off the page, so those two lines
+  // drop to scale 1 - the size the menu's rows already use.
+  uint8_t line_scale = 2;
 };
 bool build_confirm(const Snapshot& snap, uint16_t index, ConfirmView& out);
 // The two rows that empty the device: the count for a wipe, and for a format
@@ -267,6 +293,29 @@ struct BusyView {
   bool bar = false;
 };
 BusyView build_busy(bool format, uint32_t done, uint32_t total);
+// The Unpair screen: the bonded phones, one address a row, with the name beside
+// it when the table knew one. `title` and the count line are the screen's own;
+// an empty table is a line, never a blank page.
+struct PeerRowView {
+  char addr[18] = {};   // "A4:C1:38:7F:12:9B", 17 columns
+  char name[13] = {};   // empty when the radio never knew one
+};
+struct UnpairView {
+  uint8_t count = 0;       // rows below
+  uint8_t selected = 0;    // index into the table
+  bool empty = false;      // the table holds nothing
+  char count_line[24] = {}; // "2 PAIRED"; empty when there is nothing to count (the slot holds any %u)
+  PeerRowView row[kMaxPeerRows];
+};
+UnpairView build_unpair(const Snapshot& snap, uint8_t selected);
+// The question one phone gets: its address, the name when known, and the
+// runtime's reason when the hold would be refused. False when the index is past
+// the table (a phone unpaired from the console while the question was up), so the
+// frame can fall back to the list rather than asking about nobody.
+bool build_unpair_confirm(const Snapshot& snap, uint8_t index, ConfirmView& out);
+// "A4:C1:38:7F:12:9B" from the six octets, in print order. 18 columns with the
+// terminator.
+void format_peer_addr(const Peer& peer, char out[18]);
 
 struct RecordingView {
   uint32_t elapsed_s = 0;

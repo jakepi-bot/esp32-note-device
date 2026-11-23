@@ -397,6 +397,47 @@ BusyView build_busy(bool format, uint32_t done, uint32_t total) {
   return out;
 }
 
+void format_peer_addr(const Peer& peer, char out[18]) {
+  // Six octets, upper case, colons between: the form a phone's own settings show
+  // and the form the pairing ask already put on this glass.
+  static const char kHex[] = "0123456789ABCDEF";
+  for (int i = 0; i < 6; ++i) {
+    out[i * 3 + 0] = kHex[(peer.addr[i] >> 4) & 0x0F];
+    out[i * 3 + 1] = kHex[peer.addr[i] & 0x0F];
+    out[i * 3 + 2] = i == 5 ? '\0' : ':';
+  }
+  out[17] = '\0';
+}
+
+UnpairView build_unpair(const Snapshot& snap, uint8_t selected) {
+  UnpairView view;
+  view.count = snap.peer_count > kMaxPeerRows ? kMaxPeerRows : snap.peer_count;
+  view.empty = view.count == 0;
+  if (view.empty) return view;
+  view.selected = selected < view.count ? selected : static_cast<uint8_t>(view.count - 1);
+  for (uint8_t i = 0; i < view.count; ++i) {
+    format_peer_addr(snap.peers[i], view.row[i].addr);
+    copy_out(snap.peers[i].name, view.row[i].name, sizeof view.row[i].name);
+  }
+  std::snprintf(view.count_line, sizeof view.count_line, unpair::kCount, static_cast<unsigned>(view.count));
+  return view;
+}
+
+bool build_unpair_confirm(const Snapshot& snap, uint8_t index, ConfirmView& out) {
+  if (index >= snap.peer_count) return false;
+  out = ConfirmView{};
+  copy_out(unpair::kConfirmHero, out.hero, sizeof out.hero);
+  // The address is the subject - it is the one thing a person can compare with
+  // the phone in their hand. The name, when the radio knew one, is the second
+  // line; when it did not, the address is the whole sentence.
+  format_peer_addr(snap.peers[index], out.line1);
+  copy_out(snap.peers[index].name, out.line2, sizeof out.line2);
+  out.hold = unpair::kHold;
+  out.line_scale = 1;  // 17 columns at the body size would run off the page
+  if (snap.busy[0] != '\0') out.why = snap.busy;
+  return true;
+}
+
 // The Phone screen: the port's phase as one word, the window's clock, and the
 // pairing table. A refusal is a word too - "PAIRING FULL" is the reason, in the
 // same slot the state goes in, so the screen never says nothing (t_9972e2a1).

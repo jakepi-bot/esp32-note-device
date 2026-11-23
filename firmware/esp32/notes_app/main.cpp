@@ -159,8 +159,9 @@ bool run_effect(hgp::notesui::Effect effect, uint16_t note) {
     case Effect::PairingAllow:
     case Effect::PairingRefuse:
     case Effect::DeleteNote:
+    case Effect::UnpairPeer:
       (void)note;
-      return false;  // the screens' own: playback, the ports' windows, the card
+      return false;  // the screens' own: playback, the ports' windows, the card, the bond store
     case Effect::OpenPhoneWindow:
     case Effect::ClosePhoneWindow:
       // The screens' own too, and the one this bench could not see: the runtime

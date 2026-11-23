@@ -43,6 +43,10 @@ void ScreenApp::begin(const Snapshot& snapshot) {
   snap_ = snapshot;
   state_ = State{};
   state_.note_count = snap_.note_count;
+  // The bonded-phone table is part of the snapshot the machine boots with: the
+  // key map reads its count, so it has to be here and not only on the first
+  // publish (a BOOT tap on the list would otherwise wrap a table of zero).
+  state_.peer_count = snap_.peer_count > kMaxPeerRows ? kMaxPeerRows : snap_.peer_count;
   open_note_ = 0;
   booted_ = true;
   bar_moves_ = 0;
@@ -56,6 +60,15 @@ void ScreenApp::clamp_cursor() {
     state_.note = static_cast<uint16_t>(snap_.note_count - 1);
   }
   if (open_note_ >= snap_.note_count) open_note_ = snap_.note_count ? snap_.note_count - 1 : 0;
+  // The bonded-phone cursor moves with the table the same way: a phone removed
+  // by the confirm's hold (or from the console) must not leave the bar past the
+  // last row, where the next BOOT tap would wrap from a selection nobody sees.
+  state_.peer_count = snap_.peer_count > kMaxPeerRows ? kMaxPeerRows : snap_.peer_count;
+  if (state_.peer_count == 0) {
+    state_.peer = 0;
+  } else if (state_.peer >= state_.peer_count) {
+    state_.peer = static_cast<uint8_t>(state_.peer_count - 1);
+  }
 }
 
 Outcome ScreenApp::publish(const Snapshot& snapshot, uint16_t dirty) {
@@ -142,6 +155,8 @@ Outcome ScreenApp::run(Action action, uint32_t now_ms) {
 
     case Action::MenuNext:
     case Action::NextNoteAction:
+    case Action::OpenUnpairConfirm:
+    case Action::NextPeer:
       return stay(Refresh::Partial);
 
     case Action::NextNote:
@@ -200,9 +215,14 @@ Outcome ScreenApp::run(Action action, uint32_t now_ms) {
           out.draw = true;
           return out;
         case MenuItem::UnpairPhones:
-          // The row is here and its behaviour is the next task's: selecting it
-          // does nothing yet rather than pretending to have unpaired a phone.
-          return stay(Refresh::None);
+          // The row's own list (ui_peers.hpp): the phones the radio's bond store
+          // holds, one address a row, and a question per phone. It used to be
+          // inert; a person with three lost phones had no way out of the table.
+          state_.go(Screen::UnpairList);
+          state_.peer = 0;
+          out.refresh = Refresh::Full;
+          out.draw = true;
+          return out;
         case MenuItem::Back:
         case MenuItem::Count:
           state_.go(Screen::Home);
@@ -281,6 +301,17 @@ Outcome ScreenApp::run(Action action, uint32_t now_ms) {
       out.draw = true;
       return out;
 
+    case Action::UnpairPeer:
+      // ui_keys has already put the glass back on the list. The effect forgets
+      // this one phone (the index, not the address: the adapter reads the same
+      // table the question named), and the publish that follows draws the list
+      // one row shorter.
+      out.effect = Effect::UnpairPeer;
+      out.peer = state_.peer;
+      out.refresh = Refresh::Full;
+      out.draw = true;
+      return out;
+
     case Action::Play:
       if (open_note_ >= snap_.note_count) return stay(Refresh::None);
       state_.playing = true;
@@ -339,13 +370,15 @@ Outcome ScreenApp::run(Action action, uint32_t now_ms) {
 }
 
 Outcome ScreenApp::press(Key key, uint32_t now_ms) {
-  // The busy guard, before ui_keys moves anything: a wipe or a format is refused
-  // while the device is recording or uploading, and the confirm stays up with
-  // the runtime's reason on it (a recording must not be formatted out from under
-  // itself). The frame is already showing the reason - the snapshot's busy line
-  // was published when it changed - so a refused hold costs no refresh.
+  // The busy guard, before ui_keys moves anything: a wipe, a format or an unpair
+  // is refused while the device is recording or uploading, and the question stays
+  // up with the runtime's reason on it (a recording must not be formatted out from
+  // under itself, and a phone must not lose its keys mid-upload). The frame is
+  // already showing the reason - the snapshot's busy line was published when it
+  // changed - so a refused hold costs no refresh.
   if (key == Key::BootHold &&
-      (state_.screen == Screen::ConfirmWipe || state_.screen == Screen::ConfirmFormat) &&
+      (state_.screen == Screen::ConfirmWipe || state_.screen == Screen::ConfirmFormat ||
+       state_.screen == Screen::ConfirmUnpair) &&
       snap_.busy[0] != '\0') {
     return stay(Refresh::None);
   }
@@ -676,6 +709,8 @@ Window ScreenApp::window() const {
     case Screen::ConfirmWipe:
     case Screen::ConfirmFormat:
     case Screen::Wiping:
+    case Screen::UnpairList:
+    case Screen::ConfirmUnpair:
       // Their glass carries counts and copy, never a note's stamp.
       return w;
   }
@@ -732,6 +767,17 @@ ScreenDraw ScreenApp::frame() const {
       break;
     case Screen::Wiping:
       d.busy = build_busy(card_format_, card_done_, card_total_);
+    case Screen::UnpairList:
+      d.unpair = build_unpair(snap_, state_.peer);
+      break;
+    case Screen::ConfirmUnpair:
+      // The phone this question is about. If the table lost it between the press
+      // and the frame (the console's `phone forget`), the list is the honest
+      // page - the question would otherwise name nobody.
+      if (!build_unpair_confirm(snap_, state_.peer, d.confirm)) {
+        d.screen = Screen::UnpairList;
+        d.unpair = build_unpair(snap_, state_.peer);
+      }
       break;
     case Screen::Playing: {
       uint32_t duration = snap_.play_total_s;

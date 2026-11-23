@@ -164,6 +164,7 @@ void format_capacity(uint64_t bytes, char out[12]) {
 HomeView build_home(const Snapshot& snap) {
   HomeView view;
   view.wifi_up = snap.wifi_up;
+  view.wifi_on = snap.wifi_on;
   view.battery_pct = snap.battery_pct;
   view.external = snap.external;
 
@@ -199,6 +200,7 @@ HomeView build_home(const Snapshot& snap) {
   // are copies, so the frame stays self-contained like the rest of the snapshot.
   if (snap.clock_set && snap.clock_text[0] != '\0') copy_out(snap.clock_text, view.clock, sizeof view.clock);
   view.bt = snap.bt;
+  view.wifi_on = snap.wifi_on;
 
   // One line, context first, and never a restatement of the band. A notice is
   // what happened just now (a discarded capture, nothing saved), so it outranks

@@ -25,6 +25,7 @@ namespace hgp::notesui {
 // What the ports answer that the screens cache. Read on an event, never while a
 // frame is drawn (docs/notes-ui-spec.md §15.4).
 struct Facts {
+  bool wifi_on = false;        // the station's radio is up (associated or not)
   bool wifi_up = false;        // the station holds an association
   bool clock_set = true;       // the clock has been set at least once
   Stamp clock;                 // the wall clock's local fields; `valid` is the answer

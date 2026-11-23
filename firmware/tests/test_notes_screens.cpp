@@ -1009,25 +1009,35 @@ TEST("band: the clock takes its own slot and the glyphs keep theirs") {
   CHECK(std::string(build_home(with_clock).clock) == "14:02");
 }
 
-TEST("band: the Bluetooth mark is the radio's answer, in the Wi-Fi box") {
+TEST("band: the Wi-Fi box shows the station's three states, and never Bluetooth") {
+  // Off, on-but-not-associated, associated: three pictures, so a person can tell
+  // "the radio is off" from "it is trying" without a console (Jake, 2026-11-22).
   Snapshot off = band_seed();
-  Snapshot advertising = band_seed();
-  advertising.bt = BtState::Advertising;
-  Snapshot connected = band_seed();
-  connected.bt = BtState::Connected;
+  off.wifi_up = false;                 // the seed is associated; this one is not
+  off.wifi_on = false;
+  Snapshot on = band_seed();
+  on.wifi_up = false;
+  on.wifi_on = true;                   // up, not associated
+  Snapshot up = band_seed();
+  up.wifi_on = true;
+  up.wifi_up = true;
 
   const uint64_t off_box = home_band_hash(off, 136, 8, 153, 24);
-  const uint64_t adv_box = home_band_hash(advertising, 136, 8, 153, 24);
-  const uint64_t on_box = home_band_hash(connected, 136, 8, 153, 24);
-  CHECK(off_box != adv_box);
+  const uint64_t on_box = home_band_hash(on, 136, 8, 153, 24);
+  const uint64_t up_box = home_band_hash(up, 136, 8, 153, 24);
   CHECK(off_box != on_box);
-  CHECK(adv_box != on_box);  // advertising is thin, connected is 2 px
+  CHECK(off_box != up_box);
+  CHECK(on_box != up_box);
 
-  // Off is the Wi-Fi glyph, in both of its states: the radio's mark never
-  // silently stands in for a link that is down.
-  Snapshot wifi_down = off;
-  wifi_down.wifi_up = false;
-  CHECK(off_box != home_band_hash(wifi_down, 136, 8, 153, 24));
+  // Bluetooth never takes this box: the phone window has its own screen, and a
+  // board on battery used to show the advertising rune here instead of the
+  // network's state, which is what made the Wi-Fi mark "disappear".
+  Snapshot bluetooth_busy = off;
+  bluetooth_busy.bt = BtState::Connected;
+  CHECK(home_band_hash(bluetooth_busy, 136, 8, 153, 24) == off_box);
+  Snapshot bluetooth_adv = up;
+  bluetooth_adv.bt = BtState::Advertising;
+  CHECK(home_band_hash(bluetooth_adv, 136, 8, 153, 24) == up_box);
 
   // Nothing bleeds out of the box into the 8 px gap the battery starts after.
   static uint16_t fb[200 * 200];
@@ -1035,7 +1045,7 @@ TEST("band: the Bluetooth mark is the radio's answer, in the Wi-Fi box") {
   hg::Canvas canvas(fb, 200, 200, false);
   ScreenDraw frame;
   frame.screen = Screen::Home;
-  frame.home = build_home(connected);
+  frame.home = build_home(up);
   draw(canvas, frame);
   for (int y = 8; y < 24; ++y) {
     for (int x = 152; x < 160; ++x) CHECK(fb[y * 200 + x] != 0x0000);

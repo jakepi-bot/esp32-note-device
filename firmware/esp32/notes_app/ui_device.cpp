@@ -131,6 +131,7 @@ void NotesUi::begin(const Ports& ports) {
   std::snprintf(seed.device, sizeof seed.device, "%s", device_name_.c_str());
   seed.note_max_s = ports_.config != nullptr ? static_cast<uint32_t>(ports_.config->note_max_s()) : 86400;
   seed.wifi_up = facts_.wifi_up;
+  seed.wifi_on = facts_.wifi_on;
   seed.clock_set = facts_.clock_set;
   if (facts_.clock.valid) notesui::format_clock(facts_.clock, seed.clock_text);
   seed.bt = facts_.bt;
@@ -153,6 +154,9 @@ notesui::Facts NotesUi::read_facts() const {
   // The slow facts are carried over: only poll_facts(slow) re-reads them.
   notesui::Facts f = facts_;
   f.wifi_up = ports_.wifi != nullptr && !ports_.wifi->current().empty();
+  // The radio's own answer, not the window's: a station that is up but still
+  // joining is "on" and must not look like "off" (Jake, 2026-11-22).
+  f.wifi_on = ports_.wifi != nullptr && ports_.wifi->radio_running();
   hg::WallTime wall;
   const bool have_time = ports_.system != nullptr && ports_.system->wall_time(wall);
   f.clock_set = have_time;

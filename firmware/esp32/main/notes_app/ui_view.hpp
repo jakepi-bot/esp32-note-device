@@ -47,6 +47,11 @@ struct NoteStub {
 // whole thing can be built on a stack or handed to a test.
 struct Snapshot {
   bool card = true;             // Store::ensure() succeeded
+  // The station's three states, as the band shows them: off, on but not
+  // associated (`wifi_on`), and associated (`wifi_up`). A board on battery used
+  // to show the Bluetooth rune here instead, which said nothing about the
+  // network (Jake, 2026-11-22).
+  bool wifi_on = false;
   bool wifi_up = false;
   bool clock_set = true;        // the clock has been set at least once
   // "14:02", the minute the clock reads (t_3beb371a §4). Empty when the clock
@@ -175,7 +180,8 @@ struct HomeView {
   char band[14] = {};            // "3 TO SEND" / "ALL SENT"; empty = none
   char sub[18] = {};             // "LAST 14:02"; empty = none
   char clock[6] = {};            // "14:02"; empty when the clock is not set
-  BtState bt = BtState::Off;     // the radio's mark, in the Wi-Fi glyph's slot
+  BtState bt = BtState::Off;     // the Bluetooth window: the Phone screen only
+  bool wifi_on = false;          // the station is up, associated or not
   bool wifi_up = false;
   int8_t battery_pct = -1;
   bool external = false;

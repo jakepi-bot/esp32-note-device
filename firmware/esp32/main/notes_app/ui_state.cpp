@@ -149,6 +149,7 @@ Outcome UiState::set_facts(const Facts& facts, uint32_t now_ms) {
   if (about_dirty) dirty |= DirtyAbout;
 
   snap_.wifi_up = facts.wifi_up;
+  snap_.wifi_on = facts.wifi_on;
   snap_.clock_set = facts.clock_set;
   std::snprintf(snap_.clock_text, sizeof snap_.clock_text, "%s", clock_text);
   snap_.bt = facts.bt;

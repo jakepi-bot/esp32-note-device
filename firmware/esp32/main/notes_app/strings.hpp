@@ -49,6 +49,9 @@ inline constexpr const char* kNoAudioSaved = "NO AUDIO SAVED";
 // Footers: one binding each, two only where both keys are load-bearing (§3.3).
 namespace key {
 inline constexpr const char* kBootRecord = "BOOT: record";
+// Home's hint line, above the rule: the menu is a hold, and nothing on the glass
+// said so (Jake, 2026-11-22).
+inline constexpr const char* kHoldMenuHint = "hold BOOT for menu";
 inline constexpr const char* kBootNext = "BOOT: next";
 inline constexpr const char* kBootStop = "BOOT: stop";
 inline constexpr const char* kPwrSelect = "PWR: select";

@@ -83,7 +83,7 @@ void row(hg::Canvas& c, int y, const char* label, const char* value, bool select
 
 void home_face(hg::Canvas& c, const ScreenDraw& d) {
   const HomeView& v = d.home;
-  draw_band(c, v.band, v.clock, v.wifi_up, v.bt, v.battery_pct, v.external);
+  draw_band(c, v.band, v.clock, v.wifi_on, v.wifi_up, v.battery_pct, v.external);
   rule(c, grid::kRuleY);
   const int bottom = grid::kRuleOneLine;  // one-line footer on Home
   const int group_h = 21 + 12 + 14;
@@ -94,12 +94,16 @@ void home_face(hg::Canvas& c, const ScreenDraw& d) {
     // Growth-only, so the bar leaves no residue at all (§15.3).
     draw_progress(c, top + group_h + 16, v.bar_pct);
   }
+  // The menu is a BOOT hold and nothing on the glass said so: one hint line,
+  // scale 1, right-aligned above the rule so the footer keeps its shape.
+  c.text(grid::kLeft + grid::kWidth - text_width(key::kHoldMenuHint, 1),
+         grid::kRuleOneLine - 11, key::kHoldMenuHint, 1, kInk);
   draw_footer(c, key::kBootRecord);
 }
 
 void recording_face(hg::Canvas& c, const ScreenDraw& d) {
   const HomeView& band = d.home;  // the queue count of the previous notes
-  draw_band(c, band.band, band.clock, band.wifi_up, band.bt, band.battery_pct, band.external);
+  draw_band(c, band.band, band.clock, band.wifi_on, band.wifi_up, band.battery_pct, band.external);
   rule(c, grid::kRuleY);
   text_at(c, grid::kLeft, 38, recording::kLabel, grid::kScale, kInk);
   if (d.recording.queued) {
@@ -179,7 +183,7 @@ void confirm_face(hg::Canvas& c, const ScreenDraw& d) {
 
 void playing_face(hg::Canvas& c, const ScreenDraw& d) {
   const HomeView& band = d.home;
-  draw_band(c, band.band, band.clock, band.wifi_up, band.bt, band.battery_pct, band.external);
+  draw_band(c, band.band, band.clock, band.wifi_on, band.wifi_up, band.battery_pct, band.external);
   rule(c, grid::kRuleY);
   text_at(c, grid::kLeft, 40, d.playing.when, grid::kScale, kInk);
   char elapsed[10], total[13];
@@ -233,7 +237,7 @@ void about_face(hg::Canvas& c, const ScreenDraw& d) {
 
 }  // namespace
 
-void draw_band(hg::Canvas& c, const char* queue, const char* clock, bool wifi_up, BtState bt,
+void draw_band(hg::Canvas& c, const char* queue, const char* clock, bool wifi_on, bool wifi_up,
                int8_t battery_pct, bool external) {
   // The band is full at scale 2: the queue slot runs to 130 px, then a 16 px
   // glyph and a 28 px battery to the right margin. Adding a clock meant choosing
@@ -244,11 +248,18 @@ void draw_band(hg::Canvas& c, const char* queue, const char* clock, bool wifi_up
   if (clock != nullptr && clock[0] != '\0') {
     c.text(grid::kGlyphX - 6 - text_width(clock, 1), grid::kBandY + 3, clock, 1, kInk);
   }
-  const uint8_t* mark = bt == BtState::Connected    ? kRuneConnected
-                        : bt == BtState::Advertising ? kRuneAdvertising
-                        : wifi_up                    ? kWifiUp
-                                                     : kWifiCut;
-  c.bitmap1(grid::kGlyphX, grid::kBandY, 16, 15, mark, kInk);
+  // Wi-Fi owns this slot, in its three states: associated, up but not
+  // associated (the rune with the cut), and off (no rune at all - the slot is
+  // cleared, so "off" is a blank there rather than a different little icon).
+  // Bluetooth is the Phone screen's business and never appears on Home
+  // (Jake, 2026-11-22).
+  if (wifi_up) {
+    c.bitmap1(grid::kGlyphX, grid::kBandY, 16, 15, kWifiUp, kInk);
+  } else if (wifi_on) {
+    c.bitmap1(grid::kGlyphX, grid::kBandY, 16, 15, kWifiCut, kInk);
+  } else {
+    c.fill_rect(grid::kGlyphX, grid::kBandY, 16, 15, kPaper);
+  }
   draw_battery(c, 160, grid::kBandY, battery_pct, external);
 }
 

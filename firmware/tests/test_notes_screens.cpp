@@ -1115,6 +1115,21 @@ TEST("band: the clock takes its own slot and the glyphs keep theirs") {
   CHECK(std::string(build_home(with_clock).clock) == "14:02");
 }
 
+TEST("pairing: a second ask does not trap the screen on the question") {
+  // The bench hit this with a real phone: an ask arrived, was answered, and a
+  // second ask landed before the screen left, so after_pairing became Pairing
+  // and no key could get off it (2026-11-22).
+  ScreenApp app;
+  Snapshot snap = band_seed();
+  app.begin(snap);
+  app.pairing_ask(0);
+  CHECK(app.screen() == Screen::Pairing);
+  app.pairing_ask(0);                       // a second ask, same screen
+  app.pairing_answer(true);
+  CHECK(app.screen() == Screen::Home);      // not Pairing again
+  CHECK(app.screen() != Screen::Pairing);
+}
+
 TEST("band: the Wi-Fi box shows the station's three states, and never Bluetooth") {
   // Off, on-but-not-associated, associated: three pictures, so a person can tell
   // "the radio is off" from "it is trying" without a console (Jake, 2026-11-22).

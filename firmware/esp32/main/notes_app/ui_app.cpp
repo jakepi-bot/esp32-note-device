@@ -767,6 +767,7 @@ ScreenDraw ScreenApp::frame() const {
       break;
     case Screen::Wiping:
       d.busy = build_busy(card_format_, card_done_, card_total_);
+      break;
     case Screen::UnpairList:
       d.unpair = build_unpair(snap_, state_.peer);
       break;

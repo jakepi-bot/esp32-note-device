@@ -9,11 +9,17 @@ uint8_t wrap(uint8_t value, uint8_t count) { return count == 0 ? 0 : static_cast
 }  // namespace
 
 void show_pairing_ask(State& state, Screen previous) {
-  state.after_pairing = previous;
+  // A second ask while the first is still on the glass must not make the screen
+  // its own way back: after_pairing would become Pairing, so every answer would
+  // land on the ask again and the device could never leave it (the bench's
+  // stuck 'screen pairing', 2026-11-22).
+  if (previous != Screen::Pairing) state.after_pairing = previous;
   state.go(Screen::Pairing);
 }
 
-void answer_pairing(State& state) { state.go(state.after_pairing); }
+void answer_pairing(State& state) {
+  state.go(state.after_pairing == Screen::Pairing ? Screen::Home : state.after_pairing);
+}
 
 Action press_power(State& state) {
   switch (state.screen) {

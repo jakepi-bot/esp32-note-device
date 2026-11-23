@@ -31,6 +31,16 @@ inline constexpr int kGlyphX = 136;      // the Wi-Fi / Bluetooth box (§3.2)
 inline constexpr int kRuleY = 27;        // the rule under the band
 inline constexpr int kRowTop = 32;       // zone B, first row
 inline constexpr int kRowPitch = 18;
+// The menu is nine rows now, and nine at kRowPitch would end at 176 - past the
+// two-line footer's rule at 144 and the ink limit both. The design's own rule
+// (§5.1: six rows at 18 px, the footer's two lines are the rail) leaves one way
+// to keep the key legend: the labels drop to scale 1 and the rows to a 12 px
+// pitch, which closes the column at 137 with the bar and keeps 6 px of paper
+// under it. The menu is the one screen where a smaller label is still a choice
+// between words a person reads; the footer's bindings are how they move.
+inline constexpr int kMenuPitch = 12;
+inline constexpr int kMenuBar = 11;
+inline constexpr int kMenuLabelScale = 1;
 inline constexpr int kRuleTwoLine = 144;  // rule above a two-line footer
 inline constexpr int kRuleOneLine = 162;  // rule above a one-line footer
 inline constexpr int kFooterTwoA = 152;

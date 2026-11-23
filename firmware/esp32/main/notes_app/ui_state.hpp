@@ -90,6 +90,11 @@ class UiState {
   void set_upload_failed();
   void set_play(uint32_t pos_s, uint32_t total_s);
 
+  // Why the device cannot be emptied right now, in the runtime's words (empty
+  // when it is idle). Adopted here, not asked for by the frame: the two confirms
+  // draw it, and the busy guard reads it. Returns whether the line moved.
+  bool set_busy(std::string_view reason);
+
   // A one-line reason for Home's slot under the hero (a capture the stop
   // discarded for holding no audio), for `ttl_ms` and then no longer: the
   // counts line comes back when it lapses, which tick() watches for. It is

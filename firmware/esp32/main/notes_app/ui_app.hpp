@@ -40,6 +40,8 @@ enum class Effect : uint8_t {
   PairingAllow,    // BOOT on the ask: let the phone in (port_ble, then leave)
   PairingRefuse,   // PWR on the ask: reject it (port_ble, then leave)
   DeleteNote,
+  WipeNotes,       // every note, both folders: the store's wipe, the settings stay
+  FormatCard,      // the volume itself goes: every note and whatever else it held
 };
 
 // The refresh class, straight from the spec's transition table (§13.2).

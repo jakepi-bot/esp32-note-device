@@ -16,6 +16,8 @@
 //   NoteList   open the note      (nothing)    next note          back to menu
 //   NoteAction select the action  (nothing)    next action        back to the list
 //   Confirm    keep the note      (nothing)    keep the note      delete the note
+//   ConfirmWipe  cancel, menu     (nothing)    cancel, menu       wipe every note
+//   ConfirmFormat cancel, menu    (nothing)    cancel, menu       format the card
 //   Playing    stop, to the list  (nothing)    stop               stop
 //   Pairing    refuse the phone   (nothing)    allow the phone    (nothing)
 //   Phone      close the window   (nothing)    (nothing)          back to the menu
@@ -37,6 +39,8 @@ enum class Screen : uint8_t {
   NoteList,
   NoteAction,
   ConfirmDelete,
+  ConfirmWipe,    // empty the device: every note, the card left as filesystem
+  ConfirmFormat,  // format the SD card: every note and the card's log
   Playing,
   Pairing,
   Phone,  // the Bluetooth window a person opened from the menu
@@ -44,8 +48,11 @@ enum class Screen : uint8_t {
   Back,  // internal: "leave this screen", resolved by the caller
 };
 
-// The menu, in order. Back is last so one hold always leaves.
-enum class MenuItem : uint8_t { Notes, SyncNow, Phone, Wifi, About, Back, Count };
+// The menu, in order. Back is last so one hold always leaves. The three rows
+// before it are the destructive ones: wipe every note, format the card, and
+// (the follow-on task) drop every paired phone - each behind its own confirm,
+// because a hold on the row must never be the thing that empties the device.
+enum class MenuItem : uint8_t { Notes, SyncNow, Phone, Wifi, About, WipeNotes, FormatCard, UnpairPhones, Back, Count };
 
 inline constexpr uint8_t kMenuCount = static_cast<uint8_t>(MenuItem::Count);
 
@@ -69,6 +76,11 @@ enum class Action : uint8_t {
   AskDelete,
   DeleteNote,
   KeepNote,
+  // The two rows that empty the device, and their cancels. A cancel is
+  // Action::Back: ui_keys has already put the screen on the menu, and there is
+  // nothing outside the glass to undo.
+  WipeNotes,
+  FormatCard,
   Play,
   StopPlay,         // BOOT: stop and stay on the note's own screen
   StopPlayToList,   // PWR: stop and leave the player for the list

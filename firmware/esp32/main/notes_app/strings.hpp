@@ -60,6 +60,8 @@ inline constexpr const char* kBootAllow = "BOOT: allow";
 inline constexpr const char* kPwrRefuse = "PWR: refuse";
 inline constexpr const char* kHoldDiscard = "HOLD: discard";
 inline constexpr const char* kHoldDelete = "HOLD: delete";
+inline constexpr const char* kHoldWipe = "HOLD: wipe";
+inline constexpr const char* kHoldFormat = "HOLD: format";
 inline constexpr const char* kHoldBack = "HOLD: back";
 inline constexpr const char* kHoldNothing = "HOLD: nothing";
 inline constexpr const char* kTapKeep = "TAP: keep";
@@ -117,6 +119,15 @@ inline constexpr const char* kFailed = "failed";
 
 namespace confirm {
 inline constexpr const char* kHero = "DELETE?";
+// The menu's two destructive rows. Scale 3 is 195 px wide at 11 columns, so the
+// hero stays at ten or fewer and the rest of the sentence goes on the body
+// lines, where the count and what is lost are stated plainly.
+inline constexpr const char* kWipeHero = "WIPE NOTES";
+inline constexpr const char* kWipeCount = "%u NOTES GO";
+inline constexpr const char* kWipeKeeps = "THE CARD STAYS";
+inline constexpr const char* kFormatHero = "FORMAT";
+inline constexpr const char* kFormatTarget = "THE SD CARD";
+inline constexpr const char* kFormatLoss = "NOTES AND LOG GO";
 }  // namespace confirm
 
 namespace pairing {

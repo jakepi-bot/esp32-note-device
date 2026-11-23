@@ -130,6 +130,18 @@ bool run_effect(hgp::notesui::Effect effect, uint16_t note) {
     case Effect::SyncNow:
       g_runtime.sync_now(g_system.now_ms());
       return true;
+    case Effect::WipeNotes: {
+      // The menu's Wipe notes, after its confirm: the runtime empties the store
+      // and republishes the counts, so the frame that follows reads 0 NOTES.
+      const std::string answer = g_runtime.on_action(static_cast<int>(Action::WipeNotes));
+      if (answer.empty()) ESP_LOGW(TAG, "the runtime refused the wipe: its reason is above");
+      return !answer.empty();
+    }
+    case Effect::FormatCard: {
+      const std::string answer = g_runtime.on_action(static_cast<int>(Action::FormatCard));
+      if (answer.empty()) ESP_LOGW(TAG, "the runtime refused the format: its reason is above");
+      return !answer.empty();
+    }
     case Effect::PowerOff:
       // The screens' power-off from Home. The sleeping face goes on the panel
       // first: this is the last frame the device draws, and the e-paper keeps
@@ -631,7 +643,8 @@ extern "C" void app_main(void) {
   // started there reaches it.
   g_ui.set_capture_probe({[] { return g_runtime.recording(); }, [] { return g_runtime.record_elapsed_s(); },
                           [] { return g_runtime.recording_queued(); }, [] { return g_runtime.record_cap_s(); },
-                          [] { return g_runtime.record_cap_bytes(); }});
+                          [] { return g_runtime.record_cap_bytes(); },
+                          [] { return g_runtime.busy_reason(); }});
   g_ui.begin(ui_ports);
 
   // The runtime's other half reaches the glass through these (QA D1): a note

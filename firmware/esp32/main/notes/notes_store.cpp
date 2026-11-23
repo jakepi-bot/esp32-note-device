@@ -295,6 +295,22 @@ uint32_t Store::erase_failed() {
   return removed;
 }
 
+uint32_t Store::wipe() {
+  // Pending, failed and sent: a person emptying the device means the card, not
+  // one folder of it. Sent goes last so a note that is also present under
+  // pending/ (locate()'s first answer) is counted once, by the state that
+  // actually holds it.
+  uint32_t removed = 0;
+  for (NoteState state : {NoteState::Pending, NoteState::Failed, NoteState::Sent}) {
+    for (const auto& id : list(state)) {
+      NoteState where = state;
+      if (!locate(id, where) || where != state) continue;
+      if (erase(id)) ++removed;
+    }
+  }
+  return removed;
+}
+
 uint32_t Store::prune_sent(size_t keep) {
   auto ids = list(NoteState::Sent);
   if (ids.size() <= keep) return 0;

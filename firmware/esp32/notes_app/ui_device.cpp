@@ -85,6 +85,8 @@ const char* effect_name(notesui::Effect effect) {
     case notesui::Effect::PairingAllow: return "a pairing answer";
     case notesui::Effect::PairingRefuse: return "a pairing refusal";
     case notesui::Effect::DeleteNote: return "a delete";
+    case notesui::Effect::WipeNotes: return "a wipe of every note";
+    case notesui::Effect::FormatCard: return "a card format";
   }
   return "an effect";
 }
@@ -97,6 +99,8 @@ const char* screen_name(notesui::Screen screen) {
     case notesui::Screen::NoteList: return "notes";
     case notesui::Screen::NoteAction: return "note";
     case notesui::Screen::ConfirmDelete: return "confirm-delete";
+    case notesui::Screen::ConfirmWipe: return "confirm-wipe";
+    case notesui::Screen::ConfirmFormat: return "confirm-format";
     case notesui::Screen::Playing: return "playing";
     case notesui::Screen::Pairing: return "pairing";
     case notesui::Screen::Phone: return "phone";
@@ -256,6 +260,20 @@ void NotesUi::poll_phone(uint32_t now_ms) {
   if (last_phone_ms_ != 0 && now_ms - last_phone_ms_ < kPhonePollMs) return;
   last_phone_ms_ = now_ms == 0 ? 1 : now_ms;
   apply(state_.set_phone(read_phone(), now_ms), now_ms);
+}
+
+// Why the device may not be emptied right now, as the runtime says it. Polled
+// with the other facts (a key or a tick), never from the draw path, and published
+// only while one of the two confirms is up: the line has no other home.
+void NotesUi::poll_busy(uint32_t now_ms) {
+  (void)now_ms;
+  if (!begun_ || !capture_probe_.busy) return;
+  const char* why = capture_probe_.busy();
+  if (!state_.set_busy(why != nullptr ? why : "")) return;
+  if (state_.screen() == notesui::Screen::ConfirmWipe ||
+      state_.screen() == notesui::Screen::ConfirmFormat) {
+    publish(notesui::DirtyQueue);
+  }
 }
 
 void NotesUi::render(notesui::Refresh refresh) {
@@ -441,6 +459,15 @@ void NotesUi::apply(const notesui::Outcome& outcome, uint32_t now_ms) {
       if (ports_.radio != nullptr) ports_.radio->answer_pairing(false);
       apply(state_.pairing_answer(false), now_ms);
       return;
+    case notesui::Effect::WipeNotes:
+    case notesui::Effect::FormatCard: {
+      // The runtime owns both (it holds the store, the mount and the mode), so
+      // this is only reached when it declined: the busy guard in the screens is
+      // what stops that, and a race here leaves the glass on Home having done
+      // nothing rather than claiming an empty card.
+      ESP_LOGW(TAG, "the runtime declined %s: nothing was emptied", effect_name(outcome.effect));
+      break;
+    }
     case notesui::Effect::DeleteNote: {
       const std::string* found_id = state_.cache().id_at(outcome.note);
       if (ports_.store == nullptr || found_id == nullptr) break;
@@ -466,6 +493,7 @@ const char* NotesUi::screen_word() const { return screen_name(state_.screen()); 
 notesui::Outcome NotesUi::press(notesui::Key key) {
   const uint32_t now = ports_.system != nullptr ? ports_.system->now_ms() : esp_timer_get_time() / 1000;
   poll_facts(now, false);  // the band is a fact, not a tick
+  poll_busy(now);          // and so is the reason a wipe or a format is refused
   const notesui::Outcome out = state_.press(key, now);
   apply(out, now);
   ESP_LOGI(TAG, "key %u -> screen %s", static_cast<unsigned>(key), screen_name(state_.screen()));
@@ -495,6 +523,10 @@ void NotesUi::tick(uint32_t now_ms) {
   // The Phone screen: a countdown and a link, the only things on the glass that
   // move without an event.
   poll_phone(now_ms);
+
+  // A capture or an upload that starts or ends while a confirm is open changes
+  // whether its hold would be refused: the line is a fact like the band's.
+  poll_busy(now_ms);
 
   // Playback publishes its position; the screen draws at 5 s (§9.2).
   if (play_state_.load() == Play::Running) {

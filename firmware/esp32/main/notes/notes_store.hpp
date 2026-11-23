@@ -83,6 +83,11 @@ class Store {
   bool erase(std::string_view id, NoteState* found = nullptr);
   // `notes delete --failed`: empties failed/. Returns how many notes went.
   uint32_t erase_failed();
+  // The menu's `Wipe notes`: every note in every state, and nothing else. The
+  // settings are NVS, not the card, so they survive - and the three state
+  // folders stay, so the store is usable the moment the wipe returns. Returns
+  // how many notes were removed.
+  uint32_t wipe();
   // Keeps the newest `keep` entries under sent/ (spec §7.2: prune over 500).
   uint32_t prune_sent(size_t keep = 500);
   // What `notes prune` swept, by state.

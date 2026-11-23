@@ -166,6 +166,11 @@ class Runtime {
   // The bytes behind that cap (free space less the reserve, never past the
   // per-note ceiling), for the face's size. 0 when no capture is running.
   uint64_t record_cap_bytes() const { return capture_.budget_bytes(); }
+  // Why the device may not be emptied right now, in the glass's words, or
+  // nullptr when it is idle. The wipe and format confirms draw it and refuse
+  // their hold while it is set: a recording or an upload must not be formatted
+  // out from under itself.
+  const char* busy_reason() const;
 
  private:
   enum class Mode : uint8_t { Idle, Recording, Syncing };
@@ -190,6 +195,11 @@ class Runtime {
   void step_window(uint32_t now);
   void run_retention(uint32_t now, bool force);
   bool ensure_sd();
+  // The menu's two destructive rows: every note (the settings stay), and the
+  // volume itself. Both refuse while `mode_` is not Idle and republish the counts
+  // so Home reads 0 NOTES. False with `error` in the runtime's words.
+  bool wipe_notes(std::string* error);
+  bool format_card(std::string* error);
   void refresh_counts();
   void refresh_battery();
   // The glass's side of a state change: one publish, no state of its own.

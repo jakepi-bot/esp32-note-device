@@ -29,6 +29,14 @@ bool ensure(bool format_if_needed = false, std::string* error = nullptr);
 // the volume will not answer. The query walks the FAT on a big card, so callers
 // ask on their own clock rather than every loop pass.
 bool space(uint64_t* total_bytes, uint64_t* free_bytes);
+// The menu's `Format card`: the volume itself, rewritten in place. Unmounts the
+// FAT volume, formats it (16 KiB clusters, the mount's own unit), and mounts it
+// back, so the card answers a fresh filesystem when this returns true. Only
+// ever reached from an explicit ask - a person's hold on the confirm - and only
+// while nothing holds the card open: every note is gone afterwards, so the
+// caller re-creates the note tree and republishes the counts. False with
+// `error` set when the card is not mounted or the format failed.
+bool format(std::string* error = nullptr);
 // Drops the mount (a write failed: the card was pulled or the volume broke).
 // The VFS refuses to unmount while a file is open, in which case the mount
 // stays and the caller keeps its failure.

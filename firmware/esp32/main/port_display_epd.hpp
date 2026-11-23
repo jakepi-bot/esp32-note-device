@@ -34,6 +34,11 @@ class EpdDisplay final : public hg::Display {
   // for a screen that takes the whole panel over from another one, where a
   // partial leaves the previous image ghosted through the new one.
   void request_full_refresh() { force_full_ = true; }
+  // How many partial updates may run before a full one clears the residue. 1
+  // means every frame is a full refresh (no ghosting, most charge); the default
+  // is 10. The bench and a demo can set it from the console.
+  void set_full_every(int n) { full_every_ = n < 1 ? 1 : (n > 100 ? 100 : n); }
+  int full_every() const { return full_every_; }
 
   // Panel updates finished since boot. Sample it, flush, then wait_idle(): the
   // number is how a caller tells "the update my frame asked for has run" from
@@ -86,6 +91,7 @@ class EpdDisplay final : public hg::Display {
   bool dirty_ = false;         // the panel does not show image_ yet
   bool partial_ = false;       // the partial waveform is armed
   int partials_ = 0;           // partial updates since the last full one
+  int full_every_ = 10;  // the .cpp's kFullEvery; the console can move it
 };
 
 }  // namespace hgp

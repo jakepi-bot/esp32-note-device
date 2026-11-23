@@ -530,6 +530,24 @@ std::string console_line(std::string_view line) {
     g_net.set_credentials(ssid, psk);
     return "@ok credentials stored; joining";
   }
+  if (line.rfind("epd ", 0) == 0) {
+    // The glass's own knob: `epd full` clears the residue now (a demo wants a
+    // clean page), `epd ghost N` trades charge for cleanliness - 1 is a full
+    // refresh every frame, 10 the default.
+    const std::string_view rest(line.substr(4));
+    if (rest == "full") {
+      g_epd.request_full_refresh();
+      return "@ok the next frame is a full refresh";
+    }
+    if (rest.rfind("ghost ", 0) == 0) {
+      const int n = std::atoi(std::string(rest.substr(6)).c_str());
+      g_epd.set_full_every(n);
+      char out[64];
+      std::snprintf(out, sizeof out, "@ok full refresh every %d partials", g_epd.full_every());
+      return out;
+    }
+    return "@error usage: epd full | epd ghost <1..100>";
+  }
   if (line.rfind("set ", 0) == 0) return set_line(line.substr(4));
   // `screen` proves what the panel is showing without a camera pointed at it;
   // one console write takes about 4,000 characters and the image is 5,000, so

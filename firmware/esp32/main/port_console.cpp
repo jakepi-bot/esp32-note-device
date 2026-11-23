@@ -99,7 +99,7 @@ void begin() {
   // page does, so a device whose NVS was wiped can be put back on the network
   // from a host (2026-11-22). Without the registration esp_console answers
   // "Unrecognized command" and the handler is never reached.
-  for (const char* name : {"about", "battery", "clock", "power", "radio", "sd", "keys", "ui", "wifi-set"}) {
+  for (const char* name : {"about", "battery", "clock", "power", "radio", "sd", "keys", "ui", "wifi-set", "epd"}) {
     esp_console_cmd_t cmd = {};
     cmd.command = name;
     cmd.help = "Notes app status (see: notes status)";

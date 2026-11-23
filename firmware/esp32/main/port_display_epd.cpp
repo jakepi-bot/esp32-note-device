@@ -73,7 +73,7 @@ constexpr int64_t kBusyTimeoutMs = 3000;
 // A partial waveform leaves residue; twenty of them is a visible ghost on a
 // band that redraws a minute apart. Ten keeps the glass clean without turning
 // every minute into a flash (2026-11-23).
-constexpr int kFullEvery = 10;
+constexpr int kFullEvery = 10;  // the default; see set_full_every()
 // The vendor's driver comments name 10 MHz as the panel's clock; a full
 // frame is 5,000 bytes either way, about 4 ms on the wire.
 constexpr int kSpiHz = 10 * 1000 * 1000;
@@ -289,7 +289,7 @@ void EpdDisplay::update_once() {
   // UI asked for a repaint after a failed transfer. The sequence mirrors the
   // vendor's boot order: full update into both RAM planes, then arm the
   // partial waveform for the updates that follow.
-  const bool full = force_full_.exchange(false) || !partial_ || partials_ >= kFullEvery;
+  const bool full = force_full_.exchange(false) || !partial_ || partials_ >= full_every_;
   if (full) {
     panel_init();
     command(0x24);

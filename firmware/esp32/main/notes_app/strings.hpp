@@ -1,9 +1,11 @@
 // Every English word the notes UI draws, and nothing else.
 //
 // This replaces the core's i18n table: there is no locale layer and no pair of
-// translated strings (docs/notes-ui-spec.md §14). The nine rows the spec marks
-// `ui_keys.cpp` stay in ui_keys.cpp - menu_label() and action_label() - so no
-// row is written twice; the renderer asks ui_keys for those.
+// translated strings (docs/notes-ui-spec.md §14). The twelve rows the spec marks
+// `ui_keys.cpp` - menu_label()'s nine and action_label()'s three - stay in
+// ui_keys.cpp, so no row is written twice; the renderer asks ui_keys for those.
+// Every string defined here has its own §14 row; a new one needs a new row
+// there, or a line here naming the row it shares and why.
 //
 // Rules the table keeps (§14.1):
 //   * uppercase means state or a key legend, sentence case means a thing you
@@ -101,8 +103,8 @@ inline constexpr const char* kHint = "asleep - hold PWR 2 s";
 }  // namespace sleep
 
 namespace menu {
-// The screen's own title. It is the one word §14's table does not list, and it
-// is drawn from here so no literal lives in the renderer.
+// The screen's own title. §14 lists it as `menu.title`; it is drawn from here
+// so no literal lives in the renderer.
 inline constexpr const char* kTitle = "MENU";
 inline constexpr const char* kWifiOn = "on";
 inline constexpr const char* kWifiOff = "off";

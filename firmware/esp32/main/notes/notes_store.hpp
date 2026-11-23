@@ -14,8 +14,10 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "notes_queue.hpp"
@@ -87,7 +89,14 @@ class Store {
   // settings are NVS, not the card, so they survive - and the three state
   // folders stay, so the store is usable the moment the wipe returns. Returns
   // how many notes were removed.
-  uint32_t wipe();
+  //
+  // `progress` is called with (done, total) once before the first note and then
+  // after each one, so a caller can put an honest count on the glass instead of
+  // a spinner. The total is known up front: every folder is listed before the
+  // first removal. A false return stops the walk (the caller is shutting down);
+  // the notes already gone stay gone, and the count returned is what was erased.
+  using WipeProgress = std::function<bool(uint32_t done, uint32_t total)>;
+  uint32_t wipe(const WipeProgress& progress = {});
   // Keeps the newest `keep` entries under sent/ (spec §7.2: prune over 500).
   uint32_t prune_sent(size_t keep = 500);
   // What `notes prune` swept, by state.

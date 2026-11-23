@@ -17,6 +17,7 @@
 // and it lands with the screens.
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -172,8 +173,26 @@ class Runtime {
   // out from under itself.
   const char* busy_reason() const;
 
+  // The wipe or the format the runtime is running, as the app task reads it
+  // (t_0070a731). A wipe of 114 notes was measured at ~90 s on this card and a
+  // 64 GB format at 22.8 s; both used to run inside the key's effect, which froze
+  // the glass on the confirm and left the console answering `device busy` for
+  // their whole length. Now a worker task does the file work and the screens poll
+  // these three calls.
+  struct CardJob {
+    bool active = false;  // the worker is running (or starting)
+    bool format = false;
+    uint32_t done = 0, total = 0;  // the wipe's count; 0 for a format
+  };
+  CardJob card_job() const;
+  // The result of the job that ended, true exactly once: consumes it, puts the
+  // runtime back to Idle and re-reads the counts so the console's own numbers are
+  // the card's. It never publishes - the caller draws the frame - so the Home
+  // frame the screens owe is the only one the panel takes.
+  bool take_card_job_result(bool* ok, std::string* error);
+
  private:
-  enum class Mode : uint8_t { Idle, Recording, Syncing };
+  enum class Mode : uint8_t { Idle, Recording, Syncing, Wiping, Formatting };
   // Why a Wi-Fi window is open. Every reason is bounded; Retry is the one that
   // reopens itself, on its own slow clock, while a note waits or the clock is
   // still unset (a device that has been offline for an hour must not need a
@@ -195,12 +214,21 @@ class Runtime {
   void step_window(uint32_t now);
   void run_retention(uint32_t now, bool force);
   bool ensure_sd();
-  // The menu's two destructive rows: every note (the settings stay), and the
-  // volume itself. Both refuse while `mode_` is not Idle and republish the counts
-  // so Home reads 0 NOTES. False with `error` in the runtime's words.
-  bool wipe_notes(std::string* error);
-  bool format_card(std::string* error);
-  void refresh_counts();
+  // The two menu rows that empty the device. Both are refused while the device
+  // is not idle and both run off the app task (t_0070a731): the call validates
+  // and starts the worker, and the screens hear the counts through card_job().
+  // False with `error` in the runtime's words.
+  bool begin_wipe(std::string* error);
+  bool begin_format(std::string* error);
+  // The worker behind them: started by the two calls above, one job at a time,
+  // and gone when it is done. It touches the card and the atomics only; `mode_`
+  // stays the app task's, and `take_card_job_result` is what puts it back.
+  static void card_job_task(void* arg);
+  void run_card_job(bool format);
+  bool start_card_job(bool format, std::string* error);
+  // `notify` false is the job-result path, which must not publish from inside
+  // the poll that took it (the Home frame is drawn by the screens).
+  void refresh_counts(bool notify = true);
   void refresh_battery();
   // The glass's side of a state change: one publish, no state of its own.
   void notify_ui();
@@ -266,6 +294,19 @@ class Runtime {
   // warning about a tight card with nothing left to delete fires once per
   // transition and not once per pass.
   bool retention_tight_ = false;
+
+  // The card job the worker is running (t_0070a731). The worker owns everything
+  // behind `finished_`: it writes the counts, the ok flag and the reason, then
+  // sets finished_ with a release store; the app task reads them after an acquire
+  // load, so the buffer below is safe to read exactly once the flag is seen.
+  std::atomic<bool> card_job_running_{false};
+  std::atomic<bool> card_job_finished_{false};
+  std::atomic<bool> card_job_ok_{false};
+  std::atomic<bool> card_job_cancel_{false};  // a shutdown asked the walk to stop
+  std::atomic<bool> card_job_format_{false};
+  std::atomic<uint32_t> card_job_done_{0};
+  std::atomic<uint32_t> card_job_total_{0};
+  char card_job_error_[48] = {};
 
   int battery_pct_ = -1;
   uint16_t battery_mv_ = 0;

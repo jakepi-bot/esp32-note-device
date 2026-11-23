@@ -295,18 +295,31 @@ uint32_t Store::erase_failed() {
   return removed;
 }
 
-uint32_t Store::wipe() {
+uint32_t Store::wipe(const WipeProgress& progress) {
   // Pending, failed and sent: a person emptying the device means the card, not
   // one folder of it. Sent goes last so a note that is also present under
   // pending/ (locate()'s first answer) is counted once, by the state that
   // actually holds it.
-  uint32_t removed = 0;
+  //
+  // The plan is built first, and that is what makes the count honest: the total
+  // the progress line states is the number of folders this call will try to
+  // remove, known before the first one goes. It also keeps locate() - three
+  // stat() calls per note - out of the removal loop, which on this card's 1-bit
+  // link is the difference between a measured 0.8 s and about 0.5 s a note.
+  std::vector<std::pair<NoteState, std::string>> plan;
   for (NoteState state : {NoteState::Pending, NoteState::Failed, NoteState::Sent}) {
     for (const auto& id : list(state)) {
       NoteState where = state;
       if (!locate(id, where) || where != state) continue;
-      if (erase(id)) ++removed;
+      plan.emplace_back(state, id);
     }
+  }
+  const uint32_t total = static_cast<uint32_t>(plan.size());
+  if (progress && !progress(0, total)) return 0;
+  uint32_t removed = 0;
+  for (const auto& entry : plan) {
+    if (erase(entry.second)) ++removed;
+    if (progress && !progress(removed, total)) break;
   }
   return removed;
 }

@@ -3,8 +3,10 @@
 #include "notes_app/runtime.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <vector>
 
 #include "battery_curve.hpp"
 #include "device_config.hpp"
@@ -13,6 +15,7 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "freertos/task.h"
 #include "hg/crypto.hpp"
 #include "hg/protocol.hpp"
 #include "notes/sd_mount.hpp"
@@ -57,6 +60,13 @@ constexpr const char* kLowSpaceError = "SD almost full, no synced notes to delet
 constexpr const char* kSeqKey = "note_seq";
 constexpr const char* kNotesUrlKey = "notes_url";
 constexpr uint16_t kDefaultNotesPort = 8766;
+// The card job's worker (t_0070a731). 6 KB is the wipe's own walk (a directory
+// scan, std::vector/std::string, and the FAT VFS's opendir/remove paths) with
+// room to spare; priority 3 keeps it above the console's own reads and below the
+// recorder's writer, so a key or a console line still lands within its 10 s
+// window while a 90 s wipe runs.
+constexpr uint32_t kCardJobStack = 6144;
+constexpr UBaseType_t kCardJobPriority = 3;
 
 uint32_t now_ms() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
@@ -223,6 +233,16 @@ void Runtime::refresh_battery() {
 void Runtime::shutdown() {
   const uint32_t now = now_ms();
   ESP_LOGW(TAG, "power off asked: flushing the card, closing the radio, dropping the latch");
+  // A wipe or a format owns the card right now: ask it to stop and give it a
+  // moment before the mount is released under it. The hardware latch cuts the
+  // rail at 2.5 s whatever this decides, so the wait is short on purpose, and a
+  // format (one esp_vfs_fat_sdcard_format call) cannot be interrupted at all -
+  // it is reported rather than hidden (t_0070a731).
+  if (card_job_running_.load()) {
+    card_job_cancel_.store(true);
+    for (int i = 0; i < 24 && card_job_running_.load(); ++i) vTaskDelay(pdMS_TO_TICKS(50));
+    ESP_LOGW(TAG, "power off with the card job %s", card_job_running_.load() ? "still running" : "stopped");
+  }
   // A recording becomes a note here: its note.json is the commit, and a partial
   // one that never reached it is the only thing that may be lost.
   if (mode_ == Mode::Recording) finish_note(now, "power off");
@@ -349,6 +369,14 @@ void Runtime::tick(uint32_t now, bool wifi_link) {
   if (net_open(now)) radio_ms_ += dt;
   if (wifi_link) net_was_up_ = true;
 
+  // A wipe or a format owns the card (t_0070a731): the counts scan, the
+  // retention pass, the Bluetooth source and the upload planner all touch the
+  // volume the worker is inside, so this pass only keeps the radio's own clock.
+  if (mode_ == Mode::Wiping || mode_ == Mode::Formatting) {
+    step_window(now);
+    return;
+  }
+
   // The phone first: a transfer is driven by the commands the link queued.
   step_ble(now);
 
@@ -465,14 +493,125 @@ const char* Runtime::busy_reason() const {
   switch (mode_) {
     case Mode::Recording: return "BUSY RECORDING";
     case Mode::Syncing: return "BUSY UPLOADING";
+    case Mode::Wiping: return "BUSY WIPING";
+    case Mode::Formatting: return "BUSY FORMATTING";
     case Mode::Idle: break;
   }
   return nullptr;
 }
 
+// ---------------------------------------------------------------------------
+// The card's two jobs
+//
+// Both used to run inside the key's effect, on the app task: a measured wipe of
+// 114 note folders took ~90 s (four remove/rmdir a note on this card's 1-bit SD
+// link) and a 64 GB format 22.8 s, and for the whole of either the glass kept the
+// confirm frame and every console command answered `@error device busy` (the
+// console waits 10 s for the app task's reply). The work is now a worker task:
+// the two begin_* calls validate, start it and return in milliseconds, and the
+// screens poll card_job() for the counts and take_card_job_result() for the end
+// (t_0070a731).
+
+Runtime::CardJob Runtime::card_job() const {
+  CardJob job;
+  job.active = card_job_running_.load();
+  job.format = card_job_format_.load();
+  job.done = card_job_done_.load();
+  job.total = card_job_total_.load();
+  return job;
+}
+
+bool Runtime::take_card_job_result(bool* ok, std::string* error) {
+  if (!card_job_finished_.load(std::memory_order_acquire)) return false;
+  card_job_finished_.store(false);
+  const bool good = card_job_ok_.load();
+  const bool format = card_job_format_.load();
+  if (ok) *ok = good;
+  if (error) *error = card_job_error_;
+  if (format) {
+    // sd_mount::format recycles its own mount when it fails: let the next
+    // ensure() rebuild it rather than trusting the flag.
+    sd_ready_ = good;
+    if (!good) {
+      sd_probe_ms_ = 0;
+      sd_probes_ = 0;
+      sd_error_ = card_job_error_[0] != '\0' ? card_job_error_ : "format failed";
+    } else {
+      sd_error_.clear();
+    }
+  }
+  if (mode_ == Mode::Wiping || mode_ == Mode::Formatting) mode_ = Mode::Idle;
+  // The screens re-read the card for the frame that follows; this only keeps the
+  // console's own numbers right, and it publishes nothing: the Home frame the
+  // screens owe is the only one the panel should take.
+  refresh_counts(false);
+  return true;
+}
+
+bool Runtime::start_card_job(bool format, std::string* error) {
+  card_job_cancel_.store(false);
+  card_job_finished_.store(false);
+  card_job_ok_.store(false);
+  card_job_format_.store(format);
+  card_job_done_.store(0);
+  card_job_total_.store(0);
+  card_job_error_[0] = '\0';
+  card_job_running_.store(true);
+  if (xTaskCreate(&Runtime::card_job_task, "hg-card-job", kCardJobStack, this, kCardJobPriority, nullptr) != pdPASS) {
+    card_job_running_.store(false);
+    if (error) *error = "no memory for the card job";
+    return false;
+  }
+  return true;
+}
+
+void Runtime::card_job_task(void* arg) { static_cast<Runtime*>(arg)->run_card_job(false); }
+
+void Runtime::run_card_job(bool /*format*/) {
+  // The flag is read here, not passed: card_job_task is a plain task entry and
+  // the job on the runtime is the only one, so the caller's parameter is the
+  // task's own and the value that matters is the one start_card_job stored.
+  const bool format = card_job_format_.load();
+  bool ok = false;
+  if (format) {
+    std::string reason;
+    const uint32_t started = now_ms();
+    ok = sd_mount::format(&reason);
+    const uint32_t spent = now_ms() - started;
+    if (!ok) {
+      std::snprintf(card_job_error_, sizeof card_job_error_, "%s", reason.empty() ? "format failed" : reason.c_str());
+      ESP_LOGW(TAG, "the card format failed after %u ms: %s", static_cast<unsigned>(spent), card_job_error_);
+    } else if (!store_.ensure()) {
+      ok = false;
+      std::snprintf(card_job_error_, sizeof card_job_error_, "%s", "the card is not writable");
+      ESP_LOGW(TAG, "formatted /sdcard in %u ms, but the note tree could not be made", static_cast<unsigned>(spent));
+    } else {
+      ESP_LOGI(TAG, "formatted /sdcard in %u ms: every note and the log are gone", static_cast<unsigned>(spent));
+    }
+  } else {
+    // The counts the glass draws, straight from the store's own walk: the total
+    // arrives with the first call (every folder is listed before the first
+    // removal), then one pair a note. A false answer stops the walk, which is
+    // what a shutdown asks for.
+    notes::Store::WipeProgress progress = [this](uint32_t done, uint32_t total) {
+      card_job_done_.store(done);
+      card_job_total_.store(total);
+      return !card_job_cancel_.load();
+    };
+    const uint32_t gone = store_.wipe(progress);
+    ok = true;  // a wipe that emptied what it could is not a failure
+    ESP_LOGI(TAG, "wiped %u notes from the card (the settings stay)", static_cast<unsigned>(gone));
+  }
+  card_job_ok_.store(ok);
+  card_job_finished_.store(true, std::memory_order_release);
+  card_job_running_.store(false, std::memory_order_release);
+  vTaskDelete(nullptr);
+}
+
 // Every note, and nothing else: the settings are NVS, and the three state folders
-// survive, so the store is usable the moment this returns.
-bool Runtime::wipe_notes(std::string* error) {
+// survive, so the store is usable the moment the worker returns. This call only
+// checks and starts it.
+bool Runtime::begin_wipe(std::string* error) {
   const char* why = busy_reason();
   if (why != nullptr) {
     if (error) *error = why;
@@ -482,47 +621,23 @@ bool Runtime::wipe_notes(std::string* error) {
     if (error) *error = sd_error_.empty() ? std::string("no card") : sd_error_;
     return false;
   }
-  const uint32_t gone = store_.wipe();
-  refresh_counts();
-  ESP_LOGI(TAG, "wiped %u notes from the card (the settings stay)", static_cast<unsigned>(gone));
+  if (!start_card_job(false, error)) return false;
+  mode_ = Mode::Wiping;
+  ESP_LOGI(TAG, "wiping every note: the card work runs on its own task (the glass says WIPING)");
   return true;
 }
 
-// The volume itself, through sd_mount's own format: the note tree is gone with
-// it, so it is re-created before the counts are read (an empty tree is what Home
-// draws the number from).
-bool Runtime::format_card(std::string* error) {
+// The volume itself, through sd_mount's own format. The worker re-creates the
+// note tree when it succeeds, so Home's number is read from a usable store.
+bool Runtime::begin_format(std::string* error) {
   const char* why = busy_reason();
   if (why != nullptr) {
     if (error) *error = why;
     return false;
   }
-  std::string reason;
-  if (!sd_mount::format(&reason)) {
-    // The format call recycles its own mount when it fails: let the next ensure()
-    // rebuild it rather than trusting sd_ready_.
-    sd_ready_ = false;
-    sd_probe_ms_ = 0;
-    sd_probes_ = 0;
-    sd_error_ = reason.empty() ? std::string("format failed") : reason;
-    if (error) *error = sd_error_;
-    notify_ui();
-    return false;
-  }
-  sd_ready_ = true;
-  sd_error_.clear();
-  if (!store_.ensure()) {
-    // A formatted card that will not take the note tree is a card problem: say
-    // so rather than reporting a wiped device.
-    sd_ready_ = false;
-    sd_error_ = "the card is not writable";
-    if (error) *error = sd_error_;
-    notify_ui();
-    return false;
-  }
-  pending_ = sent_ = failed_ = 0;
-  refresh_counts();
-  ESP_LOGI(TAG, "formatted the card: every note and the log are gone");
+  if (!start_card_job(true, error)) return false;
+  mode_ = Mode::Formatting;
+  ESP_LOGI(TAG, "formatting the card: the volume work runs on its own task (the glass says FORMATTING)");
   return true;
 }
 
@@ -563,19 +678,19 @@ std::string Runtime::on_action(int action) {
       return "power off";
     case hgp::notesui::Action::WipeNotes: {
       std::string why;
-      if (!wipe_notes(&why)) {
+      if (!begin_wipe(&why)) {
         ESP_LOGW(TAG, "wipe refused: %s", why.c_str());
         return {};
       }
-      return "wiped every note";
+      return "wiping every note";
     }
     case hgp::notesui::Action::FormatCard: {
       std::string why;
-      if (!format_card(&why)) {
+      if (!begin_format(&why)) {
         ESP_LOGW(TAG, "format refused: %s", why.c_str());
         return {};
       }
-      return "formatted the card";
+      return "formatting the card";
     }
     default:
       return {};
@@ -588,6 +703,12 @@ void Runtime::start_note(uint32_t now) {
   // log. A quiet return here is what let a tap look like a dead key.
   if (mode_ == Mode::Recording) {
     ESP_LOGW(TAG, "not recording: a recording is already running");
+    return;
+  }
+  if (mode_ == Mode::Wiping || mode_ == Mode::Formatting) {
+    // The card is being emptied on the worker task: a capture started now would
+    // write into a tree that is being removed under it (t_0070a731).
+    ESP_LOGW(TAG, "not recording: the card is being emptied");
     return;
   }
   // A new recording is not the previous stop's story: a refusal below must not
@@ -978,13 +1099,16 @@ bool Runtime::ensure_sd() {
   return true;
 }
 
-void Runtime::refresh_counts() {
+// `notify` false is the job-result path: the screens are about to draw Home from
+// their own read of the card, and a publish from inside the poll that took the
+// result would paint a Wiping frame first (t_0070a731).
+void Runtime::refresh_counts(bool notify) {
   const bool was_ready = sd_ready_;
   const uint32_t was_pending = pending_, was_sent = sent_, was_failed = failed_;
   if (!ensure_sd()) {
     // The card went away: the glass draws NO CARD, so it has to hear about it
     // even though no count moved.
-    if (was_ready) notify_ui();
+    if (was_ready && notify) notify_ui();
     return;
   }
   pending_ = store_.count(notes::NoteState::Pending);
@@ -993,7 +1117,7 @@ void Runtime::refresh_counts() {
   // A waiting note is the reason to advertise: the port opens a window for it.
   if (io_.ble) io_.ble->pending(pending_);
   // The screens cache these; a scan that found the same numbers costs no frame.
-  if (!was_ready || was_pending != pending_ || was_sent != sent_ || was_failed != failed_) notify_ui();
+  if (notify && (!was_ready || was_pending != pending_ || was_sent != sent_ || was_failed != failed_)) notify_ui();
 }
 
 void Runtime::run_retention(uint32_t now, bool force) {
@@ -1072,6 +1196,12 @@ Status Runtime::status(uint32_t now) const {
     case Mode::Syncing:
       s.phase = Status::Phase::Uploading;
       break;
+    case Mode::Wiping:
+    case Mode::Formatting:
+      // Not a status phase of its own: the card job is reported by `mode` in
+      // `notes status` and by the glass's busy face (t_0070a731).
+      s.phase = s.error.empty() ? Status::Phase::Idle : Status::Phase::Error;
+      break;
     case Mode::Idle:
       s.phase = s.error.empty() ? Status::Phase::Idle : Status::Phase::Error;
       break;
@@ -1098,6 +1228,8 @@ std::string Runtime::console(std::string_view args) {
                   notes_url().empty() ? "no url" : notes_url().c_str(),
                   mode_ == Mode::Recording ? "recording"
                   : mode_ == Mode::Syncing ? (pending_record_ ? "syncing+record-queued" : "syncing")
+                  : mode_ == Mode::Wiping ? "wiping"
+                  : mode_ == Mode::Formatting ? "formatting"
                                            : "idle",
                   static_cast<unsigned>(mode_ == Mode::Idle ? store_.pending_bytes() : meta_.bytes),
                   io_.ble && io_.ble->available() ? (io_.ble->connected() ? "link" : "ready") : "off",
@@ -1183,6 +1315,7 @@ std::string Runtime::console(std::string_view args) {
   }
   if (cmd == "delete" || cmd == "rm") {
     if (rest.empty()) return "@error usage: notes delete <note_id> | notes delete --failed";
+    if (mode_ == Mode::Wiping || mode_ == Mode::Formatting) return "@error busy: the card is being emptied";
     if (!ensure_sd()) return "@error " + (sd_error_.empty() ? std::string("no card") : sd_error_);
     if (rest == "--failed") {
       const uint32_t removed = store_.erase_failed();
@@ -1210,6 +1343,7 @@ std::string Runtime::console(std::string_view args) {
     return buf;
   }
   if (cmd == "mount") {
+    if (mode_ == Mode::Wiping || mode_ == Mode::Formatting) return "@error busy: the card is being emptied";
     sd_ready_ = false;
     sd_probe_ms_ = 0;
     return ensure_sd() ? "@ok card mounted" : "@error " + sd_error_;

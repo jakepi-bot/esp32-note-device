@@ -260,15 +260,22 @@ Outcome ScreenApp::run(Action action, uint32_t now_ms) {
       return out;
 
     case Action::WipeNotes:
-      // ui_keys has already put the screen on Home; the effect empties the store
-      // and the runtime republishes the counts, so this frame (or the publish
-      // that replaces it, on the device) reads 0 NOTES.
+      // ui_keys has put the screen on the busy face, and this effect is the
+      // runtime starting the work on its own task (t_0070a731). The frame this
+      // Outcome draws is WIPING; the counts arrive on later ticks and Home is
+      // drawn when the job ends, from the card the job left.
+      card_format_ = false;
+      card_done_ = card_total_ = 0;
+      card_pct_ = 255;
       out.effect = Effect::WipeNotes;
       out.refresh = Refresh::Full;
       out.draw = true;
       return out;
 
     case Action::FormatCard:
+      card_format_ = true;
+      card_done_ = card_total_ = 0;
+      card_pct_ = 255;
       out.effect = Effect::FormatCard;
       out.refresh = Refresh::Full;
       out.draw = true;
@@ -514,9 +521,55 @@ Outcome ScreenApp::decline(Effect effect) {
       // screens' own move back to Home stands, and the frame it asked for is
       // the one the device is really on.
       break;
+    case Effect::WipeNotes:
+    case Effect::FormatCard:
+      // The runtime would not start the job (busy after the guard passed, or no
+      // card): the busy face must not stay up over work that is not happening.
+      // Home is where the device really is, and the log says why (t_0070a731).
+      if (state_.screen == Screen::Wiping) {
+        state_.go(Screen::Home);
+        card_pct_ = 255;
+        out.refresh = Refresh::Full;
+        out.draw = true;
+      }
+      break;
     default:
       break;
   }
+  return out;
+}
+
+// The work behind a confirm, as the runtime reports it (t_0070a731). The busy
+// face is keyless and the counts only move its bar, so this is where the panel's
+// budget is spent: a 5 % step is 20 refreshes for a 114-note wipe, a per-note
+// repaint would be 114 x 0.6 s of waveform over a 90 s job.
+Outcome ScreenApp::card_job_progress(bool format, uint32_t done, uint32_t total) {
+  Outcome out;
+  if (state_.screen != Screen::Wiping) return out;
+  card_format_ = format;
+  const uint8_t pct = total == 0 ? 0 : static_cast<uint8_t>(done > total ? 100u : (done * 100u) / total);
+  if (done == card_done_ && total == card_total_) return out;  // nothing new to say
+  const bool total_known = total != card_total_;
+  const bool stepped = static_cast<int>(pct) >= static_cast<int>(card_pct_) + 5 || done >= total;
+  card_done_ = done;
+  card_total_ = total;
+  if (!total_known && !stepped) return out;
+  card_pct_ = pct;
+  out.refresh = Refresh::Partial;
+  out.draw = true;
+  return out;
+}
+
+Outcome ScreenApp::card_job_finished() {
+  Outcome out;
+  // Only the face this machine raised is its to leave: a job reported while the
+  // glass is somewhere else (a console-driven wipe on a build without the menu)
+  // costs no frame here.
+  if (state_.screen != Screen::Wiping) return out;
+  state_.go(Screen::Home);
+  card_pct_ = 255;
+  out.refresh = Refresh::Full;
+  out.draw = true;
   return out;
 }
 
@@ -622,6 +675,7 @@ Window ScreenApp::window() const {
     case Screen::About:
     case Screen::ConfirmWipe:
     case Screen::ConfirmFormat:
+    case Screen::Wiping:
       // Their glass carries counts and copy, never a note's stamp.
       return w;
   }
@@ -675,6 +729,9 @@ ScreenDraw ScreenApp::frame() const {
       break;
     case Screen::ConfirmFormat:
       d.confirm = build_format_confirm(snap_);
+      break;
+    case Screen::Wiping:
+      d.busy = build_busy(card_format_, card_done_, card_total_);
       break;
     case Screen::Playing: {
       uint32_t duration = snap_.play_total_s;

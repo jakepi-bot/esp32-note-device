@@ -130,10 +130,13 @@ Back
 - **Wipe notes** - asks first (`WIPE NOTES`, the count, `THE CARD STAYS`); BOOT-hold
   on the question removes every note from `pending/`, `sent/` and `failed/` and
   lands on Home with `0 NOTES`. The settings are NVS, so they survive, and the
-  three folders stay.
+  three folders stay. The work runs on its own task: the glass says `WIPING` with
+  the real count and a progress bar while it runs, and the console keeps
+  answering.
 - **Format card** - asks first (`FORMAT`, `THE SD CARD`, `NOTES AND LOG GO`);
   BOOT-hold rewrites the volume and re-creates the note tree. Everything on the
-  card goes.
+  card goes, behind a `FORMATTING` / `THE SD CARD` / `DO NOT UNPLUG` face for the
+  ~23 s it takes (no bar: there is no number the firmware can honestly report).
 - **Unpair phones** - the paired-phone list (the row is on the menu; the list and
   its confirm are the next change).
 - **Back** - Home.

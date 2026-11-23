@@ -779,6 +779,41 @@ The layout shifts up from §8.1 to make room for the second body line and the
 reason: hero y=42, line 1 y=72, line 2 y=90, reason y=108, rule y=118, legend
 y=126 and y=144.
 
+### 8.5 Wiping — the work behind the two confirms
+
+The hold does not do the work on the key's path. A wipe of 114 note folders was
+measured at ~90 s on this card (four `remove`/`rmdir` a note on a 1-bit SD link)
+and a 64 GB format at 22.8 s; run inside the effect, either one kept the confirm
+on the glass for its whole length and left the console answering `@error device
+busy` (the console waits 10 s for the app task's reply). So `Action::WipeNotes` /
+`Action::FormatCard` hand the screen to `Screen::Wiping` with the effect, the
+runtime starts a worker task and returns in milliseconds, and `ScreenWiping` is
+what the person watches:
+
+| Screen | Hero (scale 3) | Line 1 (scale 2) | Line 2 (scale 2) | Bar | Footer |
+|---|---|---|---|---|---|
+| `Wiping` (wipe) | `WIPING` | `%u OF %u` (then `READING CARD` before the first count) | `THE CARD STAYS` | yes, from the real count | `PLEASE WAIT` |
+| `Wiping` (format) | `FORMATTING` | `THE SD CARD` | `DO NOT UNPLUG` | no — a format has no honest number | `PLEASE WAIT` |
+
+**Keys:** none. All four gestures are `None` on this screen; a press in the middle
+of a 20-90 s wipe can only confuse, and on this board a 2.5 s PWR hold cuts the
+rail in hardware whatever the firmware decides.
+
+The counts are the store's own (`Store::wipe` lists the three folders first, so
+the total is known before the first removal, and reports `(done, total)` once per
+note). The bar redraws on a **5 % step**, never per note: a partial waveform is
+~0.6 s on this unit and 114 of them would cost more than the wipe. The last note
+always draws. When the job ends - either way - the machine goes back to Home and
+the publish that follows re-reads the card, so the frame says `0 NOTES`.
+
+The runtime's side: `mode` is `wiping`/`formatting` for the length of it (which
+`notes status` prints), the count scan, the retention pass, the Bluetooth source
+and the upload planner wait for the job (the worker is inside the same volume),
+and a recording asked for during it is refused in the log. The console stays
+answerable throughout - `notes status` and `ui` took 0.2 s on the bench - because
+the app task only polls the worker's counts. A key press during the job takes no
+card read either (`UiState::press` skips the rescan on `Screen::Wiping`).
+
 ---
 
 ## 9. Playing

@@ -180,7 +180,7 @@ bool Runtime::begin(const Io& io) {
   // always does, because every note recorded before it is stamped 1970.
   // A failed note (rejected by the server) is a person's work, not the radio's,
   // so it opens no window.
-  if (wifi_stay_) open_net(now_ms(), Net::Stay);
+  if (stay_net()) open_net(now_ms(), Net::Stay);
   else if (pending_ > 0 || !clock_ok()) open_net(now_ms(), clock_ok() ? Net::Boot : Net::Clock);
   return true;
 }
@@ -268,13 +268,16 @@ void Runtime::shutdown() {
   const bool external = io_.power && io_.power->external_power().value_or(false);
   if (external) ESP_LOGW(TAG, "external power: the latch is not the supply, so the board stays on");
   if (!io_.power || external || !io_.power->power_off()) {
-    // On USB the latch is not the supply: the board keeps running with the card
-    // unmounted, which mounts nothing. Come back all the way instead.
-    ESP_LOGW(TAG, "still powered over USB: mounting the card again");
-    std::string error;
-    sd_ready_ = sd_mount::ensure(false, &error) && store_.ensure();
-    if (!sd_ready_) ESP_LOGE(TAG, "the card did not come back: %s", error.empty() ? "no answer" : error.c_str());
-    ready_ = true;
+    // "Power off" has to mean off. On USB the latch cannot cut the supply, and
+    // this used to remount the card and keep running: a device on a shelf with
+    // its screen blanked but its cell draining. Deep sleep is the honest off
+    // (~10 uA) and the power key is what wakes it, into a normal boot.
+    if (io_.sleep_now != nullptr) {
+      ESP_LOGW(TAG, "power off: the supply cannot be cut here, sleeping until the power key");
+      io_.sleep_now();
+      return;  // not reached: deep sleep does not come back
+    }
+    ESP_LOGW(TAG, "no sleep source on this port: the board stays up");
   }
 }
 
@@ -298,8 +301,9 @@ bool Runtime::net_open(uint32_t now) const {
   // is the only way to give the device a network when none is saved, and it has
   // its own deadline in the port.
   if (setup_window()) return true;
-  // The standing choice: associate and stay associated, with no window to close.
-  if (wifi_stay_) return true;
+  // The standing choice: associate and stay associated, with no window to close
+  // - on external power only (stay_net()).
+  if (stay_net()) return true;
   if (net_ == Net::Closed) return false;
   return static_cast<int32_t>(net_until_ms_ - now) > 0;
 }
@@ -340,8 +344,11 @@ void Runtime::set_wifi_stay(bool on) {
   if (io_.config && io_.config->get("wifi").value_or("on") != (on ? "on" : "off"))
     io_.config->set("wifi", on ? "on" : "off");
   if (on) {
-    // Associated from this pass on, and kept there (step_window never closes it).
-    if (net_ == Net::Closed) open_net(now, Net::Stay);
+    // Associated from this pass on, and kept there while the board is plugged in
+    // (step_window never closes it). On the cell the choice is remembered and
+    // applies when the cable is back: an association held on battery is the
+    // load that empties it (stay_net()).
+    if (net_ == Net::Closed && stay_net()) open_net(now, Net::Stay);
   } else {
     // Back to the duty cycle: with nothing left to do the window closes now,
     // otherwise it finishes its work and closes on its own clock.
@@ -439,9 +446,15 @@ void Runtime::tick(uint32_t now, bool wifi_link) {
 void Runtime::step_window(uint32_t now) {
   // The standing choice has no deadline: keep the window open with a fresh one,
   // so nothing below (or the port) treats it as expired.
-  if (wifi_stay_ && ready_ && net_ != Net::Closed) {
+  if (stay_net() && ready_ && net_ != Net::Closed) {
     net_until_ms_ = now + kWindowMs;
     return;
+  }
+  // Unplugged with nothing to send: the association was for the hub, and it is
+  // now the biggest load on the cell. Close it; the duty cycle brings it back
+  // when a note needs it.
+  if (net_ == Net::Stay && !stay_net() && mode_ == Mode::Idle && pending_ == 0 && clock_ok()) {
+    close_net(now);
   }
   // A transfer in flight keeps its window: closing the station under the
   // uploader would waste the bytes it has already sent (`step_sync` above may

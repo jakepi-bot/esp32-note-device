@@ -70,7 +70,10 @@ constexpr int64_t kMinGapMs = 300;
 // update then refreshes the whole panel from a known state.
 constexpr int64_t kBusyTimeoutMs = 3000;
 // A full refresh clears the ghosting a run of partial ones leaves behind.
-constexpr int kFullEvery = 20;
+// A partial waveform leaves residue; twenty of them is a visible ghost on a
+// band that redraws a minute apart. Ten keeps the glass clean without turning
+// every minute into a flash (2026-11-23).
+constexpr int kFullEvery = 10;
 // The vendor's driver comments name 10 MHz as the panel's clock; a full
 // frame is 5,000 bytes either way, about 4 ms on the wire.
 constexpr int kSpiHz = 10 * 1000 * 1000;
@@ -261,10 +264,26 @@ bool EpdDisplay::wait_idle(uint32_t after, uint32_t timeout_ms) {
 
 void EpdDisplay::update_once() {
   const size_t image_bytes = static_cast<size_t>(cfg_.width) * cfg_.height / 8;
+  const size_t row_bytes = static_cast<size_t>(cfg_.width) / 8;
+  // What actually moved, as a row band. A partial waveform over the whole panel
+  // costs the same as a full one minus the flash, so the band is where the
+  // saving is: a 20-row footer on a 200-row panel is a tenth of the drive time
+  // and the same tenth of the charge (2026-11-23).
+  int band0 = -1, band1 = -1;
   xSemaphoreTake(lock_, portMAX_DELAY);
+  for (int y = 0; y < cfg_.height; ++y) {
+    if (std::memcmp(image_ + static_cast<size_t>(y) * row_bytes,
+                    sent_ + static_cast<size_t>(y) * row_bytes, row_bytes) != 0) {
+      if (band0 < 0) band0 = y;
+      band1 = y;
+    }
+  }
   memcpy(sent_, image_, image_bytes);
   dirty_ = false;
   xSemaphoreGive(lock_);
+  // Nothing moved: the panel is bistable and an update that changes no pixel is
+  // charge spent on holding the same picture.
+  if (band0 < 0) return;
 
   // Full on the first frame, every kFullEvery partial ones, and whenever the
   // UI asked for a repaint after a failed transfer. The sequence mirrors the
@@ -298,8 +317,36 @@ void EpdDisplay::update_once() {
     ESP_LOGI(TAG, "full refresh");
     return;
   }
+  // A window over the band, full width: 0x44 takes x in bytes and 0x45 y in
+  // pixels, and keeping x whole is what keeps the row arithmetic honest. A band
+  // taller than half the page is not worth the setup, so it takes the whole
+  // page exactly as before.
+  // Two rows of margin each side: the partial waveform leaves a little residue
+  // at the edge of what it drives, and a band that stops exactly on the ink
+  // leaves a ghost line of the row above (seen on the unit, 2026-11-23).
+  if (band0 > 1) band0 -= 2;
+  if (band1 < cfg_.height - 3) band1 += 2;
+  const int band_h = band1 - band0 + 1;
+  const bool windowed = band_h <= cfg_.height / 2;
+  const int y0 = windowed ? band0 : 0;
+  const int y1 = windowed ? band1 : cfg_.height - 1;
+  const int rows = y1 - y0 + 1;
+  command(0x44);
+  data(0x00);
+  data(static_cast<uint8_t>(cfg_.width / 8 - 1));
+  command(0x45);
+  data(static_cast<uint8_t>(y0 & 0xff));
+  data(static_cast<uint8_t>((y0 >> 8) & 0xff));
+  data(static_cast<uint8_t>(y1 & 0xff));
+  data(static_cast<uint8_t>((y1 >> 8) & 0xff));
+  command(0x4e);
+  data(0x00);
+  command(0x4f);
+  data(static_cast<uint8_t>(y0 & 0xff));
+  data(static_cast<uint8_t>((y0 >> 8) & 0xff));
   command(0x24);
-  if (!write(sent_, image_bytes)) {
+  if (!write(sent_ + static_cast<size_t>(y0) * row_bytes,
+             static_cast<size_t>(rows) * row_bytes)) {
     repaint_ = true;  // the panel keeps the frame it has; redraw it in full
     force_full_ = true;
     return;
@@ -308,7 +355,17 @@ void EpdDisplay::update_once() {
   data(0xcf);
   command(0x20);
   wait_busy();
+  // Back to the whole page: a window left set would clip the next full refresh.
+  command(0x44);
+  data(0x00);
+  data(static_cast<uint8_t>(cfg_.width / 8 - 1));
+  command(0x45);
+  data(0x00);
+  data(0x00);
+  data(static_cast<uint8_t>((cfg_.height - 1) & 0xff));
+  data(static_cast<uint8_t>(((cfg_.height - 1) >> 8) & 0xff));
   ++partials_;
+  ESP_LOGI(TAG, "partial %d rows (%d..%d) of %d", rows, y0, y1, cfg_.height);
 }
 
 void EpdDisplay::convert(int y0, int y1) {

@@ -24,6 +24,7 @@
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_sleep.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "notes/sd_mount.hpp"
@@ -270,6 +271,19 @@ void poll_keys(uint32_t now) {
              g_ui.press(hgp::notesui::Key::BootHold);
            });
   (void)now;
+}
+
+// "Off" on a board whose latch cannot cut the supply (a board on USB): deep
+// sleep, with the power key as the wake source, so a device put away does not
+// flatten its cell. The key is active low; waking reboots into a normal boot.
+void sleep_until_power_key() {
+  const auto& b = hgp::board_config();
+  // EXT0 is the deep-sleep wake source for one pin held low: the PWR key on this
+  // board is active low, and GPIO 17 is an RTC pin on the S3.
+  if (b.latch_power.key >= 0) {
+    esp_sleep_enable_ext0_wakeup(static_cast<gpio_num_t>(b.latch_power.key), 0);
+  }
+  esp_deep_sleep_start();
 }
 
 // The station's window: the runtime says whether this pass needs the network,
@@ -644,6 +658,7 @@ extern "C" void app_main(void) {
   }
 
   hgn::Runtime::Io io;
+  io.sleep_now = &sleep_until_power_key;
   io.mic = &g_codec_mic;
   io.power = &g_latch;
   io.ble = &g_notelink;
@@ -727,7 +742,9 @@ extern "C" void app_main(void) {
     // A resting notes device has nothing to animate: the panel is bistable and
     // the work arrives as an event (a key, a console line, a phone, the clock).
     // A key's edge ends the wait at once, so the poll below runs at once too.
-    if (hgp::events::receive(ev, pdMS_TO_TICKS(200))) {
+    // A working device polls five times a second; a resting one, once.
+    const uint32_t wait_ms = g_runtime.busy(g_system.now_ms()) ? 200 : 1000;
+    if (hgp::events::receive(ev, pdMS_TO_TICKS(wait_ms))) {
       do {
         dispatch(ev);
         hgp::events::release(ev);

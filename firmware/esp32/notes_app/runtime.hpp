@@ -89,6 +89,9 @@ class Runtime {
     hgp::SdConfig sd{};
     hg::Curve battery_curve{};
     const char* board_name = "";
+    // The board's real "off" when the latch cannot cut the supply (a board on
+    // USB): deep sleep with the power key as the wake source. Null on the host.
+    void (*sleep_now)() = nullptr;
   };
 
   // Mounts the card if it answers, loads (or makes) the device key, starts the
@@ -139,6 +142,14 @@ class Runtime {
   // the station stays associated after boot instead of closing every window, off
   // is the duty cycle below. The last choice survives a power cycle.
   bool wifi_stay() const { return wifi_stay_; }
+  // The station stays associated only while the board is on external power: a
+  // board on its cell that holds an association for the hub's benefit is a radio
+  // flattening the cell (2026-11-23, "a few hours when unused").
+  bool stay_net() const { return wifi_stay_ && external_; }
+  // Something is moving: the app loop can wait a fifth of a second. Idle, it can
+  // wait a whole one - five wakes a second on a resting device is battery spent
+  // on nothing (2026-11-23).
+  bool busy(uint32_t now_ms) const { return mode_ != Mode::Idle || net_open(now_ms); }
   void set_wifi_stay(bool on);
   // The setup page a phone opened: the window must not close under it.
   bool setup_window() const;

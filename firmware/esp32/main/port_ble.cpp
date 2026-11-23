@@ -222,7 +222,13 @@ void advertise() {
   if (!g_synced || g_conn.load() != kNone) return;
   ble_gap_adv_stop();
   const bool pairing = g_pairing.load();
-  if (!pairing && bonds() == 0) return;
+  // Advertise while there is a reason to be found: a pairing ask, or the Phone
+  // window a person opened. Advertising forever because a phone was ever paired
+  // is a radio on for nothing - about a milliamp, all day, on a device that is
+  // meant to last weeks (2026-11-23). A phone that wants the gadget opens the
+  // window from the menu, which is the documented flow.
+  const bool window_open = g_window.phone_left_ms(now_ms()) != 0;
+  if (!pairing && !window_open) return;
 
   std::string name;
   {

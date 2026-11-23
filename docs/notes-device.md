@@ -24,7 +24,11 @@ the player, so one press switched the device off - t_dec6f9ef). **PWR** held for
 The firmware takes a hold at 1.5 s, half a second before the latch, to flush the
 card, close the radio and commit a recording in progress; that is the screens'
 own `PowerOff` action on Home, and on every other screen it still flushes before
-the latch drops.
+the latch drops. The last frame it draws is the sleeping face - paper, a crescent
+and `asleep - hold PWR 2 s` - so an off device does not look like an on one. It is
+a full refresh and the firmware waits it out (about 2 s of waveform), and the
+latch's own cut still comes at 2.5 s, so a finger kept down that long can leave the
+panel part-written.
 
 ## Home
 

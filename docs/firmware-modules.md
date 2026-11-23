@@ -384,8 +384,22 @@ the first stamp. Never identify an image by the date and time.
 | BOOT tap (GPIO 0, < 1.5 s) | `ModeRouter` → `NotesMode` | Starts or stops an offline voice note (`NotesMode::on_note_button`). Never talks. BOOT is also the flash-download and deep-sleep wake pin. |
 | BOOT held ≥ 2 s | `ModeRouter` → `App::on_button(Cancel)` | Fires once at the threshold, while the key is still down: it drops the note being recorded, or otherwise taps CANCEL for a live turn, an overlay, a pairing window or a question. |
 | PWR short press (GPIO 18, < 1.5 s) | `ModeRouter` → `App::talk_toggle` | Starts a live Hermes turn; the next short press ends it. While a phone asks to pair, PWR refuses instead. |
-| PWR hold (GPIO 18, 2.5 s) | `LatchPower` | Releases the battery latch: power off on battery, screen dark on USB. The firmware acts nothing on a hold. |
+| PWR hold (GPIO 18) | `LatchPower` in hardware; in the `notes` image `power_hold` (`notes_app/main.cpp`) → `NotesUi`, `Runtime` | Releases the battery latch on a continuous **2.5 s** press: power off on battery, screen dark on USB. This image's foundation reads no hold of its own — the hardware cut is the whole gesture — while the `notes` image takes the hold at 1.5 s and draws the sleeping face before the shutdown (below). |
 | Touchscreen | none | This board has no touch panel and no touch input path: no tap, no swipe, no gesture. |
+
+**A PWR hold, in the `notes` image.** An e-paper keeps its last frame with no power,
+so the `notes` image (which replaced this foundation with `notes_app/`) draws a
+sleeping face before it goes: `NotesUi::sleep_face()` puts paper, a crescent and
+`asleep - hold PWR 2 s` on the panel as `ScreenApp::sleep_face()`'s **full** refresh
+and waits out the waveform (~2.6 s bound on a 2.1 s waveform), and only then runs
+`Runtime::shutdown()` — which flushes the card, closes the radio and drops the
+latch. Both of its power paths do this: the `Effect::PowerOff` the screens answer a
+Home hold with, and `power_hold()`'s own path for a hold on any other screen, where
+the screens decline and the loop still draws the face. The latch's hardware cut
+still follows a continuous 2.5 s press, so a finger kept down past it cuts the rail
+mid-waveform and tears the face; the console's `poweroff` and a dead battery power
+down with no frame. What the face is, and why it is not a `Screen`, is
+[the UI specification, §12.2](notes-ui-spec.md).
 
 The two keys are the whole input surface, and the settings hint names them in the
 case's own words: `talk_label = "PWR"` and `cancel_label = "BOOT"` (the core's

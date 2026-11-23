@@ -29,7 +29,7 @@ delete-confirm. Those are five of the nine that `ui_keys.hpp` already encodes:
 | Screen | In the brief | Why it has to exist |
 |---|---|---|
 | `Home` | ✓ status face | the resting face: queue, links, power, mode |
-| `Menu` | ✓ | the six rows of `MenuItem` |
+| `Menu` | ✓ | the nine rows of `MenuItem` |
 | `NoteList` | ✓ | `MenuItem::Notes` destination |
 | `Playing` | ✓ play | transport while audio plays |
 | `ConfirmDelete` | ✓ | `Action::AskDelete` destination |
@@ -478,8 +478,9 @@ under the footer.
 
 ### 5.2 The right column
 
-The value column is what makes a six-row list worth 176 px of width. It is
-right-aligned to x = 188 and always at scale 2, in the same `kInk`:
+The value column is what makes a nine-row list worth 176 px of width. It is
+right-aligned to x = 188 and at the same scale 1 as the labels (§5.1), in the same
+`kInk`:
 
 | Row | Value | Source |
 |---|---|---|
@@ -1200,7 +1201,12 @@ PWR does nothing there.
 
 ---
 
-## 12. Frames this spec does not own
+## 12. Frames outside the screen machine
+
+Two of these are drawn by code this spec only hands off to; the third is drawn by
+the notes app itself, on the way to a power cut, and no key can leave it.
+
+### 12.1 The port-owned frames
 
 Two menu rows hand the panel to code that already exists and is proven. They are
 **out of scope**, they must not be re-implemented, and the notes app owns only the
@@ -1214,6 +1220,83 @@ hand-off:
 The contract at the boundary: the app calls `display->request_full_refresh()`
 before the hand-off and again on return, because both directions change the whole
 page. Nothing else about those screens changes.
+
+### 12.2 The sleeping face — the last frame, and not a screen
+
+An e-paper keeps whatever it was holding when the rail drops. Without a last frame
+an off device looks exactly like an on one: after a PWR hold the panel went on
+showing Home with its counts, so the one fact a person needs from a dead device —
+that it is dead — was the one it could not state. The hold therefore draws a face
+of its own before the power goes (`ui_render.cpp`'s `SleepFace`, reached as
+`draw_sleep`):
+
+```
+y=0    ┌──────────────────────────────────────────────────────┐
+       │                                                      │
+y=28   │                       zzz                            │  x=96, scale 3 (hero)
+y=40   │             ◗▘                                       │  x=54, the 32 px crescent
+       │                                                      │
+y=116  │          asleep - hold PWR 2 s                       │  scale 1, centred
+y=194  └──────────────────────────────────────────────────────┘
+```
+
+| Element | x | y | size | note |
+|---|---|---|---|---|
+| the whole panel | 0 | 0 | 200 × 200 | filled to `kPaper` first. The face is drawn over whatever the person was looking at, and a stale Home frame behind the moon would read as a device that is still on |
+| crescent | 54 | 40 | 32 × 32 | `bitmap1` of a 1-bit rune in `kInk`, opening up and to the right, where the zzz climbs out |
+| `zzz` | 96 | 28 | 51 × 21 | scale 3 (`grid::kHero`): a mark, not a caption |
+| line `asleep - hold PWR 2 s` | 37 | 116 | 125 × 7 | scale 1, centred: what the panel is, and the gesture that leaves it (a hold of about two seconds is also how the board comes up on battery, [using the device](notes-device.md)) |
+| band, rule, footer, counts | — | — | — | **not drawn.** Nothing on this face may read as a live device, so it has no zone A, no queue count and no key legend |
+
+**When it is drawn: every firmware-initiated power-off.** Both power paths go
+through it — the `Effect::PowerOff` the screens answer a PWR hold with on Home
+(`main.cpp`'s `run_effect`), and `power_hold()`'s own path for a hold on any other
+screen, where the screens decline and the loop still draws the face before it shuts
+down. Two ways down do not: the console's `poweroff`, which runs `shutdown()`
+directly so a host can time the flush without a finger, and a battery that dies.
+Neither draws a frame, and a dead battery could not.
+
+**It is a full refresh, and it waits for one.** `ScreenApp::sleep_face()` answers
+`Refresh::Full`, the only class that leaves no trace of the page it replaces;
+`NotesUi::sleep_face()` calls `request_full_refresh()`, flushes, and waits for the
+waveform with a 2.6 s bound (`kSleepPanelMs`). The full waveform measured **2,122 ms**
+on this unit, and the wait is load-bearing: the rail goes the moment the call
+returns, and on battery an unfinished update is not "off", it is a broken panel.
+This is the one place the app task does wait on the panel (§15.4's rule has this
+single exception), and the bound exists only so a panel that never answers cannot
+hold the power-off for ever. On USB the board stays up after the shutdown, because
+VBUS keeps it alive, so the frame is the half of the gesture a bench can see; the
+rail actually going is a battery observation.
+
+**The hold's timing is why a long hold tears it.** The screens take a hold at
+**1.5 s** (`kPowerHoldMs`; the gesture is the release at or past it), and the latch
+cuts on its own after a continuous **2.5 s** press, in hardware
+([hardware and wiring](hardware.md#waveshare-esp32-s3-epaper-154)). Release inside
+that window and the firmware's `shutdown()` is the only cut: the waveform completes
+and the panel keeps the face. Keep the finger down past 2.5 s and the hardware cuts
+the rail mid-waveform, leaving a part-written frame — the tear the 2.6 s wait exists
+to avoid and cannot prevent, because the cut is not the firmware's.
+
+**It is not a `Screen`.** `Screen` has no `Asleep` case and nothing enters one:
+`ScreenApp::sleep_face()` moves no state (the machine is still on the screen it was
+showing, `app.screen() == Screen::Home` afterwards), so no key comes back from the
+face and nothing in the state machine has to know it exists. The frame is drawn
+straight into the framebuffer rather than through `frame()`, and
+`NotesUi::sleep_face()` sets `asleep_` **before** the flush while `render()` returns
+early once it is set — so a publish the runtime makes on its way out (the counts
+after a shutdown, a late callback) cannot repaint Home over the face. That is what
+makes this the last frame rather than merely the next one. Its two strings are the
+only ones in the UI that belong to no screen, so they live beside the others in
+`strings.hpp` (`sleep::kZzz`, `sleep::kHint`).
+
+**Host cases.** `firmware/tests/test_notes_screens.cpp`:
+`sleep: the frame is the sleeping face, and the panel is cleared` draws it over a
+stale Home page and checks the page is gone (the band and the footer ink nothing,
+the whole face is under 1,200 px and less than half of Home's, the crescent, the
+`zzz` and the line where the table above puts them), and
+`sleep: the face draws with a full refresh` checks the class and that it is not a
+screen (`Refresh::Full`, `draw`, `Effect::None`, the screen still `Home`, and the
+hold that leads to it asking for no frame of its own).
 
 
 ---
@@ -1292,7 +1375,7 @@ driver's partial path handle it. `—` = no flush at all.
 | 2 | `HOME` | BOOT tap | `StartRecording` | open a new `pending/<id>/`, start `port_codec` capture | `RECORDING` | `F` |
 | 3 | `HOME` | BOOT hold | `OpenMenu` | reset `state.menu = 0` | `MENU` | `F` |
 | 4a | `HOME` | PWR tap | `None` | nothing at all — a tap is never a power-off | `HOME` | — |
-| 4b | `HOME` | PWR hold | `PowerOff` | flush the card, close the radio, `LatchingPower::power_off()` | `OFF` | — |
+| 4b | `HOME` | PWR hold | `PowerOff` | draw the sleeping face and wait for the full waveform (§12.2), then flush the card, close the radio, drop the latch | `OFF` | `F` (the face) |
 | 5 | `HOME` | *(auto)* pending > 0 and a link is up | — | connect, `notes::Queue::plan_upload()`, upload | `HOME`/SYNCING | `P` unless the hero word changes (`F`) |
 | 6 | `HOME` | *(auto)* upload batch fails | — | record the failure, no retry storm | `HOME`/NO_SYNC | `F` (hero changes) |
 | 7 | `RECORDING` | BOOT tap | `StopKeep` | stop capture, `write_meta()` (the commit marker), enqueue | `HOME` | `F` |
@@ -1340,8 +1423,10 @@ driver's partial path handle it. `—` = no flush at all.
 | 49 | `CONFIRM_UNPAIR` | BOOT hold while `mode_ != Idle` | `None` | nothing at all; the reason is already on the glass | `CONFIRM_UNPAIR` | `—` |
 
 **Rows 4a, 9, 37, 39 and 40 are the gestures in the whole UI that produce no panel
-activity at all**, and a PWR hold outside Home adds to them. They matter: a hold
-at a pairing prompt is a common panic response, and a tap on Home or About must
+activity at all.** A PWR hold outside Home is the nearest thing to one: the screens
+answer it with nothing, and the only frame it draws is the sleeping face the loop
+puts up on its way to the shutdown (§12.2) — never a screen change. They matter: a
+hold at a pairing prompt is a common panic response, and a tap on Home or About must
 not look like it did something — least of all switch the device off.
 
 ### 13.3 Upload progress is not a screen
@@ -1497,12 +1582,15 @@ the app task and must not allocate (§16).
    pixel of the glass.
 2. **Updating is off the app task.** `EpdDisplay::task()` owns the BUSY wait; a
    refresh that outlasts the frame budget does not stall the key loop. The app must
-   never wait for it (§16).
+   never wait for it (§16) — the sleeping face is the one exception, and it waits
+   because the rail goes the moment it returns (§12.2).
 
-The **full-update duration on this unit is unmeasured** — `docs/waveshare-epaper-154-v2.md`
-§12 lists it as open item 1, and the driver only guarantees it will not wait longer
-than `kBusyTimeoutMs = 3000`. Budget for "a visible flash of the order of a second",
-and measure it before tuning `kFullEvery`:
+The **full-update duration on this unit measured 2,122 ms**, and the one place the
+firmware has to know it is the sleeping face's wait (§12.2). The driver only
+guarantees it will not wait longer than `kBusyTimeoutMs = 3000`, and
+`docs/waveshare-epaper-154-v2.md` §12 keeps it as open item 1 for panels nobody has
+timed. Treat a full refresh as a visible flash of about two seconds, and measure it
+before tuning `kFullEvery`:
 
 ```
 hg> screen            # dumps the 1-bit image, proves *what* is on the glass
@@ -1510,7 +1598,7 @@ hg> status            # duty cycle: awake ms, radio ms per hour
 ```
 
 Time `panel_init()` + a full write with `esp_timer_get_time()` across ten
-transitions and log the median. Until then, treat every `F` in §13.2 as a
+transitions and log the median. Until a panel is timed, treat every `F` in §13.2 as a
 user-visible pause and keep them where a pause is expected: on a key press.
 
 ### 15.2 Which transitions must full-refresh
@@ -1521,9 +1609,9 @@ the default.**
 The reason is not superstition. A partial waveform moves pixels to their new value
 *relative to what is already in the panel's RAM*, so where the previous frame had
 ink and the new one does not, the residue is proportional to the difference. Two
-different screens differ almost everywhere — a menu is six text rows, a note screen
-is a 21 px hero — so a partial between them leaves the old layout legible through
-the new one. This is already the established rule in the tree
+different screens differ almost everywhere — a menu is nine rows of small text, a
+note screen is a 21 px hero — so a partial between them leaves the old layout
+legible through the new one. This is already the established rule in the tree
 (`modes/notes_screen.hpp`: *"a partial update … to this one leaves the previous
 image ghosted, and the panel's own 'full every 20 partials' rule is too slow to
 hide it"*), and it applies with more force here because the screens differ more.
@@ -1537,7 +1625,8 @@ Concretely, `F` on every row of §13.2 that changes the screen, plus:
 | **any change to the Home hero string** | `READY → UPLOADING` changes three slots at once; a partial leaves the old word under the new |
 | a list rotation (§6.4) | six text rows move at once |
 | `take_redraw_request()` returns true | a transfer failed; the driver has already forced full, the app only has to redraw |
-| returning from a port-owned screen (§12) | both directions change the whole page |
+| returning from a port-owned screen (§12.1) | both directions change the whole page |
+| the sleeping face (§12.2) | it is drawn over the page it replaces, and a partial would leave that page ghosting through the moon |
 
 Everything else — bar moves, counters, progress bars, a mark appearing — is
 partial, and the driver's `kFullEvery = 20` bounds the accumulation regardless.
@@ -1574,7 +1663,7 @@ each with the specific hazard it prevents:
 | Rule | Hazard it prevents |
 |---|---|
 | **Never call `Store::list()`, `count()`, `read_meta()` or `audio_bytes()` from the draw function.** Snapshot the view model first. | An SD directory walk is tens to hundreds of ms. Drawn inline, it delays the key loop by that much per frame, and a 52-note card makes the list feel broken. |
-| **Never wait on `BUSY`, never poll `partials_`, never sleep after `flush()`.** | The driver's task owns that wait. Waiting in the draw path converts a background refresh into a stalled key press. |
+| **Never wait on `BUSY`, never poll `partials_`, never sleep after `flush()`.** | The driver's task owns that wait. Waiting in the draw path converts a background refresh into a stalled key press. The sleeping face is the one exception (§12.2): it waits for its own full waveform because the rail goes the moment it returns, and there is no key loop left to stall. |
 | **Never draw from the BLE task, the upload task, or the panel's own task.** | Two owners of one framebuffer is a torn frame at best. The uploader publishes `i/n` into an atomic; the app task reads it and draws. |
 | **Do not render on a timer for its own sake.** Gate on a hash of the view model. | A blind 100 ms redraw tick costs 3 flushes/s forever, and `kMinGapMs 300` turns it into a constant flicker at the panel's maximum rate. |
 | **Do not `vTaskDelay()` inside the draw path** (including the recording counter). | It blocks the key poll, so the stop gesture lands late and the note runs long. Drive the counter from a tick count compared against `millis()`. |
@@ -1675,11 +1764,11 @@ that wrong once.
 | # | Item | Status |
 |---|---|---|
 | 1 | `Screen` has no `About` | **gap**; three-line fix in §11.2.1, plus one host case |
-| 2 | Full-update duration unmeasured on this unit | open; bench procedure in §15.1. Until measured, every `F` is "about a second" |
+| 2 | Full-update duration on a panel nobody has timed | measured at **2,122 ms** here, from the sleeping face (§12.2); another unit needs the procedure in §15.1 |
 | 3 | The bolt cannot distinguish charging from charged | hardware limit (`charging = -1`); labelled ON EXTERNAL POWER, never `CHARGING` |
 | 4 | Two notes in the same minute are indistinguishable on the confirm | accepted, §8.2; mitigated by the hold and deterministic order |
 | 5 | 8 consecutive bar moves before a forced full | a starting value, not a measurement. Tune against the real panel; the constant belongs next to `kFullEvery` |
-| 6 | `Phone` and `Wi-Fi` frames are owned by the ports | out of scope by design (§12); only the `F` hand-off is specified |
+| 6 | `Phone` and `Wi-Fi` frames are owned by the ports | out of scope by design (§12.1); only the `F` hand-off is specified |
 | 7 | `note_max_s` cap shown as `OF 5:00` | read it from the setting, do not hard-code the default; past 99:59 it reads `OF 24:00` |
 
 ---

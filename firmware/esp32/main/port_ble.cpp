@@ -56,7 +56,10 @@ const char* PhoneLink::radio_reason() const { return "none"; }
 void PhoneLink::answer_pairing(bool) {}
 void PhoneLink::close_pairing() {}
 void PhoneLink::forget() {}
-uint8_t PhoneLink::bonded_peers(BondInfo*, uint8_t) { return 0; }
+bool PhoneLink::bonded_peers(BondInfo*, uint8_t, uint8_t* count) {
+  if (count != nullptr) *count = 0;
+  return false;
+}
 bool PhoneLink::forget_peer(const BondInfo&) { return false; }
 void PhoneLink::set_name(const std::string&) {}
 
@@ -161,13 +164,13 @@ std::atomic<bool> g_allow{false};
 
 // The bond table, for the Unpair screen. The store's own API (ble_store_util_*)
 // belongs to the host task: it walks the host's cached copy of the bond store.
-// The screens ask from the app task, so when the host is running the work goes
-// onto its event queue and the app waits a few milliseconds for the answer; with
-// the radio at rest there is no host task to hand it to, and the app does it
-// inline - nothing else touches the store then. One job at a time: the app task
-// is the only caller.
+// The screens ask from the app task, so the work goes onto the host's event queue
+// and the app waits a second for the answer. With the radio at rest there is no
+// host to hand it to and none to read either - nimble_port_deinit() took the store
+// and its lock with it - so the call reports "no answer" and the screen keeps the
+// table it already had. One job at a time: the app task is the only caller.
 constexpr uint8_t kBondCap = 6;        // notesui::kMaxPeerRows
-constexpr uint32_t kBondWaitMs = 200;  // NVS plus a RAM cache: nothing slow
+constexpr uint32_t kBondWaitMs = 1000;  // NVS plus a RAM cache, and the host's lock
 
 struct BondJob {
   bool erase = false;
@@ -847,16 +850,22 @@ void PhoneLink::forget() {
   if (g_started) schedule(&g_forget_ev);
 }
 
-uint8_t PhoneLink::bonded_peers(BondInfo* out, uint8_t capacity) {
-  if (out == nullptr || capacity == 0 || !g_prepared) return 0;
-  if (!ask_bond_store(false, nullptr)) return 0;
+bool PhoneLink::bonded_peers(BondInfo* out, uint8_t capacity, uint8_t* count) {
+  if (count != nullptr) *count = 0;
+  // The store is the host's: nimble_port_deinit() frees it with the rest of the
+  // stack, so a read while the radio rests is a read of freed memory (the app
+  // task panicked on ble_hs_lock the moment the Unpair row was selected with the
+  // radio off). A caller that needs the table brings the radio up first.
+  if (out == nullptr || capacity == 0 || !g_started) return false;
+  if (!ask_bond_store(false, nullptr)) return false;
   const uint8_t n = capacity < g_bond_job.count ? capacity : g_bond_job.count;
   for (uint8_t i = 0; i < n; ++i) out[i] = g_bond_job.peers[i];
-  return n;
+  if (count != nullptr) *count = n;
+  return true;
 }
 
 bool PhoneLink::forget_peer(const BondInfo& peer) {
-  if (!g_prepared) return false;
+  if (!g_started) return false;  // no host, no store (see bonded_peers)
   ble_addr_t target{};
   target.type = peer.type;
   for (int b = 0; b < 6; ++b) target.val[b] = peer.addr[5 - b];  // back to NimBLE's order

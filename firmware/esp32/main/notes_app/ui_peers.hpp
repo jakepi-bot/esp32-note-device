@@ -19,18 +19,24 @@ class BondPort {
  public:
   virtual ~BondPort() = default;
   // The bonded phones, written into `out` (at most `capacity` of them). Returns
-  // how many were written; the order is the store's, not sorted.
-  virtual uint8_t list(Peer* out, uint8_t capacity) = 0;
+  // how many were written; the order is the store's, not sorted. `answered` says
+  // whether the store spoke at all, so a radio that is still asleep is never
+  // mistaken for a device with no phones in it.
+  virtual uint8_t list(Peer* out, uint8_t capacity, bool* answered = nullptr) = 0;
   // Forget this phone's bond. True when the store no longer holds it, so a
   // refused delete never takes a row off the glass.
   virtual bool erase(const Peer& peer) = 0;
 };
 
 // Read the table into the snapshot's peer window. The caller publishes when it
-// moved; nothing here draws.
+// moved; nothing here draws. A store that did not answer leaves the window as it
+// was: the screen keeps the table the last answer named rather than claiming the
+// device holds no phones.
 inline uint8_t load_peers(BondPort& port, Snapshot& snap) {
   Peer found[kMaxPeerRows];
-  const uint8_t n = port.list(found, kMaxPeerRows);
+  bool answered = false;
+  const uint8_t n = port.list(found, kMaxPeerRows, &answered);
+  if (!answered) return snap.peer_count;
   if (n != 0) std::memcpy(snap.peers, found, sizeof(Peer) * n);
   snap.peer_count = n;
   return n;

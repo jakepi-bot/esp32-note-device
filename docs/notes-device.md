@@ -140,7 +140,10 @@ Back
   hold goes back to the menu. The question states the address; BOOT hold there
   removes that bond (and drops the phone's link if it is connected), BOOT tap or
   PWR tap keeps it. An empty table says `NOTHING PAIRED`. It refuses while the
-  device is recording or uploading, with the reason on the question.
+  device is recording or uploading, with the reason on the question. Opening the
+  row wakes the radio if it has gone to rest, because the bond store is the
+  radio's own and it is unreadable while the stack is down; the phones on the
+  glass are the ones the store holds right now.
 - **Back** - Home.
 
 Both destructive rows refuse while the device is busy - a note recording or

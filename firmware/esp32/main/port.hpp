@@ -1090,9 +1090,11 @@ class PhoneLink {
   void close_pairing();
   void forget();  // removes every paired phone and drops a connected one
   // The bonded phones, written into `out` (at most `capacity`), in the store's
-  // order; returns how many. Call from the app task - the work is moved onto the
-  // Bluetooth host task, because the store's API is the host's.
-  uint8_t bonded_peers(BondInfo* out, uint8_t capacity);
+  // order; `count` is how many were written. False when the store did not answer
+  // - the radio is at rest, or its host did not speak in time - because an
+  // unanswered read is not an empty table. Call from the app task: the work is
+  // moved onto the Bluetooth host task, because the store's API is the host's.
+  bool bonded_peers(BondInfo* out, uint8_t capacity, uint8_t* count);
   // Forget one phone's bond, dropping its link first if it is the one connected,
   // so the phone finds itself unpaired instead of silently losing its keys. True
   // when the store no longer holds it. Call from the app task.

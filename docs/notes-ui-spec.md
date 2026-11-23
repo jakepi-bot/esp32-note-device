@@ -1148,11 +1148,14 @@ phone then shows the device as not paired and has to pair again (BOOT hold, Phon
 the passkey) before it can write a note. The delete is asked once per hold: a
 second phone needs a second question.
 
-The store's API (`ble_store_util_*`) is the Bluetooth host task's. The screens ask
-from the app task, so `port_ble` hands the work to the host's event queue when the
-radio is up and waits a few milliseconds for the answer; with the radio at rest
-there is no host task to hand it to and the app task does it inline, where nothing
-else touches the store.
+The store's API (`ble_store_util_*`) is the Bluetooth host task's, and the host is
+deinitialised when its window closes. The screens ask from the app task, so
+`port_ble` hands the work to the host's event queue and waits a few milliseconds
+for the answer; a store call with the host down is refused rather than run on the
+app task, because the host's own lock lives in memory `nimble_port_deinit()` has
+freed. Opening the screen (or `ui peers`) therefore wakes the radio first when it
+has gone to rest, and the window it opens is the plain wake, not a pairing one:
+the person asked to see the table, so the stack it lives in comes up for a minute.
 
 **11.4.4 An empty table.** `NOTHING PAIRED` at the body size, `open PHONE to pair`
 under it, and a footer that offers only `HOLD: back` — a list that advertises

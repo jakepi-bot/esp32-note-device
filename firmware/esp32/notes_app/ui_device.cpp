@@ -119,11 +119,20 @@ const char* screen_name(notesui::Screen screen) {
 class RadioBonds : public notesui::BondPort {
  public:
   explicit RadioBonds(PhoneLink* radio) : radio_(radio) {}
-  uint8_t list(notesui::Peer* out, uint8_t capacity) override {
+  uint8_t list(notesui::Peer* out, uint8_t capacity, bool* answered) override {
+    if (answered != nullptr) *answered = false;
     if (radio_ == nullptr || out == nullptr || capacity == 0) return 0;
+    // The bond store lives in the radio's own host, and that host is deinitialised
+    // when the window closes: opening this screen (or `ui peers`) after the radio
+    // had gone to rest dereferenced freed memory and panicked the app task. The
+    // window costs a few hundred ms and no pairing: the person asked to see the
+    // table, so the radio it lives in has to be up.
+    if (!radio_->radio_up()) radio_->wake();
     BondInfo found[notesui::kMaxPeerRows]{};
     const uint8_t cap = capacity < notesui::kMaxPeerRows ? capacity : notesui::kMaxPeerRows;
-    const uint8_t n = radio_->bonded_peers(found, cap);
+    uint8_t n = 0;
+    if (!radio_->bonded_peers(found, cap, &n)) return 0;  // the store did not speak
+    if (answered != nullptr) *answered = true;
     for (uint8_t i = 0; i < n; ++i) {
       out[i] = notesui::Peer{};
       out[i].type = found[i].type;
@@ -133,6 +142,9 @@ class RadioBonds : public notesui::BondPort {
   }
   bool erase(const notesui::Peer& peer) override {
     if (radio_ == nullptr) return false;
+    // The same window the list needed: the question can outlive the one the list
+    // opened, and a hold on a resting radio must not reach into a freed host.
+    if (!radio_->radio_up()) radio_->wake();
     BondInfo target{};
     target.type = peer.type;
     std::memcpy(target.addr, peer.addr, sizeof target.addr);

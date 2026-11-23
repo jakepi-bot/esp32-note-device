@@ -289,7 +289,7 @@ struct UnpairView {
   uint8_t count = 0;       // rows below
   uint8_t selected = 0;    // index into the table
   bool empty = false;      // the table holds nothing
-  char count_line[9] = {}; // "2 PAIRED"; empty when there is nothing to count
+  char count_line[24] = {}; // "2 PAIRED"; empty when there is nothing to count (the slot holds any %u)
   PeerRowView row[kMaxPeerRows];
 };
 UnpairView build_unpair(const Snapshot& snap, uint8_t selected);

@@ -129,8 +129,11 @@ struct FakeBonds : BondPort {
   std::vector<Peer> peers;
   int erases = 0;
   int refused = 0;  // the store says no to the next deletes
+  bool answers = true;  // false: the radio is asleep and does not speak
 
-  uint8_t list(Peer* out, uint8_t capacity) override {
+  uint8_t list(Peer* out, uint8_t capacity, bool* answered = nullptr) override {
+    if (answered != nullptr) *answered = answers;
+    if (!answers) return 0;
     uint8_t n = 0;
     for (const Peer& peer : peers) {
       if (n >= capacity) break;
@@ -1749,6 +1752,74 @@ TEST("unpair: the list names every bonded phone, and says so when there are none
   CHECK(empty.screen() == Screen::UnpairList);
   CHECK(empty.press(Key::BootHold, 0).refresh == Refresh::Full);
   CHECK(empty.screen() == Screen::Menu);
+}
+
+TEST("unpair: entering the screen reads the table then, not at boot") {
+  // The radio rests until somebody asks for it: its store answers nothing at
+  // boot, and by the time the row is selected it holds a phone (the device wakes
+  // the radio on the way in for exactly this reason). The screen must draw what
+  // the store says now - a table cached from boot would tell a person looking at
+  // the phone in their hand that nothing is paired.
+  TempDir dir;
+  Store store(dir.path + "/notes");
+  CHECK(store.ensure());
+  FakeBonds bonds;  // the radio is asleep: no table yet
+
+  UiState ui;
+  Snapshot seed;
+  seed.card = true;
+  ui.begin(seed, &store, &bonds);
+  ui.press(Key::BootHold, 0);  // Home -> menu
+  while (static_cast<MenuItem>(ui.app().state().menu) != MenuItem::UnpairPhones) {
+    ui.press(Key::BootTap, 0);
+  }
+  bonds.peers.push_back(make_peer("A4:C1:38:7F:12:9B"));  // the radio came up
+
+  ui.press(Key::Power, 0);  // select the row
+  CHECK(ui.screen() == Screen::UnpairList);
+  CHECK(ui.snapshot().peer_count == 1);
+  const ScreenDraw list = ui.app().frame();
+  CHECK(list.unpair.count == 1);
+  CHECK(std::string(list.unpair.row[0].addr) == "A4:C1:38:7F:12:9B");
+  CHECK(bonds.erases == 0);
+}
+
+TEST("unpair: a store that does not answer leaves the table on the glass") {
+  // The radio can be asleep when the screen is already up (its window closed
+  // under the question). The read then comes back with nothing to say, which is
+  // not the same as an empty table: the list must keep the phones it named rather
+  // than telling a person their device holds none.
+  TempDir dir;
+  Store store(dir.path + "/notes");
+  CHECK(store.ensure());
+  FakeBonds bonds;
+  bonds.peers.push_back(make_peer("A4:C1:38:7F:12:9B"));
+  bonds.peers.push_back(make_peer("E0:5A:1B:22:9C:04"));
+
+  UiState ui;
+  Snapshot seed;
+  seed.card = true;
+  ui.begin(seed, &store, &bonds);
+  ui.press(Key::BootHold, 0);
+  while (static_cast<MenuItem>(ui.app().state().menu) != MenuItem::UnpairPhones) {
+    ui.press(Key::BootTap, 0);
+  }
+  ui.press(Key::Power, 0);
+  CHECK(ui.snapshot().peer_count == 2);
+
+  bonds.answers = false;                // the radio rested under the screen
+  ui.press(Key::BootTap, 0);            // a press still reads the table
+  CHECK(ui.snapshot().peer_count == 2); // the answer it could not get changes nothing
+  const ScreenDraw list = ui.app().frame();
+  CHECK(list.unpair.count == 2);
+  CHECK(std::string(list.unpair.row[1].addr) == "E0:5A:1B:22:9C:04");
+
+  // And the store speaking again is believed, empty or not.
+  bonds.answers = true;
+  bonds.peers.clear();
+  ui.press(Key::BootTap, 0);
+  CHECK(ui.snapshot().peer_count == 0);
+  CHECK(ui.app().frame().unpair.empty);
 }
 
 TEST("unpair: a BOOT hold removes the selected phone once, and the list shrinks") {

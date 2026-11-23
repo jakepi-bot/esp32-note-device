@@ -480,6 +480,24 @@ std::string console_line(std::string_view line) {
     }
     return std::string("@error usage: key boot|hold|pwr");
   }
+  if (line.rfind("wifi-set ", 0) == 0) {
+    // Provision the station from a host at a desk: the same credentials the
+    // phone's setup page writes, through the same provision() path that saves
+    // them and joins. Without this, a wiped NVS needs a phone just to get back
+    // on the network (2026-11-22).
+    const std::string args(line.substr(9));
+    const size_t sp = args.find(' ');
+    if (sp == std::string::npos || sp == 0) return "@error usage: wifi-set <ssid> <password>";
+    hg::WifiCredentials cred;
+    const std::string ssid = args.substr(0, sp);
+    const std::string psk = args.substr(sp + 1);
+    if (ssid.size() >= sizeof cred.ssid || psk.size() >= sizeof cred.password)
+      return "@error too long for the stored field";
+    std::snprintf(cred.ssid, sizeof cred.ssid, "%s", ssid.c_str());
+    std::snprintf(cred.password, sizeof cred.password, "%s", psk.c_str());
+    g_net.provision(cred);
+    return "@ok credentials stored; joining";
+  }
   if (line.rfind("set ", 0) == 0) return set_line(line.substr(4));
   // `screen` proves what the panel is showing without a camera pointed at it;
   // one console write takes about 4,000 characters and the image is 5,000, so

@@ -47,6 +47,22 @@ const uint8_t kRuneConnected[] = {
     0x06, 0x18, 0x06, 0x60, 0x07, 0x80, 0x06, 0x00, 0x00, 0x00,
 };
 
+// The sleeping face's moon: a 32x32 crescent open at the upper right, thickest
+// at the left, so the shape reads as "asleep" without a word of English.
+const uint8_t kMoon[] = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x01, 0x80, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00,
+    0x07, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00,
+    0x1f, 0x00, 0x00, 0x00, 0x1e, 0x00, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00,
+    0x3f, 0x00, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00, 0x3f, 0x00, 0x00, 0x00,
+    0x3f, 0x00, 0x00, 0x00, 0x7f, 0x80, 0x00, 0x00, 0x3f, 0x80, 0x00, 0x00,
+    0x3f, 0xc0, 0x00, 0x00, 0x3f, 0xc0, 0x00, 0x00, 0x3f, 0xe0, 0x00, 0x00,
+    0x3f, 0xf0, 0x00, 0x00, 0x1f, 0xf8, 0x00, 0x00, 0x1f, 0xfe, 0x00, 0x00,
+    0x0f, 0xff, 0x80, 0x08, 0x0f, 0xff, 0xfd, 0xf8, 0x07, 0xff, 0xff, 0xf0,
+    0x03, 0xff, 0xff, 0xe0, 0x01, 0xff, 0xff, 0xc0, 0x00, 0x7f, 0xff, 0x00,
+    0x00, 0x1f, 0xfc, 0x00, 0x00, 0x00, 0x80, 0x00,
+};
+
 // 28 x 15: a 26 px shell, a 2 px nub, then fill, bolt or '?' (§4.5). A blank
 // box would read as 0 %, so an unknown level is always drawn.
 void draw_battery(hg::Canvas& c, int x, int y, int8_t pct, bool external) {
@@ -235,6 +251,25 @@ void about_face(hg::Canvas& c, const ScreenDraw& d) {
   draw_footer(c, key::kHoldBack);
 }
 
+// The sleeping face: the last image the panel is given before the power goes,
+// and the only one that is not a screen. The e-paper keeps whatever it was
+// holding when the rail drops, so without this an off device looks exactly like
+// an on one (Jake, 2026-11-22). Paper first, because it is drawn over whatever
+// the person was looking at: a stale Home frame behind the moon would read as a
+// device that is still on. No band, no footer, no counts - nothing that could
+// be read as a live device. The moon and the 'zzz' are the motif; the one line
+// says what the panel is and how the device got here.
+void SleepFace(hg::Canvas& c) {
+  c.fill_rect(0, 0, c.width(), c.height(), kPaper);
+  const int moon_x = 54;   // 32 px wide, left of the zzz
+  const int moon_y = 40;
+  c.bitmap1(moon_x, moon_y, 32, 32, kMoon, kInk);
+  // The zzz climbs out of the crescent's opening, at the hero size so the
+  // motif is a drawing and not a caption.
+  c.text(moon_x + 42, moon_y - 12, sleep::kZzz, grid::kHero, kInk);
+  draw_centred(c, 116, sleep::kHint, 1);
+}
+
 }  // namespace
 
 void draw_band(hg::Canvas& c, const char* queue, const char* clock, bool wifi_on, bool wifi_up,
@@ -306,5 +341,7 @@ void draw(hg::Canvas& c, const ScreenDraw& d) {
     case Screen::Back: home_face(c, d); break;
   }
 }
+
+void draw_sleep(hg::Canvas& c) { SleepFace(c); }
 
 }  // namespace hgp::notesui

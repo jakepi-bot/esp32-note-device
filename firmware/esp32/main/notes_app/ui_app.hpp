@@ -113,6 +113,14 @@ class ScreenApp {
   Outcome pairing_answer(bool allow);
   Outcome playback_finished();
 
+  // The refresh the sleeping face owes (drawn by draw_sleep, ui_render.hpp).
+  // Not a transition: no key comes back from it and the machine never enters
+  // it, so this answers the one thing it owns - the class of the frame. Always
+  // Full: it is the last image the panel is given, and a partial waveform over
+  // the screen it replaces ghosts the old page through the moon. Here, in the
+  // machine, because that is where the refresh policy is tested (t_41477fd1).
+  Outcome sleep_face() const;
+
   // The Phone screen's window as the port reports it: the phase, the countdown
   // and the pairing table. Returns the frame when the glass moved - a phase
   // change draws, and so does the countdown once every five seconds, never at

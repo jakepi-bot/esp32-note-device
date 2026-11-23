@@ -35,6 +35,17 @@ class EpdDisplay final : public hg::Display {
   // partial leaves the previous image ghosted through the new one.
   void request_full_refresh() { force_full_ = true; }
 
+  // Panel updates finished since boot. Sample it, flush, then wait_idle(): the
+  // number is how a caller tells "the update my frame asked for has run" from
+  // "the panel is quiet because nothing was queued yet".
+  uint32_t update_count() const { return updates_.load(std::memory_order_relaxed); }
+  // Blocks until an update that started after `after` has finished and the
+  // panel has no queued frame. Returns false if it did not within `timeout_ms`.
+  // The one caller is the sleeping face: the PWR hold's frame is only worth
+  // drawing if it reaches the panel before the latch cuts the rail, so the wait
+  // is bounded by what the hardware leaves, not by what the panel would like.
+  bool wait_idle(uint32_t after, uint32_t timeout_ms);
+
   // The 1-bit panel image, hex, one line: `screen` on the console proves what
   // the panel is showing (text and all) without a camera pointed at it. Empty
   // before begin(). Rows are MSB-first, padded to a byte.
@@ -49,6 +60,7 @@ class EpdDisplay final : public hg::Display {
   void panel_init();          // power-on sequence and the full waveform
   void panel_partial_init();  // arms the partial waveform after a full refresh
   void refresh();             // one panel update from the image snapshot
+  void update_once();         // refresh's body; refresh counts the update
   void convert(int y0, int y1); // RGB565 rows -> 1 bit per pixel
   bool wait_busy();
   void command(uint8_t cmd);
@@ -70,6 +82,7 @@ class EpdDisplay final : public hg::Display {
   SemaphoreHandle_t gate_ = nullptr;  // flush signals: rows went dirty
   std::atomic<bool> repaint_{false};  // a refresh failed: redraw the screen
   std::atomic<bool> force_full_{false};
+  std::atomic<uint32_t> updates_{0};  // updates finished (wait_idle's clock)
   bool dirty_ = false;         // the panel does not show image_ yet
   bool partial_ = false;       // the partial waveform is armed
   int partials_ = 0;           // partial updates since the last full one

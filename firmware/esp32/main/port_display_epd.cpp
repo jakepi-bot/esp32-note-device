@@ -231,6 +231,35 @@ void EpdDisplay::task(void* arg) {
 }
 
 void EpdDisplay::refresh() {
+  update_once();
+  // Counted after the panel's BUSY line has cleared (or the attempt was given
+  // up on): wait_idle() reads this to tell a finished update from a queued one.
+  updates_.fetch_add(1, std::memory_order_relaxed);
+}
+
+bool EpdDisplay::wait_idle(uint32_t after, uint32_t timeout_ms) {
+  const int64_t start = esp_timer_get_time();
+  for (;;) {
+    bool queued;
+    xSemaphoreTake(lock_, portMAX_DELAY);
+    queued = dirty_;
+    xSemaphoreGive(lock_);
+    // Finished means: the panel is not driving BUSY, nothing is queued behind
+    // it, and an update ran since the caller flushed. Without the count, a
+    // flush the task had not picked up yet would read as an idle panel.
+    if (!queued && updates_.load(std::memory_order_relaxed) != after &&
+        gpio_get_level(static_cast<gpio_num_t>(cfg_.busy)) == 0) {
+      return true;
+    }
+    if ((esp_timer_get_time() - start) / 1000 > static_cast<int64_t>(timeout_ms)) {
+      ESP_LOGW(TAG, "the panel is still busy after %u ms", static_cast<unsigned>(timeout_ms));
+      return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+}
+
+void EpdDisplay::update_once() {
   const size_t image_bytes = static_cast<size_t>(cfg_.width) * cfg_.height / 8;
   xSemaphoreTake(lock_, portMAX_DELAY);
   memcpy(sent_, image_, image_bytes);

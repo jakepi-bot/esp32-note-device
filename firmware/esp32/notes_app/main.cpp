@@ -131,6 +131,12 @@ bool run_effect(hgp::notesui::Effect effect, uint16_t note) {
       g_runtime.sync_now(g_system.now_ms());
       return true;
     case Effect::PowerOff:
+      // The screens' power-off from Home. The sleeping face goes on the panel
+      // first: this is the last frame the device draws, and the e-paper keeps
+      // it, so an off gadget has to say so (t_41477fd1). It has to land before
+      // shutdown(): that closes the radio and unmounts the card, and the full
+      // refresh needs the panel driver and the time the latch leaves.
+      g_ui.sleep_face();
       g_runtime.shutdown();
       return true;
     case Effect::None:
@@ -215,6 +221,25 @@ void poll_key(int pin, KeyPoll& k, uint32_t now, uint32_t hold_ms, OnTap tap, On
   }
 }
 
+// The PWR hold, the one power gesture: the screens own the policy (a hold
+// powers off from Home and from nowhere else), the runtime does the shutting
+// down, and the sleeping face goes on the glass in between - it is the last
+// frame the device draws, and the e-paper keeps it, so an off gadget has to say
+// so (t_41477fd1). Order matters: sleep_face() waits for the panel's full
+// waveform, and shutdown() then drops the radio, unmounts the card and lets the
+// latch go, after which nothing can draw.
+void power_hold(uint32_t held) {
+  // Flush the card, close the radio and drop the latch before the latch's own
+  // 2.5 s cutoff. A hold in a submenu is still a press the hardware will cut at
+  // 2.5 s, and a dirty card is not the price of that: the face is drawn and the
+  // shutdown run whatever the screens answer.
+  ESP_LOGW(TAG, "PWR held %u ms: powering off", static_cast<unsigned>(held));
+  const hgp::notesui::Outcome out = g_ui.press(hgp::notesui::Key::PowerHold);
+  if (out.effect == hgp::notesui::Effect::PowerOff) return;  // the effect did it
+  g_ui.sleep_face();
+  g_runtime.shutdown();
+}
+
 void poll_keys(uint32_t now) {
   const auto& board = hgp::board_config();
   poll_key(board.latch_power.key, g_pwr, now, kPowerHoldMs,
@@ -223,18 +248,7 @@ void poll_keys(uint32_t now) {
            // takes it from there. The tap used to reach Action::PowerOff from
            // Home, Recording, About and the player, so one press switched the
            // device off (t_dec6f9ef).
-           [now] { g_ui.press(hgp::notesui::Key::Power); },
-           [](uint32_t held) {
-             // The hold is the graceful path: flush the card, close the radio,
-             // drop the latch, before the latch's own 2.5 s cutoff. The screens
-             // own the policy - a hold powers off from Home and from nowhere
-             // else - so ask them, and flush here whatever they answer: a hold
-             // in a submenu is still a press the hardware will cut at 2.5 s, and
-             // a dirty card is not the price of that.
-             ESP_LOGW(TAG, "PWR held %u ms: powering off", static_cast<unsigned>(held));
-             const hgp::notesui::Outcome out = g_ui.press(hgp::notesui::Key::PowerHold);
-             if (out.effect != hgp::notesui::Effect::PowerOff) g_runtime.shutdown();
-           });
+           [now] { g_ui.press(hgp::notesui::Key::Power); }, power_hold);
   poll_key(board.buttons.record, g_boot, now, kBootHoldMs,
            [now] { g_ui.press(hgp::notesui::Key::BootTap); },
            [now](uint32_t held) {

@@ -124,6 +124,13 @@ class NotesUi {
   // runtime fires from finish_note's discard branch.
   void on_discarded();
 
+  // The sleeping face, drawn before the power goes: the PWR hold. It is the
+  // last frame this device writes, so it is a full refresh and it waits for the
+  // panel to take it (the latch cuts the rail after this returns). Only the key
+  // path calls it: a console `poweroff` is already a person at a desk, and a
+  // dead battery has nothing left to draw with.
+  void sleep_face();
+
   // The console's `ui` command: what the glass is showing, in words.
   std::string console(std::string_view line);
 
@@ -169,6 +176,11 @@ class NotesUi {
   std::string device_name_;
   bool begun_ = false;
   bool first_frame_ = true;
+  // The sleeping face is on the panel: this is the last frame the device draws,
+  // so nothing renders again. Without it, the publish a shutdown makes (a note
+  // committed on the way out, the card going away) would repaint Home over the
+  // face and the device would look on while it is off.
+  bool asleep_ = false;
   bool in_apply_ = false;
   // A publish the effect asked for while apply() was running: run once the
   // effect's own frame would have been drawn, so a key press repaints once.

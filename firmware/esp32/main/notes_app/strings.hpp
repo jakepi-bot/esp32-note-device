@@ -84,6 +84,15 @@ inline constexpr const char* kQueued = "QUEUED";
 inline constexpr const char* kWaiting = "FOR THE UPLOAD";
 }  // namespace recording
 
+// The sleeping face: the last frame the panel keeps, so it is also the only one
+// a person reads with the device in their hand and no way to press anything.
+// "zzz" is a mark, not a word; the line says what the panel is and how it got
+// there, in one line because that is all an off device should be saying.
+namespace sleep {
+inline constexpr const char* kZzz = "zzz";
+inline constexpr const char* kHint = "asleep - hold PWR 2 s";
+}  // namespace sleep
+
 namespace menu {
 // The screen's own title. It is the one word §14's table does not list, and it
 // is drawn from here so no literal lives in the renderer.

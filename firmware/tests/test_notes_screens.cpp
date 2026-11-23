@@ -1275,3 +1275,116 @@ TEST("keys: two PWR taps in the player leave the device running") {
   CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Full);
   CHECK(app.screen() == Screen::NoteList);
 }
+
+// ---------------------------------------------------------------------------
+// The sleeping face (t_41477fd1): an off device must never look like an on one.
+// The e-paper keeps whatever frame it was holding when the rail drops, so the
+// PWR hold's last image is the only thing that says "this is off".
+
+namespace {
+
+// Ink in a box of the panel, and where it lands. The framebuffer is 200x200
+// with ink at 0x0000 and paper at 0xFFFF, the way every screen case here reads
+// it.
+struct InkBox {
+  int ink = 0;
+  int min_x = 200, max_x = -1, min_y = 200, max_y = -1;
+};
+
+InkBox ink_in(const uint16_t* fb, int x0, int y0, int x1, int y1) {
+  InkBox box;
+  for (int y = y0; y < y1 && y < 200; ++y) {
+    for (int x = x0; x < x1 && x < 200; ++x) {
+      if (fb[y * 200 + x] != 0x0000) continue;
+      ++box.ink;
+      if (x < box.min_x) box.min_x = x;
+      if (x > box.max_x) box.max_x = x;
+      if (y < box.min_y) box.min_y = y;
+      if (y > box.max_y) box.max_y = y;
+    }
+  }
+  return box;
+}
+
+// The draw_sleep() the device calls, with the moon where it is drawn: the rune
+// is 32x32 and the face puts it at (54, 40). Named here so the test and the
+// renderer cannot drift apart silently (a move is a failing case, not a photo
+// nobody takes).
+constexpr int kMoonX = 54;
+constexpr int kMoonY = 40;
+constexpr int kMoonSize = 32;
+
+}  // namespace
+
+TEST("sleep: the frame is the sleeping face, and the panel is cleared") {
+  static uint16_t fb[200 * 200];
+  std::memset(fb, 0xFF, sizeof fb);
+  hg::Canvas canvas(fb, 200, 200, false);
+  // A stale Home frame first: the face is drawn over whatever the person was
+  // looking at when they held PWR, so every pixel of that page has to go.
+  ScreenDraw home;
+  home.screen = Screen::Home;
+  home.home.hero = home::kReady;
+  std::snprintf(home.home.band, sizeof home.home.band, "3 TO SEND");
+  std::snprintf(home.home.sub, sizeof home.home.sub, "LAST 14:02");
+  home.home.battery_pct = 84;
+  draw(canvas, home);
+  const InkBox page = ink_in(fb, 0, 0, 200, 200);
+  CHECK(page.ink > 2000);  // a full page of UI text and marks was on the glass
+
+  draw_sleep(canvas);
+
+  // A sleeping face is a drawing on paper, not a page: under a third of what
+  // Home inks (a run of text and rows is thousands of pixels), and nothing at
+  // all where Home's band, hint and footer were.
+  constexpr int kClearedInk = 1200;
+  const InkBox all = ink_in(fb, 0, 0, 200, 200);
+  CHECK(all.ink > 400);   // the moon, the zzz and the line are there
+  CHECK(all.ink < kClearedInk);
+  CHECK(all.ink < page.ink / 2);
+  CHECK(ink_in(fb, 0, 0, 200, 20).ink == 0);     // Home's band is gone
+  CHECK(ink_in(fb, 0, 150, 200, 200).ink == 0);  // and so is its footer
+  CHECK(all.min_x >= 4);   // inside the panel's own margins, as every face is
+  CHECK(all.max_x <= 196);
+  CHECK(all.max_y <= 186);
+
+  // The glyph where the face puts it: the 32 px crescent, then the zzz climbing
+  // out of its opening.
+  const InkBox moon = ink_in(fb, kMoonX, kMoonY, kMoonX + kMoonSize, kMoonY + kMoonSize);
+  CHECK(moon.ink > 200);
+  CHECK(moon.max_y < kMoonY + kMoonSize);
+  const InkBox zzz = ink_in(fb, kMoonX + kMoonSize, 20, 190, 60);
+  CHECK(zzz.ink > 100);
+
+  // The line, centred at scale 1 where draw_centred puts it, between the motif
+  // and the rule Home draws.
+  const InkBox line = ink_in(fb, 0, 100, 200, 145);
+  CHECK(line.ink > 100);
+  const int want_x = (200 - hg::Canvas::text_width(sleep::kHint, 1)) / 2;
+  CHECK(line.min_x >= want_x);
+  CHECK(line.min_x <= want_x + 2);
+  CHECK(line.max_x <= want_x + hg::Canvas::text_width(sleep::kHint, 1));
+  CHECK(line.min_y >= 110);
+  CHECK(line.max_y <= 130);
+}
+
+TEST("sleep: the face draws with a full refresh") {
+  // The frame the PWR hold puts on the panel is the screen machine's answer,
+  // like every other frame: full, because a partial waveform over the page it
+  // replaces ghosts that page through the moon. NotesUi::sleep_face() asks this
+  // same ScreenApp (state_.app().sleep_face()) and hands the class to the
+  // driver's request_full_refresh(), so this is what the device draws.
+  ScreenApp app;
+  app.begin(one_note_card());
+  const Outcome out = app.sleep_face();
+  CHECK(out.refresh == Refresh::Full);
+  CHECK(out.draw);
+  CHECK(out.effect == Effect::None);    // nothing for the runtime, only the glass
+  CHECK(app.screen() == Screen::Home);  // not a screen: the machine does not move
+
+  // And the hold that leads to it asks for no frame of its own, so the sleeping
+  // face is the only one the power-off path puts on the panel.
+  const Outcome hold = app.press(Key::PowerHold, 0);
+  CHECK(hold.effect == Effect::PowerOff);
+  CHECK(!hold.draw);
+}

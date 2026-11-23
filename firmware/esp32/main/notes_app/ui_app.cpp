@@ -536,6 +536,17 @@ Outcome ScreenApp::playback_finished() {
   return out;
 }
 
+Outcome ScreenApp::sleep_face() const {
+  // No state moves: the machine stays on the screen it was showing, because
+  // nothing will ask it for another frame. The answer is the frame itself and
+  // the waveform it needs - the last full update this panel gets, which is also
+  // the only way to leave no trace of the page it replaces.
+  Outcome out;
+  out.refresh = Refresh::Full;
+  out.draw = true;
+  return out;
+}
+
 Window ScreenApp::window() const {
   Window w;
   switch (state_.screen) {

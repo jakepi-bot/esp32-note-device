@@ -71,4 +71,12 @@ void draw_progress(hg::Canvas& canvas, int y, uint8_t pct);
 void draw_footer(hg::Canvas& canvas, const char* line1, const char* line2 = nullptr);
 void draw_centred(hg::Canvas& canvas, int y, const char* text, int scale);
 
+// The sleeping face: paper, a moon with 'zzz', and one line saying what the
+// panel is. Not a screen - no key comes back from it, and the state machine
+// never enters it - so it is drawn straight into the framebuffer by the caller.
+// It clears to paper itself: it is painted over whatever the person was
+// looking at, and a stale Home frame behind the moon would read as a device
+// that is still on. Always a full refresh (ScreenApp::sleep_face()).
+void draw_sleep(hg::Canvas& canvas);
+
 }  // namespace hgp::notesui

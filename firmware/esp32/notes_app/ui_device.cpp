@@ -47,6 +47,15 @@ constexpr uint32_t kPhonePollMs = 250;
 // read after a full refresh has settled, short enough that the counts line the
 // person expects on Home is back before they look twice.
 constexpr uint32_t kNoticeTtlMs = 5000;
+// How long the sleeping face may hold the app task after its flush. It has to
+// outlast a full waveform - measured at 2,122 ms on this unit - because calling
+// shutdown() before the panel settles is a guaranteed half-updated frame: the
+// latch is dropped by our own power_off() the moment this returns. The bound is
+// here only so a panel that never answers cannot hold the power-off; 2.6 s
+// covers the driver's 300 ms coalesce gap plus a full update with a little room.
+// A PWR key released before the latch's own 2.5 s cutoff (docs/hardware.md)
+// leaves this the only power cut, which is the case the face is drawn for.
+constexpr uint32_t kSleepPanelMs = 2600;
 
 // Why the Phone window could not open, in words, for the log. The screen has its
 // own copy of these (strings.hpp); this is the serial line an operator reads.
@@ -250,6 +259,7 @@ void NotesUi::poll_phone(uint32_t now_ms) {
 }
 
 void NotesUi::render(notesui::Refresh refresh) {
+  if (asleep_) return;  // the sleeping face is the last frame: nothing paints over it
   if (ports_.display == nullptr) return;
   uint16_t* fb = ports_.display->framebuffer();
   if (fb == nullptr) return;
@@ -269,6 +279,30 @@ void NotesUi::render(notesui::Refresh refresh) {
   }
   ++frames_;
   ports_.display->flush(0, info.height);
+}
+
+void NotesUi::sleep_face() {
+  if (!begun_ || ports_.display == nullptr) return;
+  asleep_ = true;  // set first: no event between here and the flush may draw
+  uint16_t* fb = ports_.display->framebuffer();
+  if (fb == nullptr) return;
+  const hg::DisplayInfo info = ports_.display->info();
+  if (info.width == 0 || info.height == 0) return;
+
+  hg::Canvas canvas(fb, info.width, info.height, info.swap_bytes);
+  notesui::draw_sleep(canvas);
+  // The machine owns the class of every frame, this one included: full, so the
+  // page the person was looking at does not ghost through the moon.
+  const notesui::Outcome out = state_.app().sleep_face();
+  if (out.refresh == notesui::Refresh::Full) ports_.display->request_full_refresh();
+  ++frames_;
+  // Wait for the waveform, not for the driver's task: shutdown() is called the
+  // moment this returns, and on battery that drops the rail - an unfinished
+  // update would leave the panel half-written, which is not "off", it is "broken".
+  const uint32_t before = ports_.display->update_count();
+  ports_.display->flush(0, info.height);
+  const bool settled = ports_.display->wait_idle(before, kSleepPanelMs);
+  ESP_LOGI(TAG, "the sleeping face is on the panel (full refresh, %s)", settled ? "settled" : "cut short");
 }
 
 void NotesUi::draw(const notesui::Outcome& outcome, uint32_t now_ms) {

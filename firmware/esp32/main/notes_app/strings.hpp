@@ -69,6 +69,8 @@ inline constexpr const char* kTapKeep = "TAP: keep";
 inline constexpr const char* kBootCancel = "BOOT: cancel";
 inline constexpr const char* kHoldCancel = "HOLD: cancel";
 inline constexpr const char* kPwrClose = "PWR: close";
+// The Unpair list's select: the row answers with a question, not with the act.
+inline constexpr const char* kPwrUnpair = "PWR: unpair";
 }  // namespace key
 
 // Durations, shared by Recording and Playing: "%u:%02u" is M:SS and
@@ -151,6 +153,18 @@ inline constexpr const char* kHolding = "Held open";
 inline constexpr const char* kOff = "Radio off";
 inline constexpr const char* kTable = "%u OF %u PAIRED";
 }  // namespace phone
+
+// The Unpair screen: the bonded phones, and the question one of them gets. An
+// empty table says what to do about it - the Phone row is where a phone is
+// paired - rather than leaving a blank page under a title.
+namespace unpair {
+inline constexpr const char* kTitle = "UNPAIR";
+inline constexpr const char* kCount = "%u PAIRED";
+inline constexpr const char* kEmpty = "NOTHING PAIRED";
+inline constexpr const char* kEmptyHint = "open PHONE to pair";
+inline constexpr const char* kConfirmHero = "UNPAIR?";
+inline constexpr const char* kHold = "HOLD: unpair";
+}  // namespace unpair
 
 namespace about {
 inline constexpr const char* kTitle = "ABOUT";

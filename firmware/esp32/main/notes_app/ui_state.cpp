@@ -18,8 +18,9 @@ constexpr uint64_t kCardFreeSlackBytes = 1ull << 20;        // 1 MiB: a write mo
 
 }  // namespace
 
-void UiState::begin(const Snapshot& seed, notes::Store* store) {
+void UiState::begin(const Snapshot& seed, notes::Store* store, BondPort* bonds) {
   store_ = store;
+  bonds_ = bonds;
   snap_ = seed;
   snap_.low_power = seed.battery_pct >= 0 && seed.battery_pct <= 10 && !seed.external;
   load_counts();
@@ -66,6 +67,21 @@ void UiState::load_window() {
     return;
   }
   cache_.fill(*store_, snap_, want.first, want.rows);
+}
+
+bool UiState::refresh_peers() {
+  if (bonds_ == nullptr) return false;
+  const Screen screen = app_.screen();
+  if (screen != Screen::UnpairList && screen != Screen::ConfirmUnpair) return false;
+  // Only the two screens that draw the table ask for it: the port is a handful of
+  // NVS-cached reads, but it is the radio's, and a press anywhere else must not
+  // wake it. The machine hears the new table through the sync_app() the press
+  // path already does, so a frame is never drawn from a stale list.
+  Peer before[kMaxPeerRows];
+  std::memcpy(before, snap_.peers, sizeof before);
+  const uint8_t had = snap_.peer_count;
+  const uint8_t now = notesui::load_peers(*bonds_, snap_);
+  return now != had || std::memcmp(before, snap_.peers, sizeof(Peer) * now) != 0;
 }
 
 void UiState::adopt_app_facts() {
@@ -179,6 +195,10 @@ Outcome UiState::press(Key key, uint32_t now_ms) {
   merge(out, synced);  // a hero that moved under the press still needs its frame
   adopt_app_facts();
   load_window();
+  // The Unpair screen's table, for the same reason and at the same point: a press
+  // that landed on it (or came back to it) must draw the table as the radio holds
+  // it now, not as it was when the menu was opened.
+  refresh_peers();
   // The machine acted on the snapshot sync_app() pushed before it moved, and
   // load_counts() had just zeroed that snapshot's window. Fill the window for
   // the screen the press landed on and hand it back: otherwise the frame this
@@ -187,6 +207,22 @@ Outcome UiState::press(Key key, uint32_t now_ms) {
   // Outcome is the only one this path returns.
   sync_app();
   return out;
+}
+
+Outcome UiState::unpair(uint8_t index, uint32_t now_ms) {
+  if (bonds_ == nullptr) return Outcome{};
+  // One erase, then the table is read again: unpair_peer() does both, and a store
+  // that refused leaves the snapshot (and the glass) as it was.
+  if (!notesui::unpair_peer(*bonds_, snap_, index)) {
+    // The phone went from the table between the question and the hold (the
+    // console, or a second press): the list is re-read so the frame that follows
+    // is the truth rather than a question about nobody.
+    refresh_peers();
+    return Outcome{};
+  }
+  // The list shrank. A publish carries it to the machine, which is what re-clamps
+  // the bar and draws the list one row fewer.
+  return publish(now_ms, DirtyQueue, Refresh::Full);
 }
 
 Outcome UiState::tick(uint32_t now_ms) {

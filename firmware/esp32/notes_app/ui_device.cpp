@@ -87,6 +87,7 @@ const char* effect_name(notesui::Effect effect) {
     case notesui::Effect::DeleteNote: return "a delete";
     case notesui::Effect::WipeNotes: return "a wipe of every note";
     case notesui::Effect::FormatCard: return "a card format";
+    case notesui::Effect::UnpairPeer: return "a phone unpaired";
   }
   return "an effect";
 }
@@ -101,6 +102,8 @@ const char* screen_name(notesui::Screen screen) {
     case notesui::Screen::ConfirmDelete: return "confirm-delete";
     case notesui::Screen::ConfirmWipe: return "confirm-wipe";
     case notesui::Screen::ConfirmFormat: return "confirm-format";
+    case notesui::Screen::UnpairList: return "unpair";
+    case notesui::Screen::ConfirmUnpair: return "confirm-unpair";
     case notesui::Screen::Playing: return "playing";
     case notesui::Screen::Pairing: return "pairing";
     case notesui::Screen::Phone: return "phone";
@@ -109,6 +112,36 @@ const char* screen_name(notesui::Screen screen) {
   }
   return "?";
 }
+
+// The Unpair screen's bond store (ui_peers.hpp), over the radio: the adapter's
+// translation between the UI's plain Peer and port_ble's BondInfo, so neither
+// layer has to know the other's types.
+class RadioBonds : public notesui::BondPort {
+ public:
+  explicit RadioBonds(PhoneLink* radio) : radio_(radio) {}
+  uint8_t list(notesui::Peer* out, uint8_t capacity) override {
+    if (radio_ == nullptr || out == nullptr || capacity == 0) return 0;
+    BondInfo found[notesui::kMaxPeerRows]{};
+    const uint8_t cap = capacity < notesui::kMaxPeerRows ? capacity : notesui::kMaxPeerRows;
+    const uint8_t n = radio_->bonded_peers(found, cap);
+    for (uint8_t i = 0; i < n; ++i) {
+      out[i] = notesui::Peer{};
+      out[i].type = found[i].type;
+      std::memcpy(out[i].addr, found[i].addr, sizeof out[i].addr);
+    }
+    return n;
+  }
+  bool erase(const notesui::Peer& peer) override {
+    if (radio_ == nullptr) return false;
+    BondInfo target{};
+    target.type = peer.type;
+    std::memcpy(target.addr, peer.addr, sizeof target.addr);
+    return radio_->forget_peer(target);
+  }
+
+ private:
+  PhoneLink* radio_;
+};
 
 // apply() can reach itself (a pairing answer hands the screen back), and the
 // runtime's publish must wait for the outermost one: a flag, saved and set on
@@ -124,6 +157,9 @@ struct InApply {
 
 void NotesUi::begin(const Ports& ports) {
   ports_ = ports;
+  // The Unpair screen's table is the radio's: one adapter over PhoneLink, built
+  // before the first frame so the state machine holds it from boot.
+  bonds_ = ports_.radio != nullptr ? std::make_unique<RadioBonds>(ports_.radio) : nullptr;
   if (ports_.system != nullptr && ports_.storage != nullptr) {
     auto name = ports_.storage->get("name");
     device_name_ = name && !name->empty() ? *name : std::string(CONFIG_HG_DEFAULT_NAME);
@@ -152,7 +188,7 @@ void NotesUi::begin(const Ports& ports) {
   seed.battery_pct = facts_.battery_pct;
   seed.external = facts_.external;
 
-  state_.begin(seed, ports_.store);
+  state_.begin(seed, ports_.store, bonds_.get());
   begun_ = true;
   first_frame_ = true;
   render(notesui::Refresh::Full);
@@ -271,7 +307,8 @@ void NotesUi::poll_busy(uint32_t now_ms) {
   const char* why = capture_probe_.busy();
   if (!state_.set_busy(why != nullptr ? why : "")) return;
   if (state_.screen() == notesui::Screen::ConfirmWipe ||
-      state_.screen() == notesui::Screen::ConfirmFormat) {
+      state_.screen() == notesui::Screen::ConfirmFormat ||
+      state_.screen() == notesui::Screen::ConfirmUnpair) {
     publish(notesui::DirtyQueue);
   }
 }
@@ -481,6 +518,21 @@ void NotesUi::apply(const notesui::Outcome& outcome, uint32_t now_ms) {
         pending_dirty_ = static_cast<uint16_t>(pending_dirty_ | notesui::DirtyQueue | notesui::DirtyList);
       } else {
         ESP_LOGW(TAG, "could not delete %s", id.c_str());
+      }
+      break;
+    }
+    case notesui::Effect::UnpairPeer: {
+      // The screens own this one: the bond store is the radio's, and the UiState
+      // adapter does the erase (exactly one) and republishes. The frame drawn is
+      // the list one row shorter; the runtime never sees the effect.
+      if (bonds_ == nullptr) {
+        ESP_LOGW(TAG, "no radio in this build: nothing to unpair");
+        break;
+      }
+      const notesui::Outcome after = state_.unpair(outcome.peer, now_ms);
+      if (after.draw) {
+        draw(after, now_ms);
+        return;
       }
       break;
     }
@@ -717,6 +769,21 @@ std::string NotesUi::console(std::string_view line) {
     // A full refresh across the next frame: what a screen hand-over does.
     render(notesui::Refresh::Full);
     return std::string("@ok redrawn");
+  }
+  if (line == "ui peers") {
+    // The bond table as the screen lists it, for the bench: the same read the
+    // Unpair screen makes, so "the list the glass drew" is checkable from the
+    // console without decoding a frame.
+    if (bonds_ == nullptr) return std::string("@error no radio in this build");
+    notesui::Peer peers[notesui::kMaxPeerRows];
+    const uint8_t n = bonds_->list(peers, notesui::kMaxPeerRows);
+    std::string out = "@ok " + std::to_string(n) + " paired";
+    for (uint8_t i = 0; i < n; ++i) {
+      char addr[18];
+      notesui::format_peer_addr(peers[i], addr);
+      out += std::string(i == 0 ? ": " : ", ") + addr;
+    }
+    return out;
   }
   if (line.rfind("ui press ", 0) == 0) {
     // A key, for a host with no finger on the board. The same entry the GPIO

@@ -1029,6 +1029,14 @@ enum class PhoneOpen : uint8_t {
   BleOff,     // this build has no Bluetooth, or begin() never ran
 };
 
+// One bonded phone's identity address, as the bond store holds it and as the
+// Unpair screen lists it. `addr` is in print order (addr[0] is the first octet
+// shown), which is the order the pairing ask already put on this glass.
+struct BondInfo {
+  uint8_t type = 0;      // BLE address type (public/random)
+  uint8_t addr[6] = {};  // print order: addr[0] is the first octet shown
+};
+
 // The Phone screen's window as the port sees it: no strings, no policy.
 struct PhoneWindow {
   bool ready = false;      // the controller is up, so advertising is on the air
@@ -1081,6 +1089,14 @@ class PhoneLink {
   void answer_pairing(bool allow);
   void close_pairing();
   void forget();  // removes every paired phone and drops a connected one
+  // The bonded phones, written into `out` (at most `capacity`), in the store's
+  // order; returns how many. Call from the app task - the work is moved onto the
+  // Bluetooth host task, because the store's API is the host's.
+  uint8_t bonded_peers(BondInfo* out, uint8_t capacity);
+  // Forget one phone's bond, dropping its link first if it is the one connected,
+  // so the phone finds itself unpaired instead of silently losing its keys. True
+  // when the store no longer holds it. Call from the app task.
+  bool forget_peer(const BondInfo& peer);
   void set_name(const std::string& name);
 };
 

@@ -18,6 +18,7 @@
 #include "notes/notes_store.hpp"
 #include "notes_app/ui_app.hpp"
 #include "notes_app/ui_cache.hpp"
+#include "notes_app/ui_peers.hpp"
 #include "notes_app/ui_view.hpp"
 
 namespace hgp::notesui {
@@ -41,8 +42,9 @@ class UiState {
   // recording cap and the first Facts). The card is read once, the screen
   // machine is given the counts, and only then is the first window filled: that
   // order is what keeps the boot frame's sub-line honest (QA D2 - it read
-  // "BOOT TO RECORD" with 58 notes on the card).
-  void begin(const Snapshot& seed, notes::Store* store);
+  // "BOOT TO RECORD" with 58 notes on the card). `bonds` is the radio's table, for
+  // the Unpair screen; null on a build without Bluetooth.
+  void begin(const Snapshot& seed, notes::Store* store, BondPort* bonds = nullptr);
 
   // Something the screens cannot see moved: a note was committed, deleted,
   // moved or pruned, an upload stepped, the card came or went. Re-reads the card
@@ -64,6 +66,12 @@ class UiState {
   Outcome press(Key key, uint32_t now_ms);
 
   Outcome tick(uint32_t now_ms);
+  // The Unpair confirm's hold: forget the phone at `index` in the snapshot's
+  // table (one erase), then re-read the table and publish, so the list the hold
+  // came back to is one row shorter and the Phone screen's count agrees. The
+  // screens have already refused a busy device; a store that refuses changes
+  // nothing and asks for no frame.
+  Outcome unpair(uint8_t index, uint32_t now_ms);
   // The runtime's own capture state, handed over before a tick or a publish.
   // The screens follow it (ScreenApp::follow_capture): a capture that ended
   // without a key leaves the recording face, one no key started enters it, and a
@@ -123,11 +131,16 @@ class UiState {
   static void merge(Outcome& out, const Outcome& more);
   void load_counts();
   void load_window();
+  // The Unpair screen's table, on the event that opens or returns to it: the
+  // radio's bond store is a fact like the card's counts, so it is read here and
+  // never from the draw path. True when it moved.
+  bool refresh_peers();
 
   Snapshot snap_;
   ScreenApp app_;
   Cache cache_;
   notes::Store* store_ = nullptr;
+  BondPort* bonds_ = nullptr;
   bool upload_active_ = false;
   bool upload_failed_ = false;
   uint8_t upload_done_ = 0, upload_total_ = 0;

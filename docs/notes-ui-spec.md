@@ -1082,6 +1082,84 @@ Both are static pages. About is deliberately **not live**: a battery percentage
 that ticks while you watch it would cost a panel refresh to tell you something you
 can already see in the band of every other screen.
 
+### 11.4 Unpair — the bonded phones
+
+**Keys:** BOOT tap next phone · PWR tap ask about the selected one · BOOT hold
+`Back` to Menu. On the question: BOOT hold removes the bond, BOOT tap and PWR tap
+keep it (the delete confirm's map, §9).
+
+**Job:** let a person remove a phone from the device's own glass, so a borrowed or
+resold unit is not still bonded to somebody else's handset. The pairing table
+holds three (`CONFIG_BT_NIMBLE_MAX_BONDS`), so the list is short enough that every
+phone is on the page: no scroll, and the bar's wrap is the only movement.
+
+```
+y=0    ┌──────────────────────────────────────────────────────┐
+       │ UNPAIR                                    2 PAIRED   │  y=8
+y=27   ├──────────────────────────────────────────────────────┤
+       │ A4:C1:38:7F:12:9B                                   │  y=32  (selected)
+       │ E0:5A:1B:22:9C:04       Pixel 8 Pro                 │  y=48
+y=144  ├──────────────────────────────────────────────────────┤
+       │ BOOT: next                                           │  y=152
+       │ PWR: unpair                                          │  y=170
+y=194  └──────────────────────────────────────────────────────┘
+```
+
+| Element | x | y | size | note |
+|---|---|---|---|---|
+| title `UNPAIR` | 12 | 8 | 70 × 14 | |
+| count `2 PAIRED` | right to 188 | 8 | | empty when the table is empty |
+| rule | 12 | 27 | | |
+| rows | 12 | **32 + 16n** | address ≤ 101, name right to 188 | scale 1, pitch 16, bar 15 |
+| rule / footers | 12 | 144 / 152 / 170 | | the two-line footer |
+
+**11.4.1 Why the address, at that size.** The address is what a phone's own
+settings show, so it is the one thing a person can compare with the handset in
+their hand. It is 17 columns (`A4:C1:38:7F:12:9B`), which is 203 px at the body
+size — off the 176 px column — so the list rows and the question's two lines are
+scale 1, the size the menu's rows already use. A name is drawn beside the address
+when the radio knew one; the bond store keeps keys, not names, so in practice the
+address is the whole row, and the layout leaves the room for the day something
+does know one (12 columns, no collision with the 101 px address).
+
+**11.4.2 The question.** `UNPAIR?`, the address, the name (or nothing), and the
+runtime's one-line reason when the hold would be refused:
+
+```
+y=42   UNPAIR?                        scale 3
+y=72   E0:5A:1B:22:9C:04              scale 1
+y=90   Pixel 8 Pro                    scale 1, empty when unknown
+y=108  BUSY UPLOADING                 scale 1, only while the device is busy
+y=118  ───────────────────────────────
+y=126  HOLD: unpair                   scale 2
+y=144  TAP: keep                      scale 2
+```
+
+The guard is the wipe's (§9.3): while `mode_ != Mode::Idle` — a note recording, an
+upload in flight — the hold is refused and the reason is already on the glass. A
+phone losing its keys mid-upload is the case that would strand the note.
+
+**11.4.3 What the hold does.** One `ble_store_util_delete_peer` for the address the
+question named - the store's key entries and that phone's CCCDs and RPA records -
+then the table is read again and the list republished. If the phone is connected,
+its link is terminated first: it keeps its own half of the bond until it notices,
+and a link held over keys this device no longer has can never encrypt again. The
+phone then shows the device as not paired and has to pair again (BOOT hold, Phone,
+the passkey) before it can write a note. The delete is asked once per hold: a
+second phone needs a second question.
+
+The store's API (`ble_store_util_*`) is the Bluetooth host task's. The screens ask
+from the app task, so `port_ble` hands the work to the host's event queue when the
+radio is up and waits a few milliseconds for the answer; with the radio at rest
+there is no host task to hand it to and the app task does it inline, where nothing
+else touches the store.
+
+**11.4.4 An empty table.** `NOTHING PAIRED` at the body size, `open PHONE to pair`
+under it, and a footer that offers only `HOLD: back` — a list that advertises
+"next" with nothing in it is a lie the user tests once (the note list's own rule).
+PWR does nothing there.
+
+
 ---
 
 ## 12. Frames this spec does not own
@@ -1215,6 +1293,13 @@ driver's partial path handle it. `—` = no flush at all.
 | 40 | `ABOUT` | BOOT tap | `None` | nothing | `ABOUT` | `—` |
 | 41 | `WIFI_SETUP` / `PHONE_WINDOW` | the port returns | — | — | `MENU` | `F` |
 | 42 | *any* | a display transfer fails (`take_redraw_request()`) | — | rebuild the view model and redraw | same | `F` (driver already forced it) |
+| 43 | `MENU` | PWR tap, row `Unpair phones` | `MenuSelect` | read the bond store once | `UNPAIR` | `F` |
+| 44 | `UNPAIR` | BOOT tap | `NextPeer` | — | `UNPAIR` | `P` (bar) |
+| 45 | `UNPAIR` | PWR tap | `OpenUnpairConfirm` (`None` on an empty table) | — | `CONFIRM_UNPAIR` | `F` |
+| 46 | `UNPAIR` | BOOT hold | `Back` | — | `MENU` | `F` |
+| 47 | `CONFIRM_UNPAIR` | BOOT hold | `UnpairPeer` | `ble_store_util_delete_peer(addr)`, read the table, republish | `UNPAIR` | `F` |
+| 48 | `CONFIRM_UNPAIR` | BOOT tap / PWR tap | `Back` | nothing outside the glass | `UNPAIR` | `F` |
+| 49 | `CONFIRM_UNPAIR` | BOOT hold while `mode_ != Idle` | `None` | nothing at all; the reason is already on the glass | `CONFIRM_UNPAIR` | `—` |
 
 **Rows 4a, 9, 37, 39 and 40 are the gestures in the whole UI that produce no panel
 activity at all**, and a PWR hold outside Home adds to them. They matter: a hold

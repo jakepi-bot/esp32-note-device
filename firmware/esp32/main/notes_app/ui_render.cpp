@@ -86,6 +86,13 @@ void draw_battery(hg::Canvas& c, int x, int y, int8_t pct, bool external) {
 
 void rule(hg::Canvas& c, int y) { c.fill_rect(grid::kLeft, y, grid::kWidth, 1, kInk); }
 
+// The Unpair screen's rows: an address is 17 columns at scale 1, and its bar is
+// 15 px, so the pitch is 16. Six of them (the panel's row count) close at 123 -
+// above the two-line footer's rule - which is why the list needs no scroll.
+constexpr int kPeerPitch = 16;
+static_assert(grid::kRowTop + kPeerPitch * (kMaxPeerRows - 1) + 12 < grid::kRuleTwoLine,
+              "unpair rows must end above the two-line footer rule");
+
 // One row of a list: the selection bar bleeds 4 px past each margin, because a
 // solid block's residue is invisible and an outline's is not (§3.4).
 void row(hg::Canvas& c, int y, const char* label, const char* value, bool selected) {
@@ -207,16 +214,49 @@ void confirm_face(hg::Canvas& c, const ScreenDraw& d) {
   const ConfirmView& v = d.confirm;
   // The question, then what it is about: one line for a note's stamp, two for a
   // wipe (the count, and that the card stays) or a format (the card, and what
-  // goes with it). The refusal sits above the rule at the small size - it is a
-  // reason, not part of the question.
+  // goes with it). An unpair states a 17-column address, so its two lines drop to
+  // scale 1 - the body size would run past the margin. The refusal sits above the
+  // rule at the small size - it is a reason, not part of the question.
   draw_centred(c, 42, v.hero, grid::kHero);
-  draw_centred(c, 72, v.line1, grid::kScale);
-  draw_centred(c, 90, v.line2, grid::kScale);
+  draw_centred(c, 72, v.line1, v.line_scale);
+  draw_centred(c, 90, v.line2, v.line_scale);
   if (v.why != nullptr) draw_centred(c, 108, v.why, 1);
   rule(c, 118);
   // The body is the legend: this screen has no footer and no rows (§8.2).
   draw_centred(c, 126, v.hold != nullptr ? v.hold : key::kHoldDelete, grid::kScale);
   draw_centred(c, 144, key::kTapKeep, grid::kScale);
+}
+
+// The Unpair screen (§11.4): one bonded phone a row, its address in the form the
+// phone's own settings show. The address is 17 columns, which the body size
+// (12 px a column) would run off the page, so the rows are the menu's size - and
+// the name, when the table knew one, takes the room beside it.
+void unpair_face(hg::Canvas& c, const ScreenDraw& d) {
+  const UnpairView& v = d.unpair;
+  text_at(c, grid::kLeft, grid::kBandY, unpair::kTitle, grid::kScale, kInk);
+  text_right(c, grid::kBandY, v.count_line, kInk);
+  rule(c, grid::kRuleY);
+  if (v.empty) {
+    // A table with nothing in it says so, and says where a phone is paired. An
+    // empty page under a title reads as a screen that failed to load.
+    draw_centred(c, 74, unpair::kEmpty, grid::kScale);
+    draw_centred(c, 96, unpair::kEmptyHint, 1);
+    draw_footer(c, key::kHoldBack);
+    return;
+  }
+  for (uint8_t i = 0; i < v.count; ++i) {
+    const int y = grid::kRowTop + kPeerPitch * i;
+    const bool selected = i == v.selected;
+    // The bar is 15 px for a 7 px glyph: a solid block's residue is invisible and
+    // an outline's is not (§3.4).
+    if (selected) c.fill_rect(grid::kLeft - 4, y - 3, grid::kWidth + 8, 15, kInk);
+    const uint16_t colour = selected ? kPaper : kInk;
+    text_at(c, grid::kLeft, y, v.row[i].addr, 1, colour);
+    if (v.row[i].name[0] != '\0') {
+      c.text(grid::kRight - text_width(v.row[i].name, 1), y, v.row[i].name, 1, colour);
+    }
+  }
+  draw_footer(c, key::kBootNext, key::kPwrUnpair);
 }
 
 void playing_face(hg::Canvas& c, const ScreenDraw& d) {
@@ -357,7 +397,9 @@ void draw(hg::Canvas& c, const ScreenDraw& d) {
     case Screen::NoteAction: note_face(c, d); break;
     case Screen::ConfirmDelete:
     case Screen::ConfirmWipe:
-    case Screen::ConfirmFormat: confirm_face(c, d); break;
+    case Screen::ConfirmFormat:
+    case Screen::ConfirmUnpair: confirm_face(c, d); break;
+    case Screen::UnpairList: unpair_face(c, d); break;
     case Screen::Playing: playing_face(c, d); break;
     case Screen::Pairing: pairing_face(c, d); break;
     case Screen::Phone: phone_face(c, d); break;

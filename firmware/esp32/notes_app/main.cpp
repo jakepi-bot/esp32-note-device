@@ -356,6 +356,18 @@ std::string set_line(std::string_view line) {
     g_runtime.set_wifi_stay(value == "on");
     return std::string("@ok wifi ") + value;
   }
+  if (key == "device_key") {
+    // The device's identity is derived from this key, and an NVS wipe makes a new
+    // one: the hub then answers "device ... is not enrolled" to every note. This
+    // puts a known key back (from the hub's devices.json) so the device is itself
+    // again. Base64, 32 bytes; a reboot is what loads it (load_identity() runs
+    // once, in begin()).
+    std::vector<uint8_t> raw;
+    if (!hg::crypto::base64_decode(value, raw) || raw.size() != 32)
+      return "@error device_key must be base64 of 32 bytes";
+    if (!g_storage.set("device_key", value)) return "@error cannot store device_key";
+    return "@ok device key stored; reboot to use it";
+  }
   if (key != "server" && key != "token" && key != "name" && key != "notes_url" && key != "timezone")
     return "@error unknown setting " + key;
   if (!g_storage.set(key, value)) return "@error cannot store " + key;

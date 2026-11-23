@@ -101,6 +101,7 @@ const char* screen_name(notesui::Screen screen) {
     case notesui::Screen::ConfirmDelete: return "confirm-delete";
     case notesui::Screen::ConfirmWipe: return "confirm-wipe";
     case notesui::Screen::ConfirmFormat: return "confirm-format";
+    case notesui::Screen::Wiping: return "wiping";
     case notesui::Screen::Playing: return "playing";
     case notesui::Screen::Pairing: return "pairing";
     case notesui::Screen::Phone: return "phone";
@@ -276,6 +277,35 @@ void NotesUi::poll_busy(uint32_t now_ms) {
   }
 }
 
+// The wipe/format the runtime is running (t_0070a731). The counts only reach the
+// glass as the job walks, and the result moves the face off WIPING to Home with
+// the card read again - 0 NOTES after a wipe. Both are asked on the tick, on the
+// app task; the worker owns the card and nothing here waits for it.
+void NotesUi::poll_card_job(uint32_t now_ms) {
+  if (!begun_) return;
+  if (card_job_probe_.active) {
+    bool format = false;
+    uint32_t done = 0, total = 0;
+    if (card_job_probe_.active(&format, &done, &total)) {
+      apply(state_.set_card_job(format, done, total), now_ms);
+    }
+  }
+  if (!card_job_probe_.result) return;
+  bool ok = true;
+  std::string why;
+  if (!card_job_probe_.result(&ok, &why)) return;  // still running
+  if (!ok) {
+    ESP_LOGW(TAG, "the card job failed: %s", why.empty() ? "no reason given" : why.c_str());
+  } else {
+    ESP_LOGI(TAG, "the card job finished; the counts are read again");
+  }
+  // The runtime has already put its counts back (take_card_job_result); this
+  // publish re-reads the card for the frame, which is the Home frame with the
+  // number the job left. `at_least` is the machine's own class for the hand-over.
+  const notesui::Outcome home = state_.card_job_finished();
+  if (home.draw) publish(static_cast<uint16_t>(notesui::DirtyQueue | notesui::DirtyList), home.refresh);
+}
+
 void NotesUi::render(notesui::Refresh refresh) {
   if (asleep_) return;  // the sleeping face is the last frame: nothing paints over it
   if (ports_.display == nullptr) return;
@@ -352,6 +382,23 @@ void NotesUi::apply(const notesui::Outcome& outcome, uint32_t now_ms) {
   // on hand *before* it draws. UiState does that inside each entry point; the
   // draw path itself still reads no card (§15.4).
   if (!begun_) return;
+  // A wipe or a format is 20-90 s of card work (measured: 114 notes in ~90 s, a
+  // 64 GB format in 22.8 s), so the runtime runs it on its own task and this
+  // function only starts it (t_0070a731). The busy frame goes on the panel
+  // first: what the person sees while it runs is WIPING/FORMATTING, not the
+  // confirm they just answered, and the app task is free for the console and the
+  // keys throughout.
+  if (outcome.effect == notesui::Effect::WipeNotes || outcome.effect == notesui::Effect::FormatCard) {
+    if (outcome.draw) render(outcome.refresh);
+    if (!hook_ || !hook_(outcome.effect, outcome.note)) {
+      // No runtime took it (or it refused: no card, busy after the guard
+      // passed): the busy face must not stay up over work that is not running.
+      ESP_LOGW(TAG, "the runtime did not start %s", effect_name(outcome.effect));
+      const notesui::Outcome undone = state_.decline(outcome.effect);
+      if (undone.draw) draw(undone, now_ms);
+    }
+    return;
+  }
   // The runtime owns the work that is not a screen: recording, the sync window
   // and the shutdown. When it takes an effect the screens do not repeat it.
   if (hook_ && outcome.effect != notesui::Effect::None && hook_(outcome.effect, outcome.note)) {
@@ -461,12 +508,13 @@ void NotesUi::apply(const notesui::Outcome& outcome, uint32_t now_ms) {
       return;
     case notesui::Effect::WipeNotes:
     case notesui::Effect::FormatCard: {
-      // The runtime owns both (it holds the store, the mount and the mode), so
-      // this is only reached when it declined: the busy guard in the screens is
-      // what stops that, and a race here leaves the glass on Home having done
-      // nothing rather than claiming an empty card.
-      ESP_LOGW(TAG, "the runtime declined %s: nothing was emptied", effect_name(outcome.effect));
-      break;
+      // Unreachable while a runtime hook exists (the branch above returns for
+      // both), and kept for the build that has none: the screens are on the busy
+      // face with nothing behind it, so go back to the truth - Home.
+      ESP_LOGW(TAG, "no runtime to run %s: nothing was emptied", effect_name(outcome.effect));
+      const notesui::Outcome undone = state_.decline(outcome.effect);
+      if (undone.draw) draw(undone, now_ms);
+      return;
     }
     case notesui::Effect::DeleteNote: {
       const std::string* found_id = state_.cache().id_at(outcome.note);
@@ -511,6 +559,10 @@ void NotesUi::tick(uint32_t now_ms) {
   // pass draws, and a capture that ended under the glass is worth the frame.
   const notesui::Outcome followed = sync_capture();
   if (followed.draw) apply(followed, now_ms);
+
+  // A wipe or a format is on the runtime's own task: take its counts and, when
+  // it is over, put Home back with the card re-read (t_0070a731).
+  poll_card_job(now_ms);
 
   const uint32_t since_facts = now_ms - last_facts_ms_;
   if (last_facts_ms_ == 0 || since_facts >= kFactsMs) {

@@ -131,8 +131,9 @@ bool run_effect(hgp::notesui::Effect effect, uint16_t note) {
       g_runtime.sync_now(g_system.now_ms());
       return true;
     case Effect::WipeNotes: {
-      // The menu's Wipe notes, after its confirm: the runtime empties the store
-      // and republishes the counts, so the frame that follows reads 0 NOTES.
+      // The menu's Wipe notes, after its confirm: the runtime checks the guard
+      // and starts the wipe on its own task (t_0070a731), so this returns in
+      // milliseconds and the glass draws its busy frame from the effect.
       const std::string answer = g_runtime.on_action(static_cast<int>(Action::WipeNotes));
       if (answer.empty()) ESP_LOGW(TAG, "the runtime refused the wipe: its reason is above");
       return !answer.empty();
@@ -645,6 +646,20 @@ extern "C" void app_main(void) {
                           [] { return g_runtime.recording_queued(); }, [] { return g_runtime.record_cap_s(); },
                           [] { return g_runtime.record_cap_bytes(); },
                           [] { return g_runtime.busy_reason(); }});
+  // The wipe and the format run on the runtime's own task, so the glass hears
+  // their counts and their end here instead of waiting inside the effect
+  // (t_0070a731): a 114-note wipe is ~90 s of card work and a format 22.8 s.
+  hgp::NotesUi::CardJobProbe card_job_probe;
+  card_job_probe.active = [](bool* format, uint32_t* done, uint32_t* total) {
+    const hgn::Runtime::CardJob job = g_runtime.card_job();
+    if (!job.active) return false;
+    *format = job.format;
+    *done = job.done;
+    *total = job.total;
+    return true;
+  };
+  card_job_probe.result = [](bool* ok, std::string* why) { return g_runtime.take_card_job_result(ok, why); };
+  g_ui.set_card_job_probe(card_job_probe);
   g_ui.begin(ui_ports);
 
   // The runtime's other half reaches the glass through these (QA D1): a note

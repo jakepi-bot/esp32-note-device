@@ -18,6 +18,7 @@
 //   Confirm    keep the note      (nothing)    keep the note      delete the note
 //   ConfirmWipe  cancel, menu     (nothing)    cancel, menu       wipe every note
 //   ConfirmFormat cancel, menu    (nothing)    cancel, menu       format the card
+//   Wiping     (nothing)          (nothing)    (nothing)          (nothing)
 //   Playing    stop, to the list  (nothing)    stop               stop
 //   Pairing    refuse the phone   (nothing)    allow the phone    (nothing)
 //   Phone      close the window   (nothing)    (nothing)          back to the menu
@@ -26,6 +27,11 @@
 // Nothing here decides what "select" means for a menu row: the caller maps
 // State::menu through MenuItem and runs it, so this stays testable and the
 // actions stay in one place.
+//
+// Wiping is the one screen no key leaves: the confirm has been answered and the
+// card work is running off the app task (t_0070a731). A press in the middle of a
+// 20-90 s wipe can only confuse, and on this board a 2.5 s PWR hold cuts the
+// rail in hardware whatever the firmware decides.
 #pragma once
 
 #include <cstdint>
@@ -41,6 +47,7 @@ enum class Screen : uint8_t {
   ConfirmDelete,
   ConfirmWipe,    // empty the device: every note, the card left as filesystem
   ConfirmFormat,  // format the SD card: every note and the card's log
+  Wiping,         // the work behind those two confirms, while it runs
   Playing,
   Pairing,
   Phone,  // the Bluetooth window a person opened from the menu

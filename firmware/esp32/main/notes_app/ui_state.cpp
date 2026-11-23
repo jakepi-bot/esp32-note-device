@@ -172,7 +172,13 @@ Outcome UiState::press(Key key, uint32_t now_ms) {
   // The card first: a key acts on what is on it now. This is the other half of
   // D1 - the press path never re-read the counts, so even a fresh snapshot would
   // have handed the machine yesterday's list.
-  load_counts();
+  //
+  // Except while a wipe or a format owns the volume (t_0070a731): the screen is
+  // the keyless busy face, no count on it can change, and a card scan here waits
+  // behind the worker's own removes - a press staged behind a 90 s wipe has no
+  // business costing the console its 10 s answer. The counts are re-read by the
+  // publish that ends the job.
+  if (app_.screen() != Screen::Wiping) load_counts();
   adopt_app_facts();
   const Outcome synced = sync_app();
   Outcome out = app_.press(key, now_ms);
@@ -246,6 +252,15 @@ Outcome UiState::decline(Effect effect) {
 Outcome UiState::pairing_ask(uint32_t passkey) { return app_.pairing_ask(passkey); }
 
 Outcome UiState::pairing_answer(bool allow) { return app_.pairing_answer(allow); }
+
+// The card job's two moves (t_0070a731). No card work and no snapshot rebuild:
+// the counts the job leaves are read by the publish the caller makes when it is
+// over, and the face itself only needs the runtime's numbers.
+Outcome UiState::set_card_job(bool format, uint32_t done, uint32_t total) {
+  return app_.card_job_progress(format, done, total);
+}
+
+Outcome UiState::card_job_finished() { return app_.card_job_finished(); }
 
 // The Phone screen's window is the port's answer, not the card's: hand it to the
 // machine, which decides whether the glass moves.

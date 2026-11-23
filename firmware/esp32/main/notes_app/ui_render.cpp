@@ -219,6 +219,22 @@ void confirm_face(hg::Canvas& c, const ScreenDraw& d) {
   draw_centred(c, 144, key::kTapKeep, grid::kScale);
 }
 
+// The busy face (t_0070a731): one word, what is happening and - for a wipe - how
+// far it has got. No footer bindings: there are none to give, and the line says
+// so rather than leaving the slot empty.
+void busy_face(hg::Canvas& c, const ScreenDraw& d) {
+  const BusyView& v = d.busy;
+  draw_centred(c, 42, v.hero, grid::kHero);
+  draw_centred(c, 72, v.line1, grid::kScale);
+  draw_centred(c, 90, v.line2, grid::kScale);
+  // The bar is real progress, so it is drawn only where the count is real (a
+  // wipe). A format would only be able to fill it from a timer, which is a
+  // spinner wearing a ruler's clothes.
+  if (v.bar) draw_progress(c, 116, v.pct);
+  rule(c, grid::kRuleOneLine);
+  draw_centred(c, grid::kFooterOne, key::kPleaseWait, grid::kScale);
+}
+
 void playing_face(hg::Canvas& c, const ScreenDraw& d) {
   const HomeView& band = d.home;
   draw_band(c, band.band, band.clock, band.wifi_on, band.wifi_up, band.battery_pct, band.external);
@@ -358,6 +374,7 @@ void draw(hg::Canvas& c, const ScreenDraw& d) {
     case Screen::ConfirmDelete:
     case Screen::ConfirmWipe:
     case Screen::ConfirmFormat: confirm_face(c, d); break;
+    case Screen::Wiping: busy_face(c, d); break;
     case Screen::Playing: playing_face(c, d); break;
     case Screen::Pairing: pairing_face(c, d); break;
     case Screen::Phone: phone_face(c, d); break;

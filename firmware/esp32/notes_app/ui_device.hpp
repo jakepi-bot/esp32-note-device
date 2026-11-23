@@ -98,6 +98,17 @@ class NotesUi {
   };
   void set_capture_probe(CaptureProbe probe) { capture_probe_ = std::move(probe); }
 
+  // The card job the runtime runs off the app task (t_0070a731). A wipe of 114
+  // notes is ~90 s on this card and a format 22.8 s, so the runtime starts it on
+  // its own task and the glass shows WIPING/FORMATTING while it runs. Both are
+  // asked on the app task's tick - never from the draw path - and the result is
+  // consumed once, which is what moves the face back to Home.
+  struct CardJobProbe {
+    std::function<bool(bool* format, uint32_t* done, uint32_t* total)> active;
+    std::function<bool(bool* ok, std::string* error)> result;
+  };
+  void set_card_job_probe(CardJobProbe probe) { card_job_probe_ = std::move(probe); }
+
   // One key, one screen change (§13.2). The outcome is returned so the caller
   // can tell a press the screens took from one they left alone - the PWR hold is
   // the case: Home asks for the power-off, every other screen declines it.
@@ -157,6 +168,8 @@ class NotesUi {
   void poll_phone(uint32_t now_ms);
   // The runtime's busy answer, adopted on every key and tick.
   void poll_busy(uint32_t now_ms);
+  // The wipe/format the runtime is running: the counts, and the moment it ends.
+  void poll_card_job(uint32_t now_ms);
   void render(notesui::Refresh refresh);
   void apply(const notesui::Outcome& outcome, uint32_t now_ms);
   // Draws the frame an effect left behind - or, when the effect moved the card,
@@ -176,6 +189,7 @@ class NotesUi {
   Ports ports_;
   EffectHook hook_;
   CaptureProbe capture_probe_;
+  CardJobProbe card_job_probe_;
   notesui::UiState state_;
   notesui::Facts facts_;
 

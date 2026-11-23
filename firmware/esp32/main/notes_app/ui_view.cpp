@@ -371,6 +371,32 @@ ConfirmView build_format_confirm(const Snapshot& snap) {
   return out;
 }
 
+// The work the confirm promised, now running (t_0070a731). A wipe knows its
+// total the moment the store has listed the three folders, so its line is a real
+// count and its bar is real progress; before that first call it says the card is
+// being read. A format has no number the firmware can honestly report, so it
+// says what is happening and what not to do.
+BusyView build_busy(bool format, uint32_t done, uint32_t total) {
+  BusyView out;
+  out.format = format;
+  copy_out(format ? busy::kFormatHero : busy::kWipeHero, out.hero, sizeof out.hero);
+  if (format) {
+    copy_out(busy::kFormatTarget, out.line1, sizeof out.line1);
+    copy_out(busy::kDontUnplug, out.line2, sizeof out.line2);
+    return out;
+  }
+  if (total != 0) {
+    std::snprintf(out.line1, sizeof out.line1, busy::kCount, static_cast<unsigned>(done),
+                  static_cast<unsigned>(total));
+    out.pct = static_cast<uint8_t>(done > total ? 100u : (done * 100u) / total);
+    out.bar = true;
+  } else {
+    copy_out(busy::kCounting, out.line1, sizeof out.line1);
+  }
+  copy_out(busy::kCardStays, out.line2, sizeof out.line2);
+  return out;
+}
+
 // The Phone screen: the port's phase as one word, the window's clock, and the
 // pairing table. A refusal is a word too - "PAIRING FULL" is the reason, in the
 // same slot the state goes in, so the screen never says nothing (t_9972e2a1).

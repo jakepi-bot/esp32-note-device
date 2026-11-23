@@ -65,6 +65,9 @@ inline constexpr const char* kHoldFormat = "HOLD: format";
 inline constexpr const char* kHoldBack = "HOLD: back";
 inline constexpr const char* kHoldNothing = "HOLD: nothing";
 inline constexpr const char* kTapKeep = "TAP: keep";
+// The busy face's one line: neither key does anything while the card is being
+// emptied, so the footer says what the person should do - nothing (t_0070a731).
+inline constexpr const char* kPleaseWait = "PLEASE WAIT";
 // The queued recording face: the press ends the wait, it does not keep anything.
 inline constexpr const char* kBootCancel = "BOOT: cancel";
 inline constexpr const char* kHoldCancel = "HOLD: cancel";
@@ -129,6 +132,21 @@ inline constexpr const char* kFormatHero = "FORMAT";
 inline constexpr const char* kFormatTarget = "THE SD CARD";
 inline constexpr const char* kFormatLoss = "NOTES AND LOG GO";
 }  // namespace confirm
+
+// The busy face the work runs behind (t_0070a731). The confirm's copy is the
+// question; this is the answer in progress - the same number it promised, now
+// moving, and the same warning, now while the card is actually being written.
+// Ten columns at most at scale 3, fourteen at scale 2 (the 176 px body width).
+namespace busy {
+inline constexpr const char* kWipeHero = "WIPING";
+inline constexpr const char* kFormatHero = "FORMATTING";
+inline constexpr const char* kCount = "%u OF %u";
+// The first progress call carries the total; until then the card is being read.
+inline constexpr const char* kCounting = "READING CARD";
+inline constexpr const char* kCardStays = "THE CARD STAYS";
+inline constexpr const char* kFormatTarget = "THE SD CARD";
+inline constexpr const char* kDontUnplug = "DO NOT UNPLUG";
+}  // namespace busy
 
 namespace pairing {
 inline constexpr const char* kTitle = "PAIRING";

@@ -40,6 +40,9 @@ Action press_power(State& state) {
       // machine draws the frame - nothing outside the glass is touched.
       state.go(Screen::Menu);
       return Action::Back;
+    case Screen::Wiping:
+      // The work owns the device: no tap can cut it short or start another.
+      return Action::None;
     case Screen::Playing:
       // Stop the audio and leave the player, and never the device: this tap used
       // to power off, so browsing notes switched the board off with one key and
@@ -92,6 +95,8 @@ Action press_boot(State& state) {
     case Screen::ConfirmFormat:
       state.go(Screen::Menu);
       return Action::Back;  // a tap cancels: only the hold empties anything
+    case Screen::Wiping:
+      return Action::None;  // the work is running; a tap is not an answer
     case Screen::Playing:
       state.playing = false;
       return Action::StopPlay;
@@ -128,13 +133,18 @@ Action hold_boot(State& state) {
       state.go(Screen::NoteList);
       return Action::DeleteNote;
     case Screen::ConfirmWipe:
-      // Home is the answer to an empty device: the frame after this says 0 NOTES
-      // rather than leaving the person in the menu to go and look.
-      state.go(Screen::Home);
+      // Home is the answer to an empty device: the busy face runs the wipe, and
+      // the frame after it says 0 NOTES rather than leaving the person in the
+      // menu to go and look (t_0070a731).
+      state.go(Screen::Wiping);
       return Action::WipeNotes;
     case Screen::ConfirmFormat:
-      state.go(Screen::Home);
+      state.go(Screen::Wiping);
       return Action::FormatCard;
+    case Screen::Wiping:
+      // A hold cannot cut the job short: the runtime is emptying the card and
+      // has no cancellation a key should be able to reach.
+      return Action::None;
     case Screen::Playing:
       state.playing = false;
       return Action::StopPlay;

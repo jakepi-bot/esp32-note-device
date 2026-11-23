@@ -743,12 +743,14 @@ TEST("render: every screen inks paper only - x 4..196, y <= 186 at 1 bit") {
   std::snprintf(frame.phone.table, sizeof frame.phone.table, "2 OF 3 PAIRED");
   frame.phone.note = phone::kHolding;
   frame.about = build_about(Snapshot{});
+  frame.busy = build_busy(false, 57, 114);  // the busiest copy a wipe has
 
   static uint16_t fb[200 * 200];
   const Screen screens[] = {Screen::Home,     Screen::Menu,          Screen::NoteList,
                             Screen::NoteAction, Screen::ConfirmDelete, Screen::ConfirmWipe,
-                            Screen::ConfirmFormat, Screen::Playing,   Screen::Recording,
-                            Screen::Pairing,  Screen::Phone,         Screen::About};
+                            Screen::ConfirmFormat, Screen::Wiping,   Screen::Playing,
+                            Screen::Recording, Screen::Pairing,       Screen::Phone,
+                            Screen::About};
   for (Screen screen : screens) {
     frame.screen = screen;
     if (screen == Screen::ConfirmWipe) {
@@ -1537,15 +1539,16 @@ TEST("confirm: a BOOT tap cancels wipe and a BOOT hold wipes") {
   CHECK(pwr.effect == Effect::None);
   CHECK(app.screen() == Screen::Menu);
 
-  // The hold is the wipe, and the glass lands on Home - where the count the
-  // runtime republishes is the answer (0 NOTES).
+  // The hold is the wipe, and the glass lands on the busy face - the frame the
+  // device paints before it starts the runtime's work (t_0070a731). Home, with
+  // the count the job leaves, is the frame card_job_finished() asks for.
   app.press(Key::Power, 0);
   CHECK(app.screen() == Screen::ConfirmWipe);
   const Outcome wipe = app.press(Key::BootHold, 0);
   CHECK(wipe.effect == Effect::WipeNotes);
   CHECK(wipe.refresh == Refresh::Full);
   CHECK(wipe.draw);
-  CHECK(app.screen() == Screen::Home);
+  CHECK(app.screen() == Screen::Wiping);
 }
 
 TEST("confirm: a BOOT tap cancels format and a BOOT hold formats") {
@@ -1580,7 +1583,7 @@ TEST("confirm: a BOOT tap cancels format and a BOOT hold formats") {
   const Outcome format = app.press(Key::BootHold, 0);
   CHECK(format.effect == Effect::FormatCard);
   CHECK(format.refresh == Refresh::Full);
-  CHECK(app.screen() == Screen::Home);
+  CHECK(app.screen() == Screen::Wiping);
 }
 
 TEST("guard: wipe and format are refused while the device is busy") {
@@ -1650,9 +1653,11 @@ TEST("home: shows 0 NOTES after a wipe") {
   open_menu_row(app, MenuItem::WipeNotes);
   const Outcome wipe = app.press(Key::BootHold, 0);
   CHECK(wipe.effect == Effect::WipeNotes);
+  CHECK(app.screen() == Screen::Wiping);
 
-  // What the device's effect does (ui_device -> Runtime::wipe_notes), and the
-  // publish that follows it: the counts and the list are re-read from the card.
+  // What the device's effect does (ui_device -> Runtime::begin_wipe, then the
+  // worker's own walk on the card), and the two moves the app task makes on the
+  // glass while it runs: the counts, then Home.
   CHECK(store.wipe() == 2);
   CHECK(cache.reload(store));
   Snapshot after = snapshot_for(cache, store, Screen::Home, 0);
@@ -1664,8 +1669,13 @@ TEST("home: shows 0 NOTES after a wipe") {
   CHECK(after.notes_total() == 0);
 
   const Outcome publish = app.publish(after, static_cast<uint16_t>(DirtyQueue | DirtyList));
-  CHECK(app.screen() == Screen::Home);
   CHECK(publish.draw);
+  // The job is over: the machine's own move back to Home, then the publish that
+  // carries the empty card (t_0070a731).
+  const Outcome home = app.card_job_finished();
+  CHECK(home.draw);
+  CHECK(home.refresh == Refresh::Full);
+  CHECK(app.screen() == Screen::Home);
   const ScreenDraw frame = app.frame();
   CHECK(std::string(frame.home.band) == "ALL SENT");
   CHECK(std::string(frame.home.sub) == "BOOT TO RECORD");  // no LAST, nothing left
@@ -1702,4 +1712,143 @@ TEST("store: wipe removes every note and leaves the folders") {
     CHECK(access(store.state_dir(state).c_str(), F_OK) == 0);
   }
   CHECK(store.ensure());
+}
+
+TEST("busy: a wipe draws its face before the work and Home after it") {
+  // t_0070a731: the confirm's answer used to be the work, so the glass stayed on
+  // the confirm for the whole 90 s it took. Now the hold returns the busy face
+  // with the effect, the device paints that frame before it starts the job, and
+  // the Home frame comes only when the job is over.
+  Snapshot snap;
+  snap.card = true;
+  snap.note_count = 3;
+  snap.count_pending = 3;
+
+  ScreenApp app;
+  app.begin(snap);
+  open_menu_row(app, MenuItem::WipeNotes);
+  CHECK(app.screen() == Screen::ConfirmWipe);
+
+  const Outcome wipe = app.press(Key::BootHold, 0);
+  CHECK(wipe.effect == Effect::WipeNotes);  // what ui_device runs after the frame
+  CHECK(wipe.draw);
+  CHECK(wipe.refresh == Refresh::Full);
+  CHECK(app.screen() == Screen::Wiping);
+
+  // The frame the device draws before it calls the runtime: WIPING, and the card
+  // is still being read (the total arrives with the worker's first progress).
+  const ScreenDraw before = app.frame();
+  CHECK(before.screen == Screen::Wiping);
+  CHECK(std::string(before.busy.hero) == "WIPING");
+  CHECK(std::string(before.busy.line1) == "READING CARD");
+  CHECK(std::string(before.busy.line2) == "THE CARD STAYS");
+  CHECK(!before.busy.bar);
+
+  // The counts, as the store's own walk reports them: 114 notes on the bench.
+  const Outcome known = app.card_job_progress(false, 0, 114);
+  CHECK(known.draw);
+  CHECK(known.refresh == Refresh::Partial);
+  const ScreenDraw first = app.frame();
+  CHECK(std::string(first.busy.line1) == "0 OF 114");
+  CHECK(first.busy.bar);
+  CHECK(first.busy.pct == 0);
+
+  // A whole-panel waveform is ~0.6 s on this unit, so the bar moves on a 5 %
+  // step and not on a note: 1 of 114 is still 0 %, 6 of 114 is the next frame.
+  CHECK(!app.card_job_progress(false, 1, 114).draw);
+  const Outcome step = app.card_job_progress(false, 6, 114);
+  CHECK(step.draw);
+  CHECK(step.refresh == Refresh::Partial);
+  CHECK(std::string(app.frame().busy.line1) == "6 OF 114");
+  CHECK(app.frame().busy.pct == 5);
+  // ...and the last note always draws, however small its step.
+  CHECK(app.card_job_progress(false, 114, 114).draw);
+  CHECK(app.frame().busy.pct == 100);
+
+  // No key reaches the job: a tap, a hold and a PWR hold all do nothing.
+  CHECK(app.press(Key::BootTap, 0).effect == Effect::None);
+  CHECK(app.press(Key::BootHold, 0).effect == Effect::None);
+  CHECK(app.press(Key::Power, 0).effect == Effect::None);
+  CHECK(app.press(Key::PowerHold, 0).effect == Effect::None);
+  CHECK(app.screen() == Screen::Wiping);
+
+  // The end: Home, full, and the publish that follows reads 0 NOTES.
+  const Outcome done = app.card_job_finished();
+  CHECK(done.draw);
+  CHECK(done.refresh == Refresh::Full);
+  CHECK(app.screen() == Screen::Home);
+  Snapshot empty = snap;
+  empty.note_count = 0;
+  empty.count_pending = 0;
+  CHECK(app.publish(empty, static_cast<uint16_t>(DirtyQueue | DirtyList)).draw);
+  CHECK(std::string(app.frame().home.band) == "ALL SENT");
+}
+
+TEST("busy: a format says what it is doing and draws no invented progress") {
+  // A format has no number the firmware can honestly report (one 22.8 s
+  // esp_vfs_fat_sdcard_format call), so its face carries the word, the target
+  // and the one instruction that matters, and no bar.
+  Snapshot snap;
+  snap.card = true;
+  ScreenApp app;
+  app.begin(snap);
+  open_menu_row(app, MenuItem::FormatCard);
+  CHECK(app.press(Key::BootHold, 0).effect == Effect::FormatCard);
+  CHECK(app.screen() == Screen::Wiping);
+
+  const ScreenDraw face = app.frame();
+  CHECK(face.screen == Screen::Wiping);
+  CHECK(std::string(face.busy.hero) == "FORMATTING");
+  CHECK(std::string(face.busy.line1) == "THE SD CARD");
+  CHECK(std::string(face.busy.line2) == "DO NOT UNPLUG");
+  CHECK(!face.busy.bar);
+  // The runtime reports no counts for it: no frame is owed for 0 of 0.
+  CHECK(!app.card_job_progress(true, 0, 0).draw);
+
+  CHECK(app.card_job_finished().draw);
+  CHECK(app.screen() == Screen::Home);
+}
+
+TEST("store: wipe reports (done, total) for every note, and a false stops it") {
+  // The count the busy face draws is the store's own: the total is known before
+  // the first removal (every folder is listed first), and one pair arrives per
+  // note. A false answer - a shutdown - stops the walk where it is.
+  TempDir dir;
+  Store store(dir.path + "/notes");
+  store.ensure();
+  CHECK(!make_note(store, "hg-a-20261121T140200-0001", "2026-11-21T14:02:00Z", 1, NoteState::Pending).empty());
+  CHECK(!make_note(store, "hg-a-20261121T140201-0002", "2026-11-21T14:02:01Z", 1, NoteState::Pending).empty());
+  CHECK(!make_note(store, "hg-a-20261121T140202-0003", "2026-11-21T14:02:02Z", 1, NoteState::Pending).empty());
+  CHECK(!make_note(store, "hg-a-20261120T091100-0004", "2026-11-20T09:11:00Z", 1, NoteState::Failed).empty());
+  CHECK(!make_note(store, "hg-a-20261119T184000-0005", "2026-11-19T18:40:00Z", 1, NoteState::Sent).empty());
+
+  std::vector<std::pair<uint32_t, uint32_t>> calls;
+  const uint32_t gone = store.wipe([&calls](uint32_t done, uint32_t total) {
+    calls.push_back({done, total});
+    return true;
+  });
+  CHECK(gone == 5);
+  CHECK(calls.size() == 6);  // 0 of 5 first, then one pair a note
+  CHECK(calls.front().first == 0);
+  CHECK(calls.front().second == 5);
+  CHECK(calls.back().first == 5);
+  CHECK(calls.back().second == 5);
+  for (size_t i = 1; i < calls.size(); ++i) {
+    CHECK(calls[i].first == calls[i - 1].first + 1);
+    CHECK(calls[i].second == 5);  // the total never moves
+  }
+
+  // A second walk stops where the callback says so: two removed, three left.
+  CHECK(!make_note(store, "hg-a-20261118T100000-0006", "2026-11-18T10:00:00Z", 1).empty());
+  CHECK(!make_note(store, "hg-a-20261118T100001-0007", "2026-11-18T10:00:01Z", 1).empty());
+  CHECK(!make_note(store, "hg-a-20261118T100002-0008", "2026-11-18T10:00:02Z", 1).empty());
+  uint32_t seen = 0;
+  const uint32_t stopped = store.wipe([&seen](uint32_t done, uint32_t total) {
+    (void)total;
+    seen = done;
+    return done < 2;  // stop once two notes are gone
+  });
+  CHECK(stopped == 2);
+  CHECK(seen == 2);
+  CHECK(store.count(NoteState::Pending) == 1);
 }

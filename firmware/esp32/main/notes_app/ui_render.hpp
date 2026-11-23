@@ -58,6 +58,7 @@ struct ScreenDraw {
   ListView list;
   NoteView note;
   ConfirmView confirm;
+  BusyView busy;
   RecordingView recording;
   PlayingView playing;
   PairingView pairing;

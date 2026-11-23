@@ -252,6 +252,22 @@ bool build_confirm(const Snapshot& snap, uint16_t index, ConfirmView& out);
 ConfirmView build_wipe_confirm(const Snapshot& snap);
 ConfirmView build_format_confirm(const Snapshot& snap);
 
+// The busy face behind those two confirms (t_0070a731): the question has been
+// answered and the work is running, off the app task. There are no keys on it -
+// a wipe of 114 notes is ~90 s on this card and a format 23 s - so it carries a
+// word, what is happening, and, for a wipe (whose total is known up front and
+// arrives with the first progress call), how far it has got. A format has no
+// honest number, so it draws no bar rather than a spinner that means nothing.
+struct BusyView {
+  bool format = false;
+  char hero[14] = {};   // "WIPING" / "FORMATTING"
+  char line1[24] = {};  // "12 OF 114" / "THE SD CARD"
+  char line2[24] = {};  // "THE CARD STAYS" / "DO NOT UNPLUG"
+  uint8_t pct = 0;      // 0..100, the bar's fill
+  bool bar = false;
+};
+BusyView build_busy(bool format, uint32_t done, uint32_t total);
+
 struct RecordingView {
   uint32_t elapsed_s = 0;
   // The cap this note will hit, and the bytes behind it (Snapshot::note_max_s

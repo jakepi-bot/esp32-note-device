@@ -115,6 +115,17 @@ class ScreenApp {
   Outcome pairing_answer(bool allow);
   Outcome playback_finished();
 
+  // The work behind the wipe and format confirms, as the runtime reports it
+  // (t_0070a731). `press()` hands the screen to Wiping with the effect, so the
+  // frame the device draws before it starts the job is the busy face; these are
+  // the two calls that move it afterwards. Progress draws only on a 5 % step:
+  // each refresh is a whole-panel waveform (~0.6 s on this unit), and 114 of them
+  // for 114 notes would cost more than the wipe.
+  Outcome card_job_progress(bool format, uint32_t done, uint32_t total);
+  // The job ended (either way): Home is the answer, and the publish that follows
+  // carries the counts it left (0 NOTES after a wipe).
+  Outcome card_job_finished();
+
   // The refresh the sleeping face owes (drawn by draw_sleep, ui_render.hpp).
   // Not a transition: no key comes back from it and the machine never enters
   // it, so this answers the one thing it owns - the class of the frame. Always
@@ -161,6 +172,13 @@ class ScreenApp {
   uint32_t play_draw_s_ = 0;   // the position's last drawn second
   uint32_t passkey_ = 0;
   bool play_done_ = false;
+  // The wipe/format running behind the busy face: which one, the count the
+  // runtime last reported, and the percentage the bar was last drawn at (so the
+  // drawn step, not the note, decides when the panel is asked again).
+  bool card_format_ = false;
+  uint32_t card_done_ = 0;
+  uint32_t card_total_ = 0;
+  uint8_t card_pct_ = 255;
   // The Phone screen's window: what the port last said, and the second the
   // countdown was last drawn for.
   PhoneStatus phone_;

@@ -477,8 +477,12 @@ int on_gap(ble_gap_event* event, void*) {
       const bool closed_too_soon = pairing_conn && !g_pairing;
       if (event->enc_change.status == 0 && d.sec_state.authenticated && d.sec_state.bonded && !closed_too_soon) {
         if (pairing_conn) {
+          // The same address the ask carried, so the screen can tell this bond
+          // from a second phone's question (t_da500270).
+          uint8_t peer[6];
+          for (int i = 0; i < 6; ++i) peer[i] = d.peer_id_addr.val[5 - i];
           ESP_LOGI(TAG, "phone paired");
-          post(PhoneSample::Kind::Paired);
+          post(PhoneSample::Kind::Paired, 0, peer);
         }
         post(PhoneSample::Kind::Status);
         return 0;

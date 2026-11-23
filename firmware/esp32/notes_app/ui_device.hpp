@@ -120,9 +120,13 @@ class NotesUi {
   void tick(uint32_t now_ms);
 
   // A phone asked to pair, and the passkey it negotiated (port_ble's Phone
-  // events). The ask is an overlay: it returns where it interrupted.
-  void on_pairing_ask();
+  // events). The ask is an overlay: it returns where it interrupted. `peer` is
+  // the asking phone's address, and `on_pairing_paired` is the port's news that
+  // its bond is made: the ask leaves by itself rather than waiting for a key the
+  // console's `phone allow` already answered elsewhere (t_da500270).
+  void on_pairing_ask(const uint8_t peer[6]);
   void on_pairing_passkey(uint32_t passkey);
+  void on_pairing_paired(const uint8_t peer[6]);
 
   // The runtime's own state moved: a note was committed, a note was deleted or
   // moved, the card came back or went away, retention ran, an upload stepped.

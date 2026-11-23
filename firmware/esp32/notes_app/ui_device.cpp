@@ -752,13 +752,23 @@ void NotesUi::stop_playback() {
   play_state_ = Play::Stopping;
 }
 
-void NotesUi::on_pairing_ask() { apply(state_.pairing_ask(0), ports_.system ? ports_.system->now_ms() : 0); }
+void NotesUi::on_pairing_ask(const uint8_t peer[6]) {
+  apply(state_.pairing_ask(0, peer), ports_.system ? ports_.system->now_ms() : 0);
+}
 
 void NotesUi::on_pairing_passkey(uint32_t passkey) {
   // The passkey replaces the dashes on the ask; nothing else about the screen
   // moves, so this is a partial redraw.
   const uint32_t now = ports_.system ? ports_.system->now_ms() : 0;
   apply(state_.pairing_ask(passkey), now);
+}
+
+void NotesUi::on_pairing_paired(const uint8_t peer[6]) {
+  // The bond is made: the question on the glass is over, and the screens say so
+  // by themselves - the person may have answered it on the console (`phone
+  // allow`), which never reaches this screen, and a phone that is counted as
+  // paired must not leave PAIRING over it (t_da500270).
+  apply(state_.pairing_paired(peer), ports_.system ? ports_.system->now_ms() : 0);
 }
 
 void NotesUi::on_runtime_change() {

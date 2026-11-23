@@ -2,6 +2,7 @@
 #include "notes_app/ui_app.hpp"
 
 #include <cstdio>
+#include <cstring>
 
 #include "notes_app/strings.hpp"
 
@@ -606,10 +607,20 @@ Outcome ScreenApp::card_job_finished() {
   return out;
 }
 
-Outcome ScreenApp::pairing_ask(uint32_t passkey) {
+Outcome ScreenApp::pairing_ask(uint32_t passkey, const uint8_t* peer) {
   Outcome out;
   if (!booted_) return out;
   passkey_ = passkey;
+  // A passkey update arrives on the same ask (the screen is already Pairing), so
+  // the question keeps the phone that asked it. A fresh ask that names a phone
+  // takes that address; one that names none (the host tests, a build without a
+  // radio) must not inherit the previous ask's.
+  if (peer != nullptr) {
+    std::memcpy(ask_peer_, peer, sizeof ask_peer_);
+    ask_peer_known_ = true;
+  } else if (state_.screen != Screen::Pairing) {
+    ask_peer_known_ = false;
+  }
   show_pairing_ask(state_, state_.screen);
   out.refresh = Refresh::Full;
   out.draw = true;
@@ -621,6 +632,22 @@ Outcome ScreenApp::pairing_answer(bool allow) {
   if (state_.screen != Screen::Pairing) return out;
   (void)allow;  // the caller has already accepted or rejected with port_ble
   answer_pairing(state_);
+  ask_peer_known_ = false;
+  out.refresh = Refresh::Full;
+  out.draw = true;
+  return out;
+}
+
+Outcome ScreenApp::pairing_paired(const uint8_t* peer) {
+  Outcome out;
+  // Only the ask on the glass, and only the phone that asked it. A pair that
+  // completes while a *second* phone's question is up (the first answer given on
+  // the console, the second ask landing before the first bond) is not an answer
+  // to the second phone: that question stays until its own keys decide it.
+  if (state_.screen != Screen::Pairing) return out;
+  if (ask_peer_known_ && peer != nullptr && std::memcmp(ask_peer_, peer, sizeof ask_peer_) != 0) return out;
+  answer_pairing(state_);
+  ask_peer_known_ = false;
   out.refresh = Refresh::Full;
   out.draw = true;
   return out;

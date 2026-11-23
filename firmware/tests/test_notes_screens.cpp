@@ -1130,6 +1130,79 @@ TEST("pairing: a second ask does not trap the screen on the question") {
   CHECK(app.screen() != Screen::Pairing);
 }
 
+TEST("pairing: a completed pair leaves the ask by itself") {
+  // The bench's stuck ask (t_da500270): the answer was given on the console
+  // (`phone allow`), so no key ever reached the screen, and the port's "phone
+  // paired" left PAIRING over a phone the console already counted. The bond is
+  // the answer, so the glass leaves the question without a key, and the frame
+  // that replaces it is a full one (the ask owns the whole page).
+  ScreenApp app;
+  Snapshot snap = band_seed();
+  app.begin(snap);
+  app.pairing_ask(761273);
+  CHECK(app.screen() == Screen::Pairing);
+  const Outcome done = app.pairing_paired();
+  CHECK(app.screen() == Screen::Home);
+  CHECK(done.draw);
+  CHECK(done.refresh == Refresh::Full);
+  // A second report of the same bond is not a frame: the question is gone.
+  CHECK(!app.pairing_paired().draw);
+}
+
+TEST("pairing: a completed pair lands back where the ask interrupted") {
+  ScreenApp app;
+  Snapshot snap = band_seed();
+  app.begin(snap);
+  app.press(Key::BootHold, 0);              // the menu
+  CHECK(app.screen() == Screen::Menu);
+  app.pairing_ask(123456);
+  CHECK(app.screen() == Screen::Pairing);
+  app.pairing_paired();
+  CHECK(app.screen() == Screen::Menu);      // the screen the ask covered
+}
+
+TEST("pairing: a second phone's ask survives the first pair completing") {
+  // Two asks can overlap: the first was answered from the console, a second
+  // phone asked, and only then did the first phone's bond land. That bond is not
+  // an answer to the second phone's question, so the question stays - and its
+  // own bond is what closes it.
+  const uint8_t first[6] = {0x0A, 0x62, 0x21, 0x20, 0xA9, 0xD3};
+  const uint8_t second[6] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+  ScreenApp app;
+  Snapshot snap = band_seed();
+  app.begin(snap);
+
+  app.pairing_ask(111111, first);
+  CHECK(app.screen() == Screen::Pairing);
+  app.pairing_answer(true);                 // the console's allow, the screen's way out
+  CHECK(app.screen() == Screen::Home);
+
+  app.pairing_ask(222222, second);          // the phone that asked while the first paired
+  CHECK(app.screen() == Screen::Pairing);
+  const Outcome wrong = app.pairing_paired(first);
+  CHECK(!wrong.draw);
+  CHECK(app.screen() == Screen::Pairing);   // still the second phone's question
+
+  const Outcome right = app.pairing_paired(second);
+  CHECK(right.draw);
+  CHECK(right.refresh == Refresh::Full);
+  CHECK(app.screen() == Screen::Home);
+}
+
+TEST("pairing: a bond never closes a screen the person opened") {
+  // The Phone screen is a person's own window, not a question: the port counts
+  // its bond and the screen keeps drawing the table it was opened for.
+  const uint8_t peer[6] = {0x0A, 0x62, 0x21, 0x20, 0xA9, 0xD3};
+  ScreenApp app;
+  Snapshot snap = band_seed();
+  app.begin(snap);
+  open_phone_row(app);                      // the Phone row: the window a person asked for
+  CHECK(app.screen() == Screen::Phone);
+  const Outcome done = app.pairing_paired(peer);
+  CHECK(!done.draw);
+  CHECK(app.screen() == Screen::Phone);
+}
+
 TEST("band: the Wi-Fi box shows the station's three states, and never Bluetooth") {
   // Off, on-but-not-associated, associated: three pictures, so a person can tell
   // "the radio is off" from "it is trying" without a console (Jake, 2026-11-22).

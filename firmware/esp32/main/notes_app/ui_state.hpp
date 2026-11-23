@@ -85,8 +85,12 @@ class UiState {
   // The runtime declined an effect the screens had acted on: put back the move
   // it was for (ScreenApp::decline) and keep the snapshot honest.
   Outcome decline(Effect effect);
-  Outcome pairing_ask(uint32_t passkey);
+  Outcome pairing_ask(uint32_t passkey, const uint8_t* peer = nullptr);
   Outcome pairing_answer(bool allow);
+  // The port says a phone's bond is made: the ask that phone put on the glass
+  // leaves by itself (ScreenApp::pairing_paired). Host-testable here, not in the
+  // device adapter - the rule is the screens'.
+  Outcome pairing_paired(const uint8_t* peer = nullptr);
   Outcome playback_finished();
   // The wipe/format the runtime is running (t_0070a731). The machine owns the
   // face and the counts; these are the two moves the app task makes on it.

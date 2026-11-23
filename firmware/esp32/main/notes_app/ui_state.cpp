@@ -285,9 +285,11 @@ Outcome UiState::decline(Effect effect) {
   return out;
 }
 
-Outcome UiState::pairing_ask(uint32_t passkey) { return app_.pairing_ask(passkey); }
+Outcome UiState::pairing_ask(uint32_t passkey, const uint8_t* peer) { return app_.pairing_ask(passkey, peer); }
 
 Outcome UiState::pairing_answer(bool allow) { return app_.pairing_answer(allow); }
+
+Outcome UiState::pairing_paired(const uint8_t* peer) { return app_.pairing_paired(peer); }
 
 // The card job's two moves (t_0070a731). No card work and no snapshot rebuild:
 // the counts the job leaves are read by the publish the caller makes when it is

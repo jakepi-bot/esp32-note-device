@@ -113,8 +113,20 @@ class ScreenApp {
   // began), so the frame drawn is the truth and not the intent.
   Outcome decline(Effect effect);
 
-  Outcome pairing_ask(uint32_t passkey);
+  // A phone asked to pair, and the passkey it negotiated. `peer` is the asking
+  // phone's address (six bytes, most significant byte first) when the port knows
+  // it: the ask remembers whose question it is, so the completion below cannot
+  // close another phone's ask. Null on a passkey update and on a build with no
+  // radio.
+  Outcome pairing_ask(uint32_t passkey, const uint8_t* peer = nullptr);
   Outcome pairing_answer(bool allow);
+  // The port says the bond is made (PhoneSample::Kind::Paired): the question that
+  // phone put on the glass is over and the screen leaves it without a key, the
+  // way a key would - back to where the ask interrupted, with a full refresh. It
+  // is the console's `phone allow` that makes this the only way out: that answer
+  // never reaches the screen, so without this the glass kept PAIRING over a phone
+  // the console already counted as paired (t_da500270).
+  Outcome pairing_paired(const uint8_t* peer = nullptr);
   Outcome playback_finished();
 
   // The work behind the wipe and format confirms, as the runtime reports it
@@ -173,6 +185,10 @@ class ScreenApp {
   uint32_t record_draw_s_ = 0; // the counter's last drawn second
   uint32_t play_draw_s_ = 0;   // the position's last drawn second
   uint32_t passkey_ = 0;
+  // The phone whose question is on the glass: its address, when the port named
+  // one, so a bond that lands for a different phone leaves the ask alone.
+  uint8_t ask_peer_[6] = {};
+  bool ask_peer_known_ = false;
   bool play_done_ = false;
   // The wipe/format running behind the busy face: which one, the count the
   // runtime last reported, and the percentage the bar was last drawn at (so the

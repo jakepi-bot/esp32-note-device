@@ -318,7 +318,9 @@ void on_phone(const hgp::PhoneSample& sample) {
   switch (sample.kind) {
     case Kind::Ask:
       // The ask owns the glass until a key answers it: BOOT allows, PWR refuses.
-      g_ui.on_pairing_ask();
+      // The asking phone's address goes with it, so the bond that lands later is
+      // matched to the question it answers (t_da500270).
+      g_ui.on_pairing_ask(sample.peer);
       ESP_LOGW(TAG, "a phone asks to pair: BOOT allows, PWR refuses");
       break;
     case Kind::Passkey:
@@ -327,7 +329,11 @@ void on_phone(const hgp::PhoneSample& sample) {
       g_ui.on_pairing_passkey(sample.passkey);
       break;
     case Kind::Paired:
+      // The bond is made - by a key, or by the console's `phone allow`, which
+      // never touches the screen: either way the ask is answered and the glass
+      // leaves it without a key.
       ESP_LOGI(TAG, "phone paired");
+      g_ui.on_pairing_paired(sample.peer);
       break;
     case Kind::Failed:
       ESP_LOGW(TAG, "pairing failed");

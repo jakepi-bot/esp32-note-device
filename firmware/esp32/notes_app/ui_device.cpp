@@ -378,6 +378,14 @@ void NotesUi::render(notesui::Refresh refresh) {
   ports_.display->flush(0, info.height);
 }
 
+void NotesUi::wake_from_sleep_face() {
+  if (!begun_ || !asleep_) return;
+  asleep_ = false;
+  // A full frame: the moon has to leave the glass completely, and a partial
+  // update over a full-page drawing is the one place ghosting always shows.
+  render(notesui::Refresh::Full);
+}
+
 void NotesUi::sleep_face() {
   if (!begun_ || ports_.display == nullptr) return;
   asleep_ = true;  // set first: no event between here and the flush may draw

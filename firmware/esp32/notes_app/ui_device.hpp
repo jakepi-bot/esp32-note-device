@@ -150,6 +150,10 @@ class NotesUi {
   // path calls it: a console `poweroff` is already a person at a desk, and a
   // dead battery has nothing left to draw with.
   void sleep_face();
+  // The sleeping face is the last frame a power-off ever draws. The bench needs a
+  // way back without a reboot, or the panel stops answering for the rest of the
+  // session (2026-11-23).
+  void wake_from_sleep_face();
 
   // The console's `ui` command: what the glass is showing, in words.
   std::string console(std::string_view line);

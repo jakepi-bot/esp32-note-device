@@ -5,21 +5,45 @@ The console can press keys (`key boot|hold|pwr`), and the camera watches the
 panel. The video is the clock: the frame where the panel's pixels move, minus the
 moment the key was sent, is the response time a person feels.
 
-usage: tools/latency_probe.py <key> [seconds]   (bench camera on /dev/video0)
+usage: tools/latency_probe.py <key> [seconds] [crop=W:H:X:Y]   (bench camera on /dev/video0)
 """
 import re
 import subprocess
 import sys
 import time
 
+import glob
+
 import serial
 
-key = sys.argv[1] if len(sys.argv) > 1 else "hold"
-seconds = float(sys.argv[2]) if len(sys.argv) > 2 else 8.0
-video = '/tmp/latency_%s.mkv' % key
-crop = 'crop=250:320:555:230'  # the panel's text area, from the bench framing
 
-s = serial.Serial('/dev/ttyACM0', 115200, timeout=0.3)
+def find_port():
+    """The board's CDC port, wherever it enumerated.
+
+    A reset can move the device from ttyACM0 to ttyACM1, and a script that pins
+    the old name talks to a dead port: the flash then fails at 13% with "no more
+    data to read" (bench, 2026-11-23).
+    """
+    for name in sorted(glob.glob('/dev/ttyACM*')):
+        try:
+            port = serial.Serial(name, 115200, timeout=0.3)
+            port.write(b'\r\n')
+            port.close()
+            return name
+        except OSError:
+            continue
+    raise SystemExit('no serial port answered')
+
+
+key = sys.argv[1] if len(sys.argv) > 1 else "hold"
+seconds = float(sys.argv[2]) if len(sys.argv) > 2 and not sys.argv[2].startswith('crop=') else 8.0
+video = '/tmp/latency_%s.mkv' % key
+# The panel's text area. The device gets moved on the bench, so this is an
+# argument, not a constant: measure once, look at the frame, adjust.
+crop_arg = next((a for a in sys.argv[2:] if a.startswith('crop=')), None)
+crop = 'crop=' + crop_arg[5:] if crop_arg else 'crop=240:290:400:430'
+
+s = serial.Serial(find_port(), 115200, timeout=0.3)
 s.write(b'\r\n')
 time.sleep(1.5)
 s.read(30000)

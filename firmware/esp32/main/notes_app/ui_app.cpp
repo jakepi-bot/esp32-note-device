@@ -132,6 +132,7 @@ void ScreenApp::begin(const Snapshot& snapshot) {
   booted_ = true;
   bar_moves_ = 0;
   handovers_ = 0;
+  hero_stale_ = false;
 }
 
 void ScreenApp::clamp_cursor() {
@@ -159,6 +160,11 @@ Outcome ScreenApp::publish(const Snapshot& snapshot, uint16_t dirty) {
   snap_ = snapshot;
   clamp_cursor();
   const bool hero_moved = !same(before, hero_facts(snap_));
+  // A hero that moved while another page is up was not drawn by this frame: the
+  // word on the glass is the one Home still shows, and it is the old one. The
+  // frame that returns Home has to be full, or the hand-over leaves the previous
+  // word ghosted under the new one, which is the artefact §4.3 is about.
+  if (hero_moved && state_.screen != Screen::Home) hero_stale_ = true;
 
   if (dirty == DirtyNone && !hero_moved) return out;  // nothing on the glass moved
 
@@ -497,7 +503,9 @@ Outcome ScreenApp::press(Key key, uint32_t now_ms) {
   // is the machine's answer, not the action's: a hand-over takes the partial
   // path and spends the budget above, and everything else stays full (§15.2).
   if (state_.screen != before) {
-    out.refresh = handover(before, state_.screen) ? handover_frame() : Refresh::Full;
+    const bool hero_stale = hero_stale_ && state_.screen == Screen::Home;
+    out.refresh = (handover(before, state_.screen) && !hero_stale) ? handover_frame() : Refresh::Full;
+    if (state_.screen == Screen::Home) hero_stale_ = false;  // this frame is the truth
     out.draw = true;
     bar_moves_ = 0;
   } else if (action == Action::MenuNext || action == Action::NextNote ||

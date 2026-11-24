@@ -194,6 +194,9 @@ class ScreenApp {
   bool booted_ = false;
   uint8_t bar_moves_ = 0;      // consecutive selection-bar moves (§15.3)
   uint8_t handovers_ = 0;      // consecutive hand-over partials since a full frame
+  // The Home hero moved while another page was up, so the word on the glass is
+  // not the current one: the frame that returns Home must be full (§4.3).
+  bool hero_stale_ = false;
   uint32_t record_start_ms_ = 0;
   uint32_t record_draw_s_ = 0; // the counter's last drawn second
   uint32_t play_draw_s_ = 0;   // the position's last drawn second

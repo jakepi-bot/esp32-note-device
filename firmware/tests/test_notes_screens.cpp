@@ -643,6 +643,34 @@ TEST("refresh: a Home hero change is full, a quiet publish draws nothing") {
   CHECK(power.refresh == Refresh::Partial);  // the hero did not move
 }
 
+TEST("refresh: a hand-over that returns to a stale hero is full") {
+  // The hero word is the one thing on Home a partial cannot draw honestly: a
+  // change that lands while another page is up (an upload starting on the menu)
+  // is not on the glass at all, so the frame that comes back to Home would draw
+  // the new word over the old one (§4.3).
+  Snapshot snap;
+  snap.card = true;
+  ScreenApp app;
+  app.begin(snap);
+
+  CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Partial);  // Home -> menu
+  CHECK(app.screen() == Screen::Menu);
+
+  Snapshot uploading = snap;
+  uploading.upload_active = true;
+  uploading.upload_done = 1;
+  uploading.upload_total = 2;
+  // The menu redraws, and the hero it does not show is remembered as stale.
+  CHECK(app.publish(uploading, DirtyUpload).refresh == Refresh::Partial);
+
+  CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Full);  // menu -> Home
+  CHECK(app.screen() == Screen::Home);
+
+  // And once Home is drawn with the truth, the next walk is a partial again.
+  CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Partial);
+  CHECK(app.screen() == Screen::Menu);
+}
+
 TEST("refresh: a hand-over is partial, and the fourth in a row spends the budget") {
   // The walk the person actually makes - Home -> menu -> list -> note and back -
   // is hand-over after hand-over, and each one is a partial over the rows either

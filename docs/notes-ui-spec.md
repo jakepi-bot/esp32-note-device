@@ -1842,6 +1842,7 @@ Still full, each for its own reason:
 | the first frame after power on | `panel_init()` is part of the full path; `NotesUi::render()` forces it on `first_frame_`, and the driver's `!partial_` agrees |
 | the first frame after a wake that dropped `EPD_PWR` | the reset cleared the panel's RAM; a partial would have nothing to diff against |
 | **any change to the Home hero string** | `READY → UPLOADING` changes three slots at once; a partial leaves the old word under the new |
+| **a hero that moved while another page was up** | the word on the glass is Home's old one, so the hand-over that returns Home is full (`hero_stale_`), or the new word lands over the old |
 | a list rotation (§6.4) | six text rows move at once |
 | `take_redraw_request()` returns true | a transfer failed; the driver has already forced full, the app only has to redraw |
 | the busy face of a wipe or a format | it stays up for 20-90 s, so one clean flash costs nothing next to the job |

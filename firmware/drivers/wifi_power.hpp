@@ -34,7 +34,11 @@ class WifiPowerSave {
   // Max modem sleep only after this long without a frame from Hermes but a ping.
   static constexpr uint32_t kQuietMs = 10000;
   // Beacons between wake-ups in max modem sleep; also sent to the access point when joining.
-  static constexpr uint8_t kListenInterval = 3;
+  // Beacons the station may skip: 3 is ~300 ms, 10 is ~1 s and the most many APs
+  // honour. The notes app is a note uploader, not a stream - a second of extra
+  // latency on an inbound frame costs nothing, and every skipped beacon is a
+  // radio wake that does not happen (2026-11-23).
+  static constexpr uint8_t kListenInterval = 10;
 
   // The sleep to switch to, or nothing when the applied one is right. `dozing` is
   // App::dozing(); `traffic_at` App::traffic_at(), the last frame from

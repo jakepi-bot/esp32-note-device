@@ -54,6 +54,11 @@ inline constexpr const char* kBootRecord = "BOOT: record";
 // Home's hint line, above the rule: the menu is a hold, and nothing on the glass
 // said so (Jake, 2026-11-22).
 inline constexpr const char* kHoldMenuHint = "hold BOOT for menu";
+// Home's second footer line. The first version of the hint was scale 1 (6 px)
+// squeezed above the rule, which is not readable at arm's length (Jake,
+// 2026-11-23). It is a footer line now, at the body size, where the other key
+// legend already lives.
+inline constexpr const char* kHoldMenu = "HOLD: menu";
 inline constexpr const char* kBootNext = "BOOT: next";
 inline constexpr const char* kBootStop = "BOOT: stop";
 inline constexpr const char* kPwrSelect = "PWR: select";
@@ -99,7 +104,10 @@ inline constexpr const char* kWaiting = "FOR THE UPLOAD";
 // there, in one line because that is all an off device should be saying.
 namespace sleep {
 inline constexpr const char* kZzz = "zzz";
-inline constexpr const char* kHint = "asleep - hold PWR 2 s";
+// Short enough to sit at the body size: 12 characters is 144 px of the panel's
+// 200, and the old 21-character caption only fitted at 6 px, which nobody could
+// read (Jake, 2026-11-23).
+inline constexpr const char* kHint = "hold PWR 2 s";
 }  // namespace sleep
 
 namespace menu {

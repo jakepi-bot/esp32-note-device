@@ -108,7 +108,10 @@ void home_face(hg::Canvas& c, const ScreenDraw& d) {
   const HomeView& v = d.home;
   draw_band(c, v.band, v.clock, v.wifi_on, v.wifi_up, v.battery_pct, v.external);
   rule(c, grid::kRuleY);
-  const int bottom = grid::kRuleOneLine;  // one-line footer on Home
+  // Home is a two-line footer now: the key legend at the body size, both keys,
+  // where a person reads them. The 6 px hint that used to sit above the rule was
+  // legible to nobody (Jake, 2026-11-23).
+  const int bottom = grid::kRuleTwoLine;
   const int group_h = 21 + 12 + 14;
   const int top = 28 + ((bottom - 28) - group_h) / 2;
   draw_centred(c, top, v.hero, grid::kHero);
@@ -117,11 +120,7 @@ void home_face(hg::Canvas& c, const ScreenDraw& d) {
     // Growth-only, so the bar leaves no residue at all (§15.3).
     draw_progress(c, top + group_h + 16, v.bar_pct);
   }
-  // The menu is a BOOT hold and nothing on the glass said so: one hint line,
-  // scale 1, right-aligned above the rule so the footer keeps its shape.
-  c.text(grid::kLeft + grid::kWidth - text_width(key::kHoldMenuHint, 1),
-         grid::kRuleOneLine - 11, key::kHoldMenuHint, 1, kInk);
-  draw_footer(c, key::kBootRecord);
+  draw_footer(c, key::kBootRecord, key::kHoldMenu);
 }
 
 void recording_face(hg::Canvas& c, const ScreenDraw& d) {
@@ -345,7 +344,10 @@ void SleepFace(hg::Canvas& c) {
   // The zzz climbs out of the crescent's opening, at the hero size so the
   // motif is a drawing and not a caption.
   c.text(moon_x + 42, moon_y - 12, sleep::kZzz, grid::kHero, kInk);
-  draw_centred(c, 116, sleep::kHint, 1);
+  // The body size, not the 6 px caption: this is the line that tells a person
+  // the device is off and how to bring it back, and it was unreadable
+  // (Jake, 2026-11-23).
+  draw_centred(c, 108, sleep::kHint, grid::kScale);
 }
 
 }  // namespace

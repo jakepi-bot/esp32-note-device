@@ -557,6 +557,13 @@ std::string console_line(std::string_view line) {
     // clean page), `epd ghost N` trades charge for cleanliness - 1 is a full
     // refresh every frame, 10 the default.
     const std::string_view rest(line.substr(4));
+    if (rest == "sleep") {
+      // Draw the sleeping face without powering off: the bench has to photograph
+      // it, and `notes poweroff` on USB now deep-sleeps until someone presses a
+      // key (2026-11-23).
+      g_ui.sleep_face();
+      return "@ok sleeping face drawn (the device is still on)";
+    }
     if (rest == "full") {
       g_epd.request_full_refresh();
       return "@ok the next frame is a full refresh";
@@ -568,7 +575,7 @@ std::string console_line(std::string_view line) {
       std::snprintf(out, sizeof out, "@ok full refresh every %d partials", g_epd.full_every());
       return out;
     }
-    return "@error usage: epd full | epd ghost <1..100>";
+    return "@error usage: epd full | epd sleep | epd ghost <1..100>";
   }
   if (line.rfind("set ", 0) == 0) return set_line(line.substr(4));
   // `screen` proves what the panel is showing without a camera pointed at it;

@@ -33,6 +33,10 @@ CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 CONFIG_RTC_CLK_SRC_INT_8MD256=y
 # Counts light sleep for the log line that ends each doze (EspSystem::set_dozing).
 CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
+# Power the MAC/BB block down when the station is not in use. The notes app's
+# battery default is "radio off between windows", so this is the common case, and
+# a clocked-but-idle PHY is a milliamp or two for nothing.
+CONFIG_ESP_PHY_MAC_BB_PD=y
 
 # TCP windows for links with a long round trip (a phone hotspot): 5,760 B capped
 # a connection near 33 KB/s at 175 ms, below 24 kHz audio's 48 KB/s.

@@ -1550,16 +1550,17 @@ TEST("sleep: the frame is the sleeping face, and the panel is cleared") {
   const InkBox zzz = ink_in(fb, kMoonX + kMoonSize, 20, 190, 60);
   CHECK(zzz.ink > 100);
 
-  // The line, centred at scale 1 where draw_centred puts it, between the motif
-  // and the rule Home draws.
+  // The line, centred at the body size where draw_centred puts it, between the
+  // motif and the bottom of the page. It was a 6 px caption and unreadable, so
+  // the assertion is on the size a person can read, not just on its position.
   const InkBox line = ink_in(fb, 0, 100, 200, 145);
-  CHECK(line.ink > 100);
-  const int want_x = (200 - hg::Canvas::text_width(sleep::kHint, 1)) / 2;
+  CHECK(line.ink > 200);
+  const int want_x = (200 - hg::Canvas::text_width(sleep::kHint, 2)) / 2;
   CHECK(line.min_x >= want_x);
   CHECK(line.min_x <= want_x + 2);
-  CHECK(line.max_x <= want_x + hg::Canvas::text_width(sleep::kHint, 1));
-  CHECK(line.min_y >= 110);
-  CHECK(line.max_y <= 130);
+  CHECK(line.max_x <= want_x + hg::Canvas::text_width(sleep::kHint, 2));
+  CHECK(line.min_y >= 104);
+  CHECK(line.max_y <= 128);
 }
 
 TEST("sleep: the face draws with a full refresh") {

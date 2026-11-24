@@ -1355,6 +1355,15 @@ std::string Runtime::console(std::string_view args) {
                   static_cast<unsigned>(failed_));
     return buf;
   }
+  if (cmd == "unmount") {
+    // Release the card without powering off: the bench's way to weigh what a
+    // mounted card costs, and the manual form of the idle release (2026-11-23).
+    if (mode_ != Mode::Idle) return "@error busy: a note is recording or uploading";
+    sd_mount::release();
+    sd_ready_ = false;
+    refresh_counts();
+    return "@ok card released";
+  }
   if (cmd == "mount") {
     if (mode_ == Mode::Wiping || mode_ == Mode::Formatting) return "@error busy: the card is being emptied";
     sd_ready_ = false;

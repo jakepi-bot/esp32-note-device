@@ -262,6 +262,12 @@ bool EpdDisplay::wait_idle(uint32_t after, uint32_t timeout_ms) {
   }
 }
 
+void EpdDisplay::panel_power(bool on) {
+  if (cfg_.pwr < 0) return;
+  const int on_level = cfg_.pwr_on_level ? 1 : 0;
+  gpio_set_level(static_cast<gpio_num_t>(cfg_.pwr), on ? on_level : !on_level);
+}
+
 void EpdDisplay::update_once() {
   const size_t image_bytes = static_cast<size_t>(cfg_.width) * cfg_.height / 8;
   const size_t row_bytes = static_cast<size_t>(cfg_.width) / 8;
@@ -284,6 +290,14 @@ void EpdDisplay::update_once() {
   // Nothing moved: the panel is bistable and an update that changes no pixel is
   // charge spent on holding the same picture.
   if (band0 < 0) return;
+
+  // Power the panel only for the update, and drop the rail on every way out.
+  panel_power(true);
+  vTaskDelay(pdMS_TO_TICKS(kRailSettleMs));
+  struct RailOff {
+    EpdDisplay* self;
+    ~RailOff() { self->panel_power(false); }
+  } rail_off{this};
 
   // Full on the first frame, every kFullEvery partial ones, and whenever the
   // UI asked for a repaint after a failed transfer. The sequence mirrors the

@@ -799,7 +799,7 @@ extern "C" void app_main(void) {
     // the work arrives as an event (a key, a console line, a phone, the clock).
     // A key's edge ends the wait at once, so the poll below runs at once too.
     // A working device polls five times a second; a resting one, once.
-    const uint32_t wait_ms = g_runtime.busy(g_system.now_ms()) ? 200 : 1000;
+    const uint32_t wait_ms = g_runtime.busy(g_system.now_ms()) ? 200 : 2000;
     if (hgp::events::receive(ev, pdMS_TO_TICKS(wait_ms))) {
       do {
         dispatch(ev);

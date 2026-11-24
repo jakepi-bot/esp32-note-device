@@ -1249,6 +1249,19 @@ Status Runtime::status(uint32_t now) const {
   return s;
 }
 
+// The wall clock in the device's own timezone, for `notes why`: the console's
+// `clock` verb prints UTC, and "is the timezone applied?" had no answer here.
+static const char* local_stamp() {
+  static char stamp[40] = "unset";
+  const std::time_t now = std::time(nullptr);
+  struct tm tm {};
+  if (localtime_r(&now, &tm) != nullptr) {
+    std::snprintf(stamp, sizeof stamp, "%04d-%02d-%02d %02d:%02d", tm.tm_year + 1900, tm.tm_mon + 1,
+                  tm.tm_mday, tm.tm_hour, tm.tm_min);
+  }
+  return stamp;
+}
+
 std::string Runtime::console(std::string_view args) {
   const std::string line = trim(args);
   const size_t sp = line.find(' ');
@@ -1275,14 +1288,17 @@ std::string Runtime::console(std::string_view args) {
     char buf[420];
     std::snprintf(buf, sizeof buf,
                   "@why pending %u, ids %u, first %s, net %s, clock %s, retry %s %d ms, attempt %u, "
-                  "sync %s, next window %d ms, url %s, slept %u ms",
+                  "sync %s, next window %d ms, url %s, slept %u ms, local %s",
                   static_cast<unsigned>(pending_), static_cast<unsigned>(ids.size()), first.c_str(),
                   net_open(now) ? net_reason() : "closed", clock_ok() ? "set" : "1970",
                   retry_waiting_ ? "waiting" : "clear", static_cast<int>(retry_in),
                   static_cast<unsigned>(attempt_), sync_id_.empty() ? "none" : sync_id_.c_str(),
                   static_cast<int>(static_cast<int32_t>(next_net_retry_ms_ - now)),
                   notes_url().empty() ? "none" : "set",
-                  static_cast<unsigned>(hgp::EspSystem::slept_ms_total()));
+                  static_cast<unsigned>(hgp::EspSystem::slept_ms_total()),
+                  // Local, not UTC: the setting is a POSIX TZ string, and this is
+                  // the only way to see from a console what the glass shows.
+                  local_stamp());
     return buf;
   }
   if (cmd.empty() || cmd == "status") {

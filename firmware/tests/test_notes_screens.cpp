@@ -783,6 +783,11 @@ TEST("delete: a hold on the confirm erases the note from the card") {
   app.press(Key::BootTap, 0);   // Delete
   CHECK(app.press(Key::Power, 0).refresh == Refresh::Full);
   CHECK(app.screen() == Screen::ConfirmDelete);
+  // One hold arms, it does not delete: a hold is also how a person backs out of a
+  // screen, and a single hold that wipes is how 48 notes went (2026-11-24).
+  const Outcome armed = app.press(Key::BootHold, 0);
+  CHECK(armed.effect == Effect::None);
+  CHECK(app.screen() == Screen::ConfirmDelete);
   const Outcome del = app.press(Key::BootHold, 0);
   CHECK(del.effect == Effect::DeleteNote);
   CHECK(del.note == 0);
@@ -1695,6 +1700,19 @@ Outcome open_menu_row(ScreenApp& app, MenuItem row) {
 
 }  // namespace
 
+TEST("menu: the page follows the selection") {
+  // Six rows at the body size are what fits, so row 7 must scroll the window
+  // rather than being drawn off the page (Jake, 2026-11-24: the menu was 6 px).
+  CHECK(hgp::notesui::grid::kMenuPerPage == 6);
+  for (uint8_t row = 0; row < 6; ++row) CHECK(hgp::notesui::grid::menu_page_start(row) == 0);
+  for (uint8_t row = 6; row < kMenuCount; ++row) CHECK(hgp::notesui::grid::menu_page_start(row) == 6);
+  // A page's last row still lands above the footer's rule.
+  const int last_y = hgp::notesui::grid::kRowTop +
+                     hgp::notesui::grid::kMenuPitch * (hgp::notesui::grid::kMenuPerPage - 1) +
+                     hgp::notesui::grid::kMenuBar - 1;
+  CHECK(last_y < hgp::notesui::grid::kRuleTwoLine);
+}
+
 TEST("menu: rows in order, Back last") {
   // Nine rows: the six the menu had, the two that empty the device, and the row
   // the unpair task fills in - every one of them before Back, so one hold still
@@ -1721,7 +1739,8 @@ TEST("menu: rows in order, Back last") {
   CHECK(std::string(wipe.hero) == "WIPE NOTES");
   CHECK(std::string(wipe.line1) == "113 NOTES GO");
   CHECK(std::string(wipe.line2) == "THE CARD STAYS");
-  CHECK(wipe.hold != nullptr && std::string(wipe.hold) == "HOLD: wipe");
+  // The legend names the key: "hold to wipe" left a person guessing whose hold.
+  CHECK(wipe.hold != nullptr && std::string(wipe.hold) == "HOLD BOOT: wipe");
   CHECK(wipe.why == nullptr);  // idle: the hold is allowed
   // The hero has to fit the panel at scale 3 and the lines at the body size: the
   // wide copy on a 200 px screen is what the ink box below proves.
@@ -1789,6 +1808,7 @@ TEST("confirm: a BOOT tap cancels wipe and a BOOT hold wipes") {
   // the count the job leaves, is the frame card_job_finished() asks for.
   app.press(Key::Power, 0);
   CHECK(app.screen() == Screen::ConfirmWipe);
+  CHECK(app.press(Key::BootHold, 0).effect == Effect::None);  // the first hold arms only
   const Outcome wipe = app.press(Key::BootHold, 0);
   CHECK(wipe.effect == Effect::WipeNotes);
   CHECK(wipe.refresh == Refresh::Full);
@@ -1813,7 +1833,7 @@ TEST("confirm: a BOOT tap cancels format and a BOOT hold formats") {
   CHECK(std::string(first.confirm.hero) == "FORMAT");
   CHECK(std::string(first.confirm.line1) == "THE SD CARD");
   CHECK(std::string(first.confirm.line2) == "NOTES AND LOG GO");
-  CHECK(std::string(first.confirm.hold) == "HOLD: format");
+  CHECK(std::string(first.confirm.hold) == "HOLD BOOT: format");
 
   const Outcome tap = app.press(Key::BootTap, 0);
   CHECK(tap.effect == Effect::None);
@@ -1828,6 +1848,7 @@ TEST("confirm: a BOOT tap cancels format and a BOOT hold formats") {
   CHECK(app.screen() == Screen::Menu);
 
   app.press(Key::Power, 0);
+  CHECK(app.press(Key::BootHold, 0).effect == Effect::None);  // the first hold arms only
   const Outcome format = app.press(Key::BootHold, 0);
   CHECK(format.effect == Effect::FormatCard);
   CHECK(format.refresh == Refresh::Full);
@@ -1876,6 +1897,7 @@ TEST("guard: wipe and format are refused while the device is busy") {
   ScreenApp free;
   free.begin(idle);
   open_menu_row(free, MenuItem::WipeNotes);
+  CHECK(free.press(Key::BootHold, 0).effect == Effect::None);  // armed
   CHECK(free.press(Key::BootHold, 0).effect == Effect::WipeNotes);
 }
 
@@ -2199,6 +2221,7 @@ TEST("home: shows 0 NOTES after a wipe") {
   CHECK(std::string(build_menu(snap, 0).rows[0].value) == "2");
 
   open_menu_row(app, MenuItem::WipeNotes);
+  CHECK(app.press(Key::BootHold, 0).effect == Effect::None);  // the first hold arms only
   const Outcome wipe = app.press(Key::BootHold, 0);
   CHECK(wipe.effect == Effect::WipeNotes);
   CHECK(app.screen() == Screen::Wiping);
@@ -2277,6 +2300,7 @@ TEST("busy: a wipe draws its face before the work and Home after it") {
   open_menu_row(app, MenuItem::WipeNotes);
   CHECK(app.screen() == Screen::ConfirmWipe);
 
+  CHECK(app.press(Key::BootHold, 0).effect == Effect::None);  // the first hold arms only
   const Outcome wipe = app.press(Key::BootHold, 0);
   CHECK(wipe.effect == Effect::WipeNotes);  // what ui_device runs after the frame
   CHECK(wipe.draw);
@@ -2341,6 +2365,7 @@ TEST("busy: a format says what it is doing and draws no invented progress") {
   ScreenApp app;
   app.begin(snap);
   open_menu_row(app, MenuItem::FormatCard);
+  CHECK(app.press(Key::BootHold, 0).effect == Effect::None);  // armed
   CHECK(app.press(Key::BootHold, 0).effect == Effect::FormatCard);
   CHECK(app.screen() == Screen::Wiping);
 

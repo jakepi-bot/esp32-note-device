@@ -268,6 +268,33 @@ void power_hold(uint32_t held) {
   g_runtime.shutdown();
 }
 
+// A key edge is an event, not something to wait for: without this the loop's
+// resting wait (2 s) was also the delay before a press was even sampled, so a tap
+// had to be held about a second to be caught at all, and the hold gesture needed
+// three (Jake, 2026-11-24). The ISR only queues a KeyEdge; the poll does the rest.
+void on_key_edge(void*) { hgp::events::post_from_isr(hgp::EventType::KeyEdge); }
+
+void arm_key_edges() {
+  const auto& b = hgp::board_config();
+  if (!hgp::gpio_isr_service()) {
+    ESP_LOGW(TAG, "no GPIO interrupt service: keys are polled only");
+    return;
+  }
+  for (int pin : {b.buttons.record, b.latch_power.key}) {
+    if (pin < 0) continue;
+    const auto gpio = static_cast<gpio_num_t>(pin);
+    // Keep the input connected through light sleep, or the wake and the edge
+    // interrupt both see a disconnected pin.
+    gpio_sleep_sel_dis(gpio);
+    gpio_set_intr_type(gpio, GPIO_INTR_ANYEDGE);
+    if (gpio_isr_handler_add(gpio, &on_key_edge, nullptr) != ESP_OK) {
+      ESP_LOGW(TAG, "key GPIO %d has no edge interrupt; polling it", pin);
+      continue;
+    }
+    gpio_intr_enable(gpio);
+  }
+}
+
 // True while a finger is on either key: the loop polls faster and light sleep
 // waits, so a press is measured from the moment it was seen.
 bool key_down_now() { return g_boot.down || g_pwr.down; }
@@ -772,6 +799,7 @@ extern "C" void app_main(void) {
     // The key timing subtracts the light sleep this app actually took, so the
     // counter has to be running even though this app never takes the doze lock.
     hgp::EspSystem::enable_sleep_accounting();
+    arm_key_edges();
   }
   // The clock wants network time: this board has no RTC, so every note recorded
   // before the first sync is stamped 1970 (the uploader restamps it later).

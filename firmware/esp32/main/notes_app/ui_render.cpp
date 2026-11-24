@@ -152,19 +152,28 @@ void recording_face(hg::Canvas& c, const ScreenDraw& d) {
   draw_footer(c, key::kBootStop, key::kHoldDiscard);
 }
 
-// Nine rows do not fit at the list's pitch: at 18 px the last row would start at
-// 176, under the two-line footer's rule and past the 186 px ink limit. The menu
-// therefore draws its own rows (scale 1, a 12 px pitch, an 11 px bar) and this
-// is the check that the column still closes above the footer's rule when a row
-// is added or the pitch moves.
-static_assert(grid::kRowTop + grid::kMenuPitch * (kMenuCount - 1) + grid::kMenuBar - 1 < grid::kRuleTwoLine,
-              "menu rows must end above the two-line footer rule");
+// The menu pages: six rows at the body size fit between the band's rule and the
+// footer's, and this is the check that a page still closes above that rule when a
+// row size or a page length moves.
+static_assert(grid::kRowTop + grid::kMenuPitch * (grid::kMenuPerPage - 1) + grid::kMenuBar - 1 < grid::kRuleTwoLine,
+              "a menu page must end above the two-line footer rule");
 
 void menu_face(hg::Canvas& c, const ScreenDraw& d) {
   text_at(c, grid::kLeft, grid::kBandY, menu::kTitle, grid::kScale, kInk);
+  // Which page, when there is more than one: the selection walks the rows and the
+  // window follows it.
+  const uint8_t pages = static_cast<uint8_t>((kMenuCount + grid::kMenuPerPage - 1) / grid::kMenuPerPage);
+  if (pages > 1) {
+    const uint8_t page = static_cast<uint8_t>(d.menu.selected / grid::kMenuPerPage + 1);
+    char mark[8];
+    std::snprintf(mark, sizeof mark, "%u/%u", static_cast<unsigned>(page), static_cast<unsigned>(pages));
+    c.text(grid::kRight - text_width(mark, grid::kScale), grid::kBandY, mark, grid::kScale, kInk);
+  }
   rule(c, grid::kRuleY);
-  for (uint8_t i = 0; i < kMenuCount; ++i) {
-    const int y = grid::kRowTop + grid::kMenuPitch * i;
+  const uint8_t first = static_cast<uint8_t>(grid::menu_page_start(d.menu.selected));
+  for (uint8_t slot = 0; slot < grid::kMenuPerPage && first + slot < kMenuCount; ++slot) {
+    const uint8_t i = static_cast<uint8_t>(first + slot);
+    const int y = grid::kRowTop + grid::kMenuPitch * slot;
     const bool selected = i == d.menu.selected;
     if (selected) c.fill_rect(grid::kLeft - 4, y - 1, grid::kWidth + 8, grid::kMenuBar, kInk);
     const uint16_t colour = selected ? kPaper : kInk;
@@ -224,9 +233,14 @@ void confirm_face(hg::Canvas& c, const ScreenDraw& d) {
   draw_centred(c, 90, v.line2, v.line_scale);
   if (v.why != nullptr) draw_centred(c, 108, v.why, 1);
   rule(c, 118);
-  // The body is the legend: this screen has no footer and no rows (§8.2).
-  draw_centred(c, 126, v.hold != nullptr ? v.hold : key::kHoldDelete, grid::kScale);
-  draw_centred(c, 144, key::kTapKeep, grid::kScale);
+  // The body is the legend: this screen has no footer and no rows (§8.2). A long
+  // legend drops to the small size rather than running past the margin - naming
+  // the key matters more than the size (Jake, 2026-11-24).
+  const char* hold = v.hold != nullptr ? v.hold : key::kHoldDelete;
+  const int hold_scale = text_width(hold, grid::kScale) <= grid::kWidth ? grid::kScale : 1;
+  draw_centred(c, 126, hold, hold_scale);
+  const int tap_scale = text_width(key::kTapKeep, grid::kScale) <= grid::kWidth ? grid::kScale : 1;
+  draw_centred(c, 144, key::kTapKeep, tap_scale);
 }
 
 // The busy face (t_0070a731): one word, what is happening and - for a wipe - how

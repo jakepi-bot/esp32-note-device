@@ -38,9 +38,15 @@ inline constexpr int kRowPitch = 18;
 // pitch, which closes the column at 137 with the bar and keeps 6 px of paper
 // under it. The menu is the one screen where a smaller label is still a choice
 // between words a person reads; the footer's bindings are how they move.
-inline constexpr int kMenuPitch = 12;
-inline constexpr int kMenuBar = 11;
-inline constexpr int kMenuLabelScale = 1;
+// Nine rows at 6 px fitted one page and were unreadable (Jake, 2026-11-24). At the
+// body size six fit between the band's rule and the footer's, so the menu pages.
+inline constexpr int kMenuPitch = 18;
+inline constexpr int kMenuPerPage = 6;
+// The first row the page shows for a selection: the menu walks its rows and the
+// window follows, so the ninth row is reachable without shrinking the type.
+inline constexpr int menu_page_start(uint8_t selected) { return (selected / kMenuPerPage) * kMenuPerPage; }
+inline constexpr int kMenuBar = 14;
+inline constexpr int kMenuLabelScale = 2;
 // A two-line footer at the hero size: 18 px lines leave 4 px between them and
 // 8 px under the rule, and both Home strings fit the 200 px width at that size.
 inline constexpr int kRuleTwoBig = 132;

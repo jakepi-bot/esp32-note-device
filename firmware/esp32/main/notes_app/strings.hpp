@@ -67,11 +67,15 @@ inline constexpr const char* kBootAllow = "BOOT: allow";
 inline constexpr const char* kPwrRefuse = "PWR: refuse";
 inline constexpr const char* kHoldDiscard = "HOLD: discard";
 inline constexpr const char* kHoldDelete = "HOLD: delete";
-inline constexpr const char* kHoldWipe = "HOLD: wipe";
-inline constexpr const char* kHoldFormat = "HOLD: format";
+// The confirm screens said "hold to wipe, tap to cancel" and never said whose
+// hold: on this device both gestures are BOOT, which a person cannot guess.
+inline constexpr const char* kHoldWipe = "HOLD BOOT: wipe";
+// The second question: the same key, again, and only within this screen.
+inline constexpr const char* kHoldAgain = "HOLD AGAIN: do it";
+inline constexpr const char* kHoldFormat = "HOLD BOOT: format";
 inline constexpr const char* kHoldBack = "HOLD: back";
 inline constexpr const char* kHoldNothing = "HOLD: nothing";
-inline constexpr const char* kTapKeep = "TAP: keep";
+inline constexpr const char* kTapKeep = "TAP BOOT: keep";
 // The busy face's one line: neither key does anything while the card is being
 // emptied, so the footer says what the person should do - nothing (t_0070a731).
 inline constexpr const char* kPleaseWait = "PLEASE WAIT";

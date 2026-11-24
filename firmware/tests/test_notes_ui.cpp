@@ -81,6 +81,10 @@ TEST("a note's own screen offers play, delete and back, and delete asks first") 
   State confirm = at(Screen::ConfirmDelete);
   CHECK(press_boot(confirm) == Action::KeepNote);  // a tap is always the safe answer
   CHECK(press_power(confirm) == Action::KeepNote);
+  // Two holds: the first only arms, because a hold is also the way out of a screen
+  // and a single hold that wipes is how a card's notes went (2026-11-24).
+  CHECK(hold_boot(confirm) == Action::None);
+  CHECK(confirm.screen == Screen::ConfirmDelete);
   CHECK(hold_boot(confirm) == Action::DeleteNote);  // the only way to delete
   CHECK(confirm.screen == Screen::NoteList);
 }

@@ -115,6 +115,10 @@ struct State {
   uint8_t peer = 0;               // the selected bonded phone, index into the table
   uint8_t peer_count = 0;         // what the radio's table holds
   bool playing = false;
+  // A destructive confirm takes two holds. One hold is also how a person backs
+  // out of a screen, and a single hold that wipes the card is how 48 notes went
+  // (2026-11-24, my own test's holds). Cleared by any other key and on entry.
+  bool confirm_armed = false;
   Screen after_pairing = Screen::Home;  // where the ask lands when answered
 
   void go(Screen next) { screen = next; }

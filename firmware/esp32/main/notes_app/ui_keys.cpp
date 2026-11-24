@@ -106,9 +106,11 @@ Action press_boot(State& state) {
       return Action::NextNoteAction;
     case Screen::ConfirmDelete:
       // A tap is the safe answer, and it is the same one PWR gives.
+      state.confirm_armed = false;
       return Action::KeepNote;
     case Screen::ConfirmWipe:
     case Screen::ConfirmFormat:
+      state.confirm_armed = false;
       state.go(Screen::Menu);
       return Action::Back;  // a tap cancels: only the hold empties anything
     case Screen::Wiping:
@@ -152,18 +154,27 @@ Action hold_boot(State& state) {
     case Screen::NoteAction:
       state.go(Screen::NoteList);
       return Action::Back;
+    // Two holds for anything that destroys: the first arms, the second commits.
     case Screen::ConfirmDelete:
-      state.go(Screen::NoteList);
-      return Action::DeleteNote;
     case Screen::ConfirmWipe:
-      // Home is the answer to an empty device: the busy face runs the wipe, and
+    case Screen::ConfirmFormat:
+      if (!state.confirm_armed) {
+        state.confirm_armed = true;
+        return Action::None;  // same screen, a second question
+      }
+      state.confirm_armed = false;
+      if (state.screen == Screen::ConfirmDelete) {
+        state.go(Screen::NoteList);
+        return Action::DeleteNote;
+      }
+      // Home is the answer to an empty device: the busy face runs the job, and
       // the frame after it says 0 NOTES rather than leaving the person in the
       // menu to go and look (t_0070a731).
-      state.go(Screen::Wiping);
-      return Action::WipeNotes;
-    case Screen::ConfirmFormat:
-      state.go(Screen::Wiping);
-      return Action::FormatCard;
+      {
+        const bool format = state.screen == Screen::ConfirmFormat;
+        state.go(Screen::Wiping);
+        return format ? Action::FormatCard : Action::WipeNotes;
+      }
     case Screen::Wiping:
       // A hold cannot cut the job short: the runtime is emptying the card and
       // has no cancellation a key should be able to reach.

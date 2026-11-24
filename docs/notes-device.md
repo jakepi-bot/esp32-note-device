@@ -296,7 +296,7 @@ notes/
 
 Over USB at 115200: `notes status|list|record|stop|sync|poweroff|mount|format|prune`,
 `screen` for the panel image as hex, `about`, `battery`, `clock`, `power`, `radio`,
-`sd`, `wifi [on|off]`, `keys`, `ui` (`ui home` forces a full-refresh hand-over,
+`sd`, `wifi [on|off]`, `keys`, `ui` (`ui home` redraws the current screen with a full refresh - the bench's clean-page verb,
 `ui press boot|hold|pwr` presses a key from a host with no finger on the board,
 `ui peers` prints the bond table the Unpair screen lists;
 the plain `ui` line also answers `ble off|advertising|connected` for the band's

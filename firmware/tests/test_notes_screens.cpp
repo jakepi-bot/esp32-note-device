@@ -507,19 +507,21 @@ TEST("the key map reaches every screen, and every screen has a way back") {
   app.begin(snap);
   CHECK(app.screen() == Screen::Home);
 
-  // Home -> Menu -> Notes -> Note -> Confirm -> back out.
-  CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Full);
+  // Home -> Menu -> Notes -> Note -> Confirm -> back out. The walk is hand-over
+  // after hand-over, so the frames are partials - three of them, then the
+  // fourth, which the ghost budget spends on a full refresh (§15.2).
+  CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Partial);
   CHECK(app.screen() == Screen::Menu);
   // BOOT walks the rows; PWR selects. Walk to About, then run it.
   while (static_cast<MenuItem>(app.state().menu) != MenuItem::About) {
     CHECK(app.press(Key::BootTap, 0).refresh == Refresh::Partial);
   }
   const Outcome about = app.press(Key::Power, 0);
-  CHECK(about.refresh == Refresh::Full);
+  CHECK(about.refresh == Refresh::Partial);  // the second hand-over
   CHECK(app.screen() == Screen::About);
   CHECK(app.press(Key::Power, 0).effect == Effect::None);  // a tap is not power, anywhere
   CHECK(app.screen() == Screen::About);  // the page stays put
-  CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Full);  // hold: back to Menu
+  CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Partial);  // hold: back to Menu
   CHECK(app.screen() == Screen::Menu);
 
   // Back to Notes and in.
@@ -527,6 +529,8 @@ TEST("the key map reaches every screen, and every screen has a way back") {
   const Outcome open_list = app.press(Key::Power, 0);
   CHECK(open_list.effect == Effect::None);
   CHECK(app.screen() == Screen::NoteList);
+  // The walk's fourth move, and the budget's one flash: three hand-overs of
+  // residue cleared, and the pages that follow start their own run.
   CHECK(open_list.refresh == Refresh::Full);
   CHECK(app.press(Key::Power, 0).effect == Effect::None);  // opens, not plays
   CHECK(app.screen() == Screen::NoteAction);
@@ -637,6 +641,53 @@ TEST("refresh: a Home hero change is full, a quiet publish draws nothing") {
   const Outcome power = app.publish(battery, DirtyPower);
   CHECK(power.draw);
   CHECK(power.refresh == Refresh::Partial);  // the hero did not move
+}
+
+TEST("refresh: a hand-over is partial, and the fourth in a row spends the budget") {
+  // The walk the person actually makes - Home -> menu -> list -> note and back -
+  // is hand-over after hand-over, and each one is a partial over the rows either
+  // page inked rather than the ~1.4 s full waveform (§15.2). What a partial
+  // leaves behind is residue, so the machine keeps its own budget: three
+  // hand-overs, then one full refresh. A session therefore carries at most three
+  // pages of ghost, and the flash lands on the fourth move, not on every key.
+  Snapshot snap;
+  snap.card = true;
+  snap.note_count = 1;
+  snap.stub_first = 0;
+  snap.stub_rows = 1;
+  std::snprintf(snap.notes[0].day, sizeof snap.notes[0].day, "21 Nov");
+  std::snprintf(snap.notes[0].clock, sizeof snap.notes[0].clock, "14:02");
+
+  ScreenApp app;
+  app.begin(snap);
+
+  CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Partial);  // Home -> menu
+  CHECK(app.screen() == Screen::Menu);
+  CHECK(app.press(Key::Power, 0).refresh == Refresh::Partial);     // menu -> list
+  CHECK(app.screen() == Screen::NoteList);
+  CHECK(app.press(Key::Power, 0).refresh == Refresh::Partial);     // list -> note
+  CHECK(app.screen() == Screen::NoteAction);
+
+  // The fourth: the budget's one flash, and the run starts over after it.
+  CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Full);     // note -> list
+  CHECK(app.screen() == Screen::NoteList);
+  CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Partial);  // list -> menu
+  CHECK(app.screen() == Screen::Menu);
+  CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Partial);  // menu -> Home
+  CHECK(app.screen() == Screen::Home);
+
+  // The faces the panel must be sure of keep their full class: the recording
+  // face (the counts move under it), and a pairing ask (an interrupt from the
+  // radio, drawn over whatever page the person was on).
+  CHECK(app.press(Key::BootTap, 0).refresh == Refresh::Full);
+  CHECK(app.screen() == Screen::Recording);
+  CHECK(app.press(Key::PowerHold, 0).effect == Effect::None);  // not a shutdown
+  const Outcome ask = app.pairing_ask(123456);
+  CHECK(ask.refresh == Refresh::Full);
+  CHECK(app.screen() == Screen::Pairing);
+
+  // And the sleeping face, which is the last frame the panel is given.
+  CHECK(app.sleep_face().refresh == Refresh::Full);
 }
 
 TEST("capture: recording again keeps the note recorded before it") {
@@ -1466,7 +1517,7 @@ TEST("keys: two PWR taps in the player leave the device running") {
 
   // Still answering keys. The machine has no "off" state to land in, so the
   // proof is a live screen that keeps taking presses.
-  CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Full);
+  CHECK(app.press(Key::BootHold, 0).refresh == Refresh::Partial);  // a hand-over
   CHECK(app.screen() == Screen::NoteList);
 }
 
@@ -1666,7 +1717,7 @@ TEST("confirm: a BOOT tap cancels wipe and a BOOT hold wipes") {
   ScreenApp app;
   app.begin(snap);
   const Outcome ask = open_menu_row(app, MenuItem::WipeNotes);
-  CHECK(ask.refresh == Refresh::Full);
+  CHECK(ask.refresh == Refresh::Partial);  // the question is a hand-over too
   CHECK(app.screen() == Screen::ConfirmWipe);
 
   // The frame is the question: the row's confirm, with the count on it.
@@ -1708,7 +1759,7 @@ TEST("confirm: a BOOT tap cancels format and a BOOT hold formats") {
 
   ScreenApp app;
   app.begin(snap);
-  CHECK(open_menu_row(app, MenuItem::FormatCard).refresh == Refresh::Full);
+  CHECK(open_menu_row(app, MenuItem::FormatCard).refresh == Refresh::Partial);
   CHECK(app.screen() == Screen::ConfirmFormat);
 
   // A format says what it takes: the card, and the notes and log with it.
@@ -1791,7 +1842,7 @@ TEST("unpair: the list names every bonded phone, and says so when there are none
 
   ScreenApp app;
   app.begin(snap);
-  CHECK(open_menu_row(app, MenuItem::UnpairPhones).refresh == Refresh::Full);
+  CHECK(open_menu_row(app, MenuItem::UnpairPhones).refresh == Refresh::Partial);
   CHECK(app.screen() == Screen::UnpairList);
 
   const ScreenDraw frame = app.frame();
@@ -1816,7 +1867,7 @@ TEST("unpair: the list names every bonded phone, and says so when there are none
   Snapshot none;
   ScreenApp empty;
   empty.begin(none);
-  CHECK(open_menu_row(empty, MenuItem::UnpairPhones).refresh == Refresh::Full);
+  CHECK(open_menu_row(empty, MenuItem::UnpairPhones).refresh == Refresh::Partial);
   CHECK(empty.screen() == Screen::UnpairList);
   const ScreenDraw blank = empty.frame();
   CHECK(blank.unpair.empty);
@@ -1841,7 +1892,7 @@ TEST("unpair: the list names every bonded phone, and says so when there are none
   // A tap on an empty table asks about nobody and stays; the hold is the way out.
   CHECK(empty.press(Key::Power, 0).effect == Effect::None);
   CHECK(empty.screen() == Screen::UnpairList);
-  CHECK(empty.press(Key::BootHold, 0).refresh == Refresh::Full);
+  CHECK(empty.press(Key::BootHold, 0).refresh == Refresh::Partial);
   CHECK(empty.screen() == Screen::Menu);
 }
 
@@ -2028,7 +2079,9 @@ TEST("unpair: a tap keeps the phone, and a store that refuses keeps the row") {
   CHECK(ui.snapshot().peer_count == 1);
 
   // And the hold on the list itself leaves for the menu with the bond intact.
-  CHECK(ui.press(Key::BootHold, 0).refresh == Refresh::Full);
+  // The hold that asked about the last phone was the walk's fourth hand-over, so
+  // it spent the ghost budget's flash; leaving the list is a plain partial again.
+  CHECK(ui.press(Key::BootHold, 0).refresh == Refresh::Partial);
   CHECK(ui.screen() == Screen::Menu);
   CHECK(bonds.erases == 1);
   CHECK(bonds.peers.size() == 1);

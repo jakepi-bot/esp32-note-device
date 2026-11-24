@@ -366,10 +366,10 @@ void NotesUi::render(notesui::Refresh refresh) {
   const notesui::ScreenDraw frame = state_.app().frame();
   notesui::draw(canvas, frame);
 
-  // Entering or leaving a screen is always full; within a screen the driver's
-  // partial waveform is the default (§15.2). A partial is a whole-panel
-  // waveform anyway, so the flush band is about the conversion cost and not
-  // about what the panel transmits.
+  // Entering or leaving a screen is a hand-over, and the machine decides its
+  // class: a partial over the band either page inked, or a full refresh for the
+  // one that spends the ghost budget (§15.2). The driver owns the rest - the
+  // diff band, the window, and its own kFullEvery cadence.
   if (refresh == notesui::Refresh::Full || first_frame_) {
     ports_.display->request_full_refresh();
     first_frame_ = false;
@@ -840,7 +840,9 @@ std::string NotesUi::console(std::string_view line) {
     return out;
   }
   if (line == "ui home") {
-    // A full refresh across the next frame: what a screen hand-over does.
+    // The bench's clean-page verb: one full refresh of whatever is on the glass,
+    // which is the same waveform `epd full` arms on the driver. A hand-over no
+    // longer draws this way (§15.2) - this is the deliberate clean one.
     render(notesui::Refresh::Full);
     return std::string("@ok redrawn");
   }

@@ -55,11 +55,11 @@ lines of `ui_keys.cpp` and reuses the existing "hold = back" invariant.
 | Driver threshold | `convert()`: `luma ≥ 128 → white dot` | exactly two survivable colours; see §2.1 |
 | Font | 5 × 7 bitmap, **integer scale only** | type sizes are quantised: 7 / 14 / 21 / 28 px |
 | Refresh | full waveform `0xC7`, partial waveform `0xCF` | see §15 |
-| Partial refresh | **whole-panel waveform**, not a rectangle | `flush(y0,y1)` narrows *conversion* only, not transmission |
+| Partial refresh | **a band**: the driver diffs the frame and drives only the rows that moved | `flush(y0,y1)` narrows *conversion*; the diff narrows what the panel is sent (§15.1) |
 | BUSY wait | `kBusyTimeoutMs = 3000` | a full update is budgeted at "around a second", see §15.1 |
 | Coalescing | `kQuietMs 80`, `kMaxCoalesceMs 250` | a frame's bands merge; do not reimplement |
 | Rate limit | `kMinGapMs 300` | ~3 updates/s ceiling, enforced by the driver |
-| Ghost reset | `kFullEvery = 20` | 20 partials then an automatic full |
+| Ghost reset | `kFullEvery = 10` | 10 partials then an automatic full; hand-overs keep a tighter budget of their own (§15.2) |
 | Charge status | `LatchingPower.charging = -1` | **there is no charge-status pin.** A bolt can only mean *on external power* |
 | Battery | ADC on GPIO 4, 2:1 divider | `std::optional<uint8_t> battery_percent` |
 
@@ -181,8 +181,8 @@ The band carries four things, all of them event-driven:
 | battery | 160 | 28 × 15 procedural | fill, bolt, or `?` |
 
 **The clock is the one exception, and it is bounded.** The original rule was no
-clock at all: a minute-accurate clock costs 60 panel updates an hour and each
-partial refresh re-drives every pixel of the whole panel (§15.2). The device now
+clock at all: a minute-accurate clock costs 60 panel updates an hour and every
+partial re-drives the rows it changes (§15.2). The device now
 carries a clock anyway, because a notes device with no way to read the time is a
 notes device you cannot date a note with. The cost is bounded by four rules: it
 is drawn on **Home only** (a minute that turns over in a menu or on the
@@ -371,9 +371,9 @@ Every combination above is rendered in `01`–`07` of the wireframe set.
 
 | Change | Refresh | Note |
 |---|---|---|
-| entering Home from any other screen | **FULL** | §15.2 |
+| entering Home from any other screen | PARTIAL | a hand-over, bounded by §15.2 |
 | first frame after a wake that dropped `EPD_PWR` | **FULL** | the panel's RAM was reset |
-| hero word changes (`READY` → `UPLOADING`) | PARTIAL | same geometry, different ink |
+| hero word changes (`READY` → `UPLOADING`) | **FULL** | three slots change at once (§15.2) |
 | band queue count / `ALL SENT` | PARTIAL | ≤ 10 columns, same slot |
 | the line under the hero | PARTIAL | |
 | battery fill | PARTIAL | fill is **growth-only in one direction per charge cycle**; see §15.3 |
@@ -506,10 +506,11 @@ words. Do not substitute a dash.
 
 | Change | Refresh |
 |---|---|
-| entering Menu | **FULL** |
+| entering Menu | PARTIAL, a hand-over (§15.2) |
 | bar moves (BOOT tap) | PARTIAL, bounded by §15.3 |
 | a value changes (a note was sent) | PARTIAL |
-| leaving Menu → any row's destination | **FULL** |
+| leaving Menu → Notes, About, Unpair, a confirm, Back | PARTIAL, a hand-over |
+| leaving Menu → Phone, Wi-Fi | **FULL** — the port owns that window or that panel |
 
 The value column changes while the menu is open only after `Sync now`, which
 returns to Home (§6.4) rather than to the menu, so in practice the menu is static
@@ -609,7 +610,7 @@ as a dropped press.
 
 | Change | Refresh |
 |---|---|
-| entering the list (from Menu, from a note, after a delete) | **FULL** |
+| entering the list (from Menu, from a note, after a delete) | PARTIAL, a hand-over (§15.2) |
 | bar moves | PARTIAL, bounded by §15.3 |
 | the row set changes (the list rotates) | **FULL** — six rows of text repaint at once |
 | a mark changes (`*` → blank after an upload) | PARTIAL |
@@ -681,9 +682,10 @@ the confirm screen names the hold (§8).
 
 | Change | Refresh |
 |---|---|
-| entering from the list | **FULL** |
+| entering from the list | PARTIAL, a hand-over (§15.2) |
 | bar moves | PARTIAL, bounded by §15.3 |
-| returning from Playing or ConfirmDelete | **FULL** |
+| returning from ConfirmDelete | PARTIAL, a hand-over |
+| returning from Playing | **FULL** — the player is the runtime's, and it stops the codec on the way out |
 
 Nothing else on this screen moves. State (`to send` → `sent`) cannot change while
 it is open, because `Playing` and `ConfirmDelete` are the only exits and both
@@ -748,13 +750,14 @@ worth it for a collision that requires two notes in the same minute.
 
 | Change | Refresh |
 |---|---|
-| entering from the note screen | **FULL** |
+| entering from the note screen | PARTIAL, a hand-over (§15.2) |
 | **anything while it is open** | **nothing at all** |
-| leaving (delete or keep) → the list | **FULL** |
+| leaving (delete or keep) → the list | PARTIAL, a hand-over |
 
 This screen is **immobile by design**: the note identity and the two key verbs are
 fixed for as long as the question is on the glass. It is the one place in the UI
-where a partial refresh never happens, which also means it never ghosts.
+where nothing can move while it is open, which also means its two frames are the
+only ones it ever draws.
 
 ### 8.4 ConfirmWipe and ConfirmFormat
 
@@ -889,9 +892,9 @@ A PWR *hold* on the player is not a power-off either: only Home is (13.2 row 4b)
 
 | Change | Refresh |
 |---|---|
-| entering from the note screen | **FULL** |
+| entering from the note screen | **FULL** — the runtime opens the codec on the way in |
 | elapsed digits + bar | PARTIAL every 5 s |
-| stop / end of audio → back to the note screen | **FULL** |
+| stop / end of audio → back to the note screen or the list | **FULL** — the runtime closes the codec on the way out |
 
 The bar grows only, so it is ghost-free (§15.3). The elapsed digits are the one
 region on this screen that can leave residue, bounded by `kFullEvery` and by the
@@ -1115,7 +1118,7 @@ TEST("about: a hold goes back to the menu, a tap does nothing, and a tap is not 
 |---|---|---|
 | Pairing | entering / answering | **FULL** both ways |
 | Pairing | anything while open | nothing — the ask is immobile |
-| About | entering / leaving | **FULL** |
+| About | entering / leaving | PARTIAL, a hand-over (§15.2) |
 | About | anything while open | nothing — the page is a snapshot at entry |
 | Phone | entering / leaving | **FULL** both ways |
 | Phone | the state word, a refusal or the bond count moves | **FULL** — a fact changed, not a tick |
@@ -1477,11 +1480,20 @@ covered by eight host cases.
 `F` = call `display->request_full_refresh()` before the flush. `P` = let the
 driver's partial path handle it. `—` = no flush at all.
 
+`P` is the class of every hand-over (§15.2): the driver's diff band means the
+panel is only driven over the rows either page inked. The one exception in a run
+of hand-overs is the machine's ghost budget - **the fourth hand-over in a row is
+`F`** - so a walk that deep sees one flash, and anything else that draws `F` in
+between (a hero change, the sleeping face, `epd full`) starts the count again.
+The rows that stay `F` here are the ones the panel has to be certain of: boot,
+the sleeping face, the busy face of a wipe or a format, the recording face, the
+player, the pairing ask, and the pages a port owns.
+
 | # | From | Event | `ui_keys` result | App does | To | Refresh |
 |---|---|---|---|---|---|---|
 | 1 | — | power on | — | `EpdDisplay::begin()`, `panel_init()`, mount SD, draw Home | `HOME` | `F` (unavoidable) |
 | 2 | `HOME` | BOOT tap | `StartRecording` | open a new `pending/<id>/`, start `port_codec` capture | `RECORDING` | `F` |
-| 3 | `HOME` | BOOT hold | `OpenMenu` | reset `state.menu = 0` | `MENU` | `F` |
+| 3 | `HOME` | BOOT hold | `OpenMenu` | reset `state.menu = 0` | `MENU` | | `P` |
 | 4a | `HOME` | PWR tap | `None` | nothing at all — a tap is never a power-off | `HOME` | — |
 | 4b | `HOME` | PWR hold | `PowerOff` | draw the sleeping face and wait for the full waveform (§12.2), then flush the card, close the radio, drop the latch | `OFF` | `F` (the face) |
 | 5 | `HOME` | *(auto)* pending > 0 and a link is up | — | connect, `notes::Queue::plan_upload()`, upload | `HOME`/SYNCING | `P` unless the hero word changes (`F`) |
@@ -1491,24 +1503,24 @@ driver's partial path handle it. `—` = no flush at all.
 | 9 | `RECORDING` | PWR tap | `None` | nothing at all; the capture is BOOT's to stop or discard | `RECORDING` | — |
 | 10 | `RECORDING` | *(auto)* `note_max_s` reached | `StopKeep` | same as 7, then draw a one-line "cap reached" note | `HOME` | `F` |
 | 11 | `MENU` | BOOT tap | `MenuNext` | — | `MENU` | `P` (bar) |
-| 12 | `MENU` | PWR tap, row `Notes` | `MenuSelect` | read the store's three folders once | `LIST` | `F` |
+| 12 | `MENU` | PWR tap, row `Notes` | `MenuSelect` | read the store's three folders once | `LIST` | | `P` |
 | 13 | `MENU` | PWR tap, row `Sync now` | `MenuSelect` | connect, upload every pending note | `HOME`/SYNCING | `F` |
 | 14 | `MENU` | PWR tap, row `Phone` | `MenuSelect` | `state.go(Screen::Phone)`, `phone_ = PhoneStatus{}`, `Effect::OpenPhoneWindow`; the port's answer becomes the frame | `PHONE` | `F` |
 | 15 | `MENU` | PWR tap, row `Wi-Fi` | `MenuSelect` | `port_wifi_setup` | `WIFI_SETUP` | `F` |
-| 16 | `MENU` | PWR tap, row `About` | `MenuSelect` | gather 5 values | `ABOUT` | `F` |
-| 17 | `MENU` | PWR tap, row `Back` | `MenuSelect` | — | `HOME` | `F` |
-| 18 | `MENU` | BOOT hold | `Back` | — | `HOME` | `F` |
+| 16 | `MENU` | PWR tap, row `About` | `MenuSelect` | gather 5 values | `ABOUT` | | `P` |
+| 17 | `MENU` | PWR tap, row `Back` | `MenuSelect` | — | `HOME` | | `P` |
+| 18 | `MENU` | BOOT hold | `Back` | — | `HOME` | | `P` |
 | 19 | `LIST` | BOOT tap | `NextNote` | rotate the window if `note ≥ 6` | `LIST` | `P`; `F` when it rotates |
-| 20 | `LIST` | PWR tap | `OpenNote` (`None` at zero notes) | read the one `note.json` | `NOTE` | `F` |
-| 21 | `LIST` | BOOT hold | `Back` | — | `MENU` | `F` |
+| 20 | `LIST` | PWR tap | `OpenNote` (`None` at zero notes) | read the one `note.json` | `NOTE` | | `P` |
+| 21 | `LIST` | BOOT hold | `Back` | — | `MENU` | | `P` |
 | 22 | `NOTE` | BOOT tap | `NextNoteAction` | — | `NOTE` | `P` (bar) |
 | 23 | `NOTE` | PWR tap, row `Play` | `RunNoteAction` → `Play` | open the WAV, start playback | `PLAYING` | `F` |
-| 24 | `NOTE` | PWR tap, row `Delete` | `RunNoteAction` → `AskDelete` | — | `CONFIRM` | `F` |
-| 25 | `NOTE` | PWR tap, row `Back` | `RunNoteAction` → `Back` | — | `LIST` | `F` |
-| 26 | `NOTE` | BOOT hold | `Back` | — | `LIST` | `F` |
-| 27 | `CONFIRM` | BOOT hold | `DeleteNote` | `Store::erase(id)`, drop it from the cached list | `LIST` | `F` |
-| 28 | `CONFIRM` | BOOT tap | `KeepNote` | — | `LIST` | `F` |
-| 29 | `CONFIRM` | PWR tap | `KeepNote` | — | `LIST` | `F` |
+| 24 | `NOTE` | PWR tap, row `Delete` | `RunNoteAction` → `AskDelete` | — | `CONFIRM` | | `P` |
+| 25 | `NOTE` | PWR tap, row `Back` | `RunNoteAction` → `Back` | — | `LIST` | | `P` |
+| 26 | `NOTE` | BOOT hold | `Back` | — | `LIST` | | `P` |
+| 27 | `CONFIRM` | BOOT hold | `DeleteNote` | `Store::erase(id)`, drop it from the cached list | `LIST` | | `P` |
+| 28 | `CONFIRM` | BOOT tap | `KeepNote` | — | `LIST` | | `P` |
+| 29 | `CONFIRM` | PWR tap | `KeepNote` | — | `LIST` | | `P` |
 | 30 | `PLAYING` | BOOT tap | `StopPlay` | stop the codec, close the file | `NOTE` | `F` |
 | 31 | `PLAYING` | BOOT hold | `StopPlay` | same as 30 | `NOTE` | `F` |
 | 32 | `PLAYING` | PWR tap | `StopPlayToList` | stop the codec, close the file, back where the player was opened | `LIST` | `F` |
@@ -1517,17 +1529,17 @@ driver's partial path handle it. `—` = no flush at all.
 | 35 | `PAIRING` | BOOT tap | `AllowPhone` | `port_ble` accepts, then `answer_pairing()` | `after_pairing` | `F` |
 | 36 | `PAIRING` | PWR tap | `RefusePhone` | reject, then `answer_pairing()` | `after_pairing` | `F` |
 | 37 | `PAIRING` | BOOT hold | `None` | nothing at all — no redraw, no state change | `PAIRING` | `—` |
-| 38 | `ABOUT` | BOOT hold | `Back` | — | `MENU` | `F` |
+| 38 | `ABOUT` | BOOT hold | `Back` | — | `MENU` | | `P` |
 | 39 | `ABOUT` | PWR tap | `None` | nothing at all | `ABOUT` | — |
 | 40 | `ABOUT` | BOOT tap | `None` | nothing | `ABOUT` | `—` |
 | 41 | `WIFI_SETUP` | the port returns | — | — | `MENU` | `F` |
 | 42 | *any* | a display transfer fails (`take_redraw_request()`) | — | rebuild the view model and redraw | same | `F` (driver already forced it) |
-| 43 | `MENU` | PWR tap, row `Unpair phones` | `MenuSelect` | read the bond store once | `UNPAIR` | `F` |
+| 43 | `MENU` | PWR tap, row `Unpair phones` | `MenuSelect` | read the bond store once | `UNPAIR` | | `P` |
 | 44 | `UNPAIR` | BOOT tap | `NextPeer` | — | `UNPAIR` | `P` (bar) |
-| 45 | `UNPAIR` | PWR tap | `OpenUnpairConfirm` (`None` on an empty table) | — | `CONFIRM_UNPAIR` | `F` |
-| 46 | `UNPAIR` | BOOT hold | `Back` | — | `MENU` | `F` |
-| 47 | `CONFIRM_UNPAIR` | BOOT hold | `UnpairPeer` | `ble_store_util_delete_peer(addr)`, read the table, republish | `UNPAIR` | `F` |
-| 48 | `CONFIRM_UNPAIR` | BOOT tap / PWR tap | `Back` | nothing outside the glass | `UNPAIR` | `F` |
+| 45 | `UNPAIR` | PWR tap | `OpenUnpairConfirm` (`None` on an empty table) | — | `CONFIRM_UNPAIR` | | `P` |
+| 46 | `UNPAIR` | BOOT hold | `Back` | — | `MENU` | | `P` |
+| 47 | `CONFIRM_UNPAIR` | BOOT hold | `UnpairPeer` | `ble_store_util_delete_peer(addr)`, read the table, republish | `UNPAIR` | | `P` |
+| 48 | `CONFIRM_UNPAIR` | BOOT tap / PWR tap | `Back` | nothing outside the glass | `UNPAIR` | | `P` |
 | 49 | `CONFIRM_UNPAIR` | BOOT hold while `mode_ != Idle` | `None` | nothing at all; the reason is already on the glass | `CONFIRM_UNPAIR` | `—` |
 | 50 | `PHONE` | PWR tap | `ClosePhone` | `port_ble` closes the window (`Effect::ClosePhoneWindow`) | `MENU` | `F` |
 | 51 | `PHONE` | BOOT hold | `ClosePhone` | same as 50: out the way the row came in | `MENU` | `F` |
@@ -1750,22 +1762,31 @@ the app task and must not allocate (§16).
 | | full | partial |
 |---|---|---|
 | LUT | `kLutFull`, `0xC7` | `kLutPartial`, `0xCF` |
-| sequence | `panel_init()` → `0x24` write → `0x26` write → `0x22 0xC7` → `0x20` → BUSY | `0x24` write → `0x22 0xCF` → `0x20` → BUSY |
-| visible | a full inversion flash | a quick settle, no flash |
-| payload | **5,000 bytes** (200 × 200 ÷ 8) | **5,000 bytes** |
-| chosen when | first frame, `force_full_`, `!partial_`, or `partials_ >= 20` | otherwise |
+| sequence | `panel_init()` → `0x24` + `0x26` write of the whole frame → `0x22 0xC7` → `0x20` → BUSY → `panel_partial_init()` | window (`0x44`/`0x45`) → `0x24` write of the band → `0x22 0xCF` → `0x20` → BUSY |
+| visible | a full inversion flash, ~1.4 s of drawing here | a quick settle, no flash |
+| payload | **5,000 bytes** (200 × 200 ÷ 8) | the changed rows × 25 bytes |
+| chosen when | first frame, `force_full_`, `!partial_`, or `partials_ >= kFullEvery` (10) | otherwise |
 
-**Two facts that decide this whole section:**
+**Three facts that decide this whole section:**
 
-1. **A partial refresh is a whole-panel waveform, not a rectangle update.** The
-   driver writes all 5,000 bytes either way. `flush(y0, y1)` narrows only the
-   RGB565 → 1-bit *conversion* band, never the transmission. So there is no such
-   thing as "refresh just the 18 rows that changed" — every partial re-drives every
-   pixel of the glass.
+1. **A partial is a band driven from a frame diff, not the whole page.**
+   `update_once()` compares the frame it is about to send with the one it sent
+   last, pads the first and last changed row by two (a band that stops exactly on
+   the ink leaves a ghost line of the row above), and drives that window only -
+   full width, because `0x44` takes x in bytes and a whole-width window keeps the
+   row arithmetic honest. A band taller than half the page takes the whole page,
+   and a frame that changes no pixel is not sent at all. `flush(y0, y1)` is a
+   *different* narrowing: it limits the RGB565 → 1-bit conversion, which is 40,000
+   luma computations over the full panel.
 2. **Updating is off the app task.** `EpdDisplay::task()` owns the BUSY wait; a
    refresh that outlasts the frame budget does not stall the key loop. The app must
    never wait for it (§16) — the sleeping face is the one exception, and it waits
    because the rail goes the moment it returns (§12.2).
+3. **A partial cannot finish a black → white transition.** Each one leaves a
+   little residue where ink goes back to paper, which is what `kFullEvery` bounds:
+   ten partials, then one full refresh that clears the glass. The budget is a
+   property of the panel, not of the UI, and it is why a page that keeps changing
+   in place is safe to draw partially.
 
 The **full-update duration on this unit measured 2,122 ms**, and the one place the
 firmware has to know it is the sleeping face's wait (§12.2). The driver only
@@ -1783,46 +1804,68 @@ Time `panel_init()` + a full write with `esp_timer_get_time()` across ten
 transitions and log the median. Until a panel is timed, treat every `F` in §13.2 as a
 user-visible pause and keep them where a pause is expected: on a key press.
 
-### 15.2 Which transitions must full-refresh
+### 15.2 Hand-overs are partial; certainty is full
 
-**Rule: entering or leaving a screen is always full. Within a screen, partial is
-the default.**
+**Rule: a hand-over between the UI's own pages is a partial, and the machine
+keeps a tighter ghost budget for them. Everything the panel has to be certain of
+is full.**
 
-The reason is not superstition. A partial waveform moves pixels to their new value
-*relative to what is already in the panel's RAM*, so where the previous frame had
-ink and the new one does not, the residue is proportional to the difference. Two
-different screens differ almost everywhere — a menu is nine rows of small text, a
-note screen is a 21 px hero — so a partial between them leaves the old layout
-legible through the new one. This is already the established rule in the tree
-(`modes/notes_screen.hpp`: *"a partial update … to this one leaves the previous
-image ghosted, and the panel's own 'full every 20 partials' rule is too slow to
-hide it"*), and it applies with more force here because the screens differ more.
+A hand-over is one page replacing another as the person walks the device:
+`HOME → MENU`, `MENU → LIST`, `LIST → NOTE`, and every step back out — plus the
+questions the menu and the list ask on the way (`ABOUT`, `UNPAIR`, the two
+confirms) and the note screen's `CONFIRM`. They are the moves in §13.2 that carry
+`P`, and they are listed in `ui_app.cpp`'s `handover()`.
 
-Concretely, `F` on every row of §13.2 that changes the screen, plus:
+This used to be the one place that was always full. The reason was sound on the
+old driver: a partial re-drove the whole page from what was already in the
+panel's RAM, so two layouts that differ everywhere left the old one legible
+through the new one, and `kFullEvery = 20` was far too lazy to hide it. The
+driver works differently now (§15.1): it drives only the rows that moved, and it
+pads them by two. So where the new page is white, the rows the old page inked are
+re-driven to white in the same pass, and the rows that were paper on both pages
+are never driven at all — which is exactly "clear only the region the previous
+page inked", done by the component that can see both frames.
+
+What a partial still cannot do is *finish* those black → white transitions, so a
+run of hand-overs does leave residue, and the driver's ten-band cadence is not
+the right bound for it: a hand-over leaves a whole layout's worth, not a bar's.
+`ScreenApp::handover_frame()` therefore keeps its own budget,
+`kHandoverFullEvery = 4`: **the fourth hand-over in a row is a full refresh.** A
+menu session of any depth carries at most three pages of ghost and sees one
+flash, on the fourth move rather than on every key. The count is reset by any
+full frame, because that flash already cleaned the glass.
+
+Still full, each for its own reason:
 
 | Also full | Why |
 |---|---|
-| the first frame after power on | `panel_init()` is part of the full path |
+| the first frame after power on | `panel_init()` is part of the full path; `NotesUi::render()` forces it on `first_frame_`, and the driver's `!partial_` agrees |
 | the first frame after a wake that dropped `EPD_PWR` | the reset cleared the panel's RAM; a partial would have nothing to diff against |
 | **any change to the Home hero string** | `READY → UPLOADING` changes three slots at once; a partial leaves the old word under the new |
 | a list rotation (§6.4) | six text rows move at once |
 | `take_redraw_request()` returns true | a transfer failed; the driver has already forced full, the app only has to redraw |
-| returning from a port-owned screen (§12.1) | both directions change the whole page |
+| the busy face of a wipe or a format | it stays up for 20-90 s, so one clean flash costs nothing next to the job |
+| the frame that ends a wipe or a format | the card changed under it, counts and all |
+| the recording face | the runtime starts and stops the capture, and a commit moves the counts under the frame |
+| the player | the runtime opens and closes the codec on the way in and out |
+| the pairing ask | an interrupt from the radio, drawn over whatever page the person was on |
+| the Phone screen and Wi-Fi setup | the port owns that window or that panel (§12.1) |
 | the sleeping face (§12.2) | it is drawn over the page it replaces, and a partial would leave that page ghosting through the moon |
+| `epd full` | the console's clean-up: the driver forces the next update full on its own, whatever the screens asked |
 
 Everything else — bar moves, counters, progress bars, a mark appearing — is
-partial, and the driver's `kFullEvery = 20` bounds the accumulation regardless.
+partial, and the driver's `kFullEvery` bounds the accumulation regardless.
 
 ### 15.3 Ghosting: where it comes from and how it is bounded
 
-All four ghost sources in this UI, with the mitigation that actually applies:
+The ghost sources in this UI, with the mitigation that actually applies:
 
 | Source | Mechanism | Mitigation |
 |---|---|---|
 | **the selection bar moving** | a 184 × 18 solid block (3,312 black px) must go white on the row it left. Black → white is the transition the partial waveform handles worst | **after 8 consecutive bar moves with no other change, force a full refresh.** 8 moves is 7 vacated rows; one flash per 8 presses is rare enough not to annoy and frequent enough that a list never looks dirty |
 | **the elapsed-time digits** | glyphs change in place; the old strokes have to be erased | the region is repainted to `kPaper` first, and the counter ticks at 30 s (§10.3), so a handful of digit changes before the driver's own full |
 | **progress bars** | **none** — the fill only ever grows | nothing to mitigate, *provided the bar never shrinks*. A bar that resets (e.g. on a retry) must force a full refresh |
-| **screen changes** | §15.2 | full by rule |
+| **a hand-over** | one page's ink has to go white where the next page is paper — the largest black → white delta in the UI | the machine's own budget: **every fourth hand-over in a row is a full refresh** (`kHandoverFullEvery`), which is one flash per deep menu session. The driver's `kFullEvery = 10` bounds the rest (§15.2) |
 
 The general principle: **ghosting is a function of pixels that go from black to
 white, so design transitions that only add ink.** That is why the bar grows rather

@@ -39,10 +39,19 @@ draw path off the card: `ui_cache` is called when something happened, and
 `ui_app.cpp` returns a `Refresh` with every outcome, from the spec's transition
 table:
 
-* **Full** — every screen change, a list rotation, a change to the Home hero,
-  and every eighth consecutive selection-bar move (§15.3);
-* **Partial** — bar moves, counters, a mark appearing, the playback position;
+* **Full** — the first frame after boot, the sleeping face, the busy face of a
+  wipe or a format, the recording face, the player, the pairing ask, the pages a
+  port owns, a list rotation, a change to the Home hero, every eighth
+  consecutive selection-bar move (§15.3), and the fourth hand-over in a row;
+* **Partial** — a hand-over between the UI's own pages (Home, the menu, the
+  list, a note, and the questions they ask), bar moves, counters, a mark
+  appearing, the playback position;
 * **None** — a publish that changed nothing, and a hold on the pairing ask.
+
+A hand-over is a page replacing a page. It is a partial because the driver
+drives only the rows that moved (§15.1), and `ScreenApp::handover_frame()` caps
+a run of them at three so no page carries more than three hand-overs of
+residue: the fourth is the full refresh that clears the glass.
 
 `ui_device.cpp` translates that into `request_full_refresh()` before the flush.
 

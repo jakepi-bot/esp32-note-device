@@ -38,6 +38,86 @@ bool same(const HeroFacts& a, const HeroFacts& b) {
          a.offline == b.offline && a.clock_set == b.clock_set;
 }
 
+// ------------------------------------------------------------------ hand-overs
+//
+// A hand-over is one page replacing another as the person walks the device:
+// Home -> menu -> list -> note, and every step back out, plus the questions the
+// menu and the list ask on the way (About, Unpair, the two confirms) and the
+// note list's own note screen.
+//
+// They used to ask for a full refresh - a ~1.4 s inversion flash on this panel,
+// which is the pause that made the demo path feel unresponsive. The premise was
+// that a partial over a page whose ink the next page does not repeat ghosts the
+// old layout through the new one. The driver no longer works that way: it diffs
+// the frame against what the panel was sent, drives only the rows that moved
+// (padded by two), and skips an update that changes no pixel
+// (port_display_epd.cpp, update_once). So a hand-over now costs the partial
+// waveform over the band that either page inked: where the new page is white,
+// the rows the old one inked are re-driven to white in the same pass, and the
+// rows that were paper on both pages are never driven at all.
+//
+// What a partial cannot do is *finish* a black-to-white transition: each one
+// leaves a little residue, which is why the panel's kFullEvery exists. A
+// hand-over leaves far more than a bar move (a whole layout's ink against a
+// whole layout's white), so the driver's ten-band cadence is too lazy for
+// them. The machine therefore keeps its own budget, four times tighter: the
+// fourth hand-over in a row is a full refresh. A menu session of any depth
+// therefore carries at most three pages of residue, and the one flash it sees
+// lands on a page the person has just moved to rather than on every key.
+constexpr uint8_t kHandoverFullEvery = 4;
+
+// Which screen changes are hand-overs (§15.2). Everything not named here keeps
+// the class it had, and each for its own reason:
+//   * the first frame after boot - the panel has nothing to diff against
+//     (NotesUi::render forces it, and EpdDisplay::begin() arms the full LUT);
+//   * the sleeping face - the last image the panel is given (§12.2);
+//   * the busy face of a wipe or a format - it stays up for 20-90 s, so one
+//     clean flash is nothing against the job, and its progress steps are the
+//     partials that follow;
+//   * the recording face and the player - the runtime starts and stops the work
+//     behind them, and a capture's commit moves the counts under the frame;
+//   * the pairing ask - an interrupt from the radio, drawn over whatever page
+//     the person was on;
+//   * the Phone screen and Wi-Fi setup - the port owns the window or the panel,
+//     and the window opening is the radio's news rather than a step the keys
+//     took (§12.1);
+//   * the Home frame that ends a wipe or a format - the card changed under it.
+bool handover(Screen from, Screen to) {
+  switch (from) {
+    case Screen::Home:
+      return to == Screen::Menu;
+    case Screen::Menu:
+      // The menu's own rows: the note list, About, the bond table, and the two
+      // questions. Its Phone and Wi-Fi rows leave the page to a port.
+      return to == Screen::Home || to == Screen::NoteList || to == Screen::About ||
+             to == Screen::UnpairList || to == Screen::ConfirmWipe ||
+             to == Screen::ConfirmFormat;
+    case Screen::NoteList:
+      return to == Screen::Menu || to == Screen::NoteAction;
+    case Screen::NoteAction:
+      return to == Screen::NoteList || to == Screen::ConfirmDelete;
+    case Screen::ConfirmDelete:
+      return to == Screen::NoteList;
+    case Screen::ConfirmWipe:
+    case Screen::ConfirmFormat:
+      return to == Screen::Menu;  // a tap cancels back to the row it came from
+    case Screen::About:
+      return to == Screen::Menu;
+    case Screen::UnpairList:
+      return to == Screen::Menu || to == Screen::ConfirmUnpair;
+    case Screen::ConfirmUnpair:
+      return to == Screen::UnpairList;
+    case Screen::Recording:
+    case Screen::Playing:
+    case Screen::Pairing:
+    case Screen::Phone:
+    case Screen::Wiping:
+    case Screen::Back:
+      return false;
+  }
+  return false;
+}
+
 }  // namespace
 
 void ScreenApp::begin(const Snapshot& snapshot) {
@@ -51,6 +131,7 @@ void ScreenApp::begin(const Snapshot& snapshot) {
   open_note_ = 0;
   booted_ = true;
   bar_moves_ = 0;
+  handovers_ = 0;
 }
 
 void ScreenApp::clamp_cursor() {
@@ -91,8 +172,23 @@ Outcome ScreenApp::publish(const Snapshot& snapshot, uint16_t dirty) {
   } else {
     out.refresh = Refresh::Partial;
   }
+  // A full frame is the one thing that clears the panel, so it clears the
+  // hand-over budget with it: whatever residue was on the glass is gone.
+  if (out.refresh == Refresh::Full) handovers_ = 0;
   bar_moves_ = 0;
   return out;
+}
+
+// The class a hand-over frame gets (§15.2). The budget is spent one hand-over
+// at a time and the one that exhausts it is a full refresh; anything that draws
+// full in between resets it, because that flash already cleaned the glass.
+Refresh ScreenApp::handover_frame() {
+  if (handovers_ + 1 >= kHandoverFullEvery) {
+    handovers_ = 0;
+    return Refresh::Full;
+  }
+  ++handovers_;
+  return Refresh::Partial;
 }
 
 Outcome ScreenApp::stay(Refresh refresh) {
@@ -397,26 +493,24 @@ Outcome ScreenApp::press(Key key, uint32_t now_ms) {
   Outcome out = run(action, now_ms);
 
   // ui_keys moves the screen itself for the transitions that are pure key rules
-  // (Home hold, a hold out of the list, About, Confirm). Any such move is full.
+  // (Home hold, a hold out of the list, About, Confirm). The class of that move
+  // is the machine's answer, not the action's: a hand-over takes the partial
+  // path and spends the budget above, and everything else stays full (§15.2).
   if (state_.screen != before) {
-    out.refresh = Refresh::Full;
+    out.refresh = handover(before, state_.screen) ? handover_frame() : Refresh::Full;
     out.draw = true;
     bar_moves_ = 0;
-    return out;
-  }
-
-  if (action == Action::MenuNext || action == Action::NextNote ||
-      action == Action::NextNoteAction) {
+  } else if (action == Action::MenuNext || action == Action::NextNote ||
+             action == Action::NextNoteAction) {
     // Selection-bar moves are boxed: after eight consecutive moves the residue
-    // is worth one full flash (§15.3).
+    // is worth one full flash (§15.3), and a list rotation (six text rows at
+    // once) is not a bar move at all.
     if (state_.screen == Screen::NoteList &&
         list_visible_first(state_.note, snap_.note_count) != first_before) {
       out.refresh = Refresh::Full;
       out.draw = true;
       bar_moves_ = 0;
-      return out;
-    }
-    if (out.refresh == Refresh::Partial) {
+    } else if (out.refresh == Refresh::Partial) {
       ++bar_moves_;
       if (bar_moves_ >= 8) {
         out.refresh = Refresh::Full;
@@ -424,6 +518,8 @@ Outcome ScreenApp::press(Key key, uint32_t now_ms) {
       }
     }
   }
+  // A full frame clears the glass, so it clears the hand-over budget with it.
+  if (out.refresh == Refresh::Full) handovers_ = 0;
   return out;
 }
 

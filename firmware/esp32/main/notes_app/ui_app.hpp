@@ -46,6 +46,13 @@ enum class Effect : uint8_t {
 };
 
 // The refresh class, straight from the spec's transition table (§13.2).
+//
+// Full is the class that clears the panel: the first frame after boot, the
+// sleeping face, the busy face of a long card job, the recording face, the
+// pairing ask, the port-owned pages, and every path the runtime drives. A
+// hand-over between the UI's own pages - Home, the menu, the list, a note and
+// the questions they ask - is a partial, bounded by the machine's ghost budget
+// (ScreenApp::handover_frame): see §15.2.
 enum class Refresh : uint8_t { None, Partial, Full };
 
 // Which part of the cache changed. The caller knows (it did the work); the app
@@ -172,6 +179,11 @@ class ScreenApp {
   Outcome run(Action action, uint32_t now_ms);
   Outcome stay(Refresh refresh = Refresh::None);
   Outcome go(Screen next, Refresh refresh = Refresh::Full);
+  // The class a hand-over frame gets, and the budget behind it (§15.2): a
+  // hand-over is a page replacing a page, which is a partial now that the
+  // driver drives only the rows either page inked. The fourth in a row is a
+  // full refresh, so no page carries more than three hand-overs of residue.
+  Refresh handover_frame();
   bool hero_changed(const Snapshot& before, const Snapshot& after) const;
   void clamp_cursor();
   void note_changed(uint16_t dirty);
@@ -181,6 +193,7 @@ class ScreenApp {
   uint16_t open_note_ = 0;
   bool booted_ = false;
   uint8_t bar_moves_ = 0;      // consecutive selection-bar moves (§15.3)
+  uint8_t handovers_ = 0;      // consecutive hand-over partials since a full frame
   uint32_t record_start_ms_ = 0;
   uint32_t record_draw_s_ = 0; // the counter's last drawn second
   uint32_t play_draw_s_ = 0;   // the position's last drawn second

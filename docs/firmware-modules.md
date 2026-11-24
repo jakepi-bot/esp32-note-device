@@ -320,9 +320,11 @@ means "the panel is mine this frame" and the core UI draws nothing. So:
 `phones_paired()`, `phone_connected()`), the cell from the core's own power read
 (`App::displayed_battery_percent()`, `App::external_power()`: the gauge or the
 voltage estimate, whichever the board's rules allow), and the notes facts from
-`NotesMode::status()` (cached; no card access). Each hand-over forces a full
-panel refresh (`EpdDisplay::request_full_refresh()`): a partial update between
-the core's white-on-black screen and this one leaves the old image ghosted.
+`NotesMode::status()` (cached; no card access). Each hand-over into or out of this
+mode forces a full panel refresh (`EpdDisplay::request_full_refresh()`): a partial
+update between the core's white-on-black screen and this one leaves the old image
+ghosted. (The notes *app*'s own hand-overs are partial - see
+`docs/notes-ui-spec.md` §15.2 - but this mode is not the app.)
 
 Edge states are copy, not special cases: no Wi-Fi is `OFFLINE` with the pending
 count, a missing card is `NO CARD`, an unknown cell prints `NO BATTERY` (or

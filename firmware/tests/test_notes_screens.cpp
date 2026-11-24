@@ -541,12 +541,18 @@ TEST("the key map reaches every screen, and every screen has a way back") {
   CHECK(app.playback_finished().effect == Effect::StopPlayback);
   CHECK(app.screen() == Screen::NoteAction);
 
-  // Delete asks first, and the ask can be backed out of for free.
+  // Delete asks first, and the ask can be backed out of for free. Both moves are
+  // hand-overs: the player's stop cleared the budget, so the ask is the first
+  // partial and the keep is the second (§15.2).
   CHECK(app.press(Key::BootTap, 0).effect == Effect::None);  // row 1: Delete
   CHECK(app.state().action == static_cast<uint8_t>(NoteActionItem::Delete));
-  CHECK(app.press(Key::Power, 0).effect == Effect::None);
+  const Outcome ask = app.press(Key::Power, 0);
+  CHECK(ask.effect == Effect::None);
+  CHECK(ask.refresh == Refresh::Partial);  // NoteAction -> ConfirmDelete
   CHECK(app.screen() == Screen::ConfirmDelete);
-  CHECK(app.press(Key::BootTap, 0).effect == Effect::None);  // tap = keep
+  const Outcome keep = app.press(Key::BootTap, 0);
+  CHECK(keep.effect == Effect::None);  // tap = keep
+  CHECK(keep.refresh == Refresh::Partial);  // ConfirmDelete -> NoteList
   CHECK(app.screen() == Screen::NoteList);
 }
 
@@ -559,7 +565,7 @@ TEST("about: a hold goes back to the menu, a tap does nothing, and a tap is not 
   CHECK(s.screen == Screen::Menu);
 }
 
-TEST("refresh: a screen change is full, a bar move is partial, eight moves force a full") {
+TEST("refresh: a bar move is partial, and eight moves force a full") {
   // Six notes: one page, so the cursor wraps without rotating and the only
   // thing that changes is the bar - which is what the eight-move bound is for.
   Snapshot snap;
@@ -1760,17 +1766,22 @@ TEST("confirm: a BOOT tap cancels wipe and a BOOT hold wipes") {
   CHECK(std::string(first.confirm.line1) == "2 NOTES GO");
 
   // A tap is the safe answer, and it is the same one PWR gives: the menu, the
-  // notes untouched, nothing outside the glass to undo.
+  // notes untouched, nothing outside the glass to undo. The ask was the second
+  // hand-over and this is the third, so both draw partial.
   const Outcome tap = app.press(Key::BootTap, 0);
   CHECK(tap.effect == Effect::None);
   CHECK(tap.effect != Effect::WipeNotes);
+  CHECK(tap.refresh == Refresh::Partial);  // ConfirmWipe -> Menu
   CHECK(app.screen() == Screen::Menu);
   CHECK(app.snapshot().note_count == 2);
 
-  CHECK(app.press(Key::Power, 0).effect == Effect::None);  // the row again
+  const Outcome again = app.press(Key::Power, 0);  // the row again
+  CHECK(again.effect == Effect::None);
+  CHECK(again.refresh == Refresh::Full);  // the fourth hand-over: the budget's flash
   CHECK(app.screen() == Screen::ConfirmWipe);
   const Outcome pwr = app.press(Key::Power, 0);
   CHECK(pwr.effect == Effect::None);
+  CHECK(pwr.refresh == Refresh::Partial);  // budget cleared, so the cancel is partial
   CHECK(app.screen() == Screen::Menu);
 
   // The hold is the wipe, and the glass lands on the busy face - the frame the
@@ -1806,11 +1817,14 @@ TEST("confirm: a BOOT tap cancels format and a BOOT hold formats") {
 
   const Outcome tap = app.press(Key::BootTap, 0);
   CHECK(tap.effect == Effect::None);
+  CHECK(tap.refresh == Refresh::Partial);  // ConfirmFormat -> Menu, the third hand-over
   CHECK(app.screen() == Screen::Menu);
 
-  app.press(Key::Power, 0);
+  const Outcome again = app.press(Key::Power, 0);
+  CHECK(again.refresh == Refresh::Full);  // the fourth hand-over: the budget's flash
   const Outcome pwr = app.press(Key::Power, 0);  // PWR cancels too
   CHECK(pwr.effect == Effect::None);
+  CHECK(pwr.refresh == Refresh::Partial);  // budget cleared, so the cancel is partial
   CHECK(app.screen() == Screen::Menu);
 
   app.press(Key::Power, 0);
@@ -2084,18 +2098,28 @@ TEST("unpair: a tap keeps the phone, and a store that refuses keeps the row") {
   CHECK(ui.screen() == Screen::UnpairList);
 
   // BOOT tap on the question: the safe answer, the list back, nothing deleted.
-  CHECK(ui.press(Key::Power, 0).effect == Effect::None);
+  // The ask is the walk's third hand-over (partial); backing out is the fourth,
+  // which the ghost budget spends on a full refresh.
+  const Outcome ask = ui.press(Key::Power, 0);
+  CHECK(ask.effect == Effect::None);
+  CHECK(ask.refresh == Refresh::Partial);  // UnpairList -> ConfirmUnpair
   CHECK(ui.screen() == Screen::ConfirmUnpair);
   const Outcome tap = ui.press(Key::BootTap, 0);
   CHECK(tap.effect == Effect::None);
+  CHECK(tap.refresh == Refresh::Full);  // ConfirmUnpair -> UnpairList, the fourth
   CHECK(ui.screen() == Screen::UnpairList);
   CHECK(bonds.erases == 0);
   CHECK(bonds.peers.size() == 1);
 
-  // PWR tap is the same safe answer (the delete confirm's rule).
-  CHECK(ui.press(Key::Power, 0).effect == Effect::None);
+  // PWR tap is the same safe answer (the delete confirm's rule). The full above
+  // cleared the budget, so the ask and the answer are partials again.
+  const Outcome ask_again = ui.press(Key::Power, 0);
+  CHECK(ask_again.effect == Effect::None);
+  CHECK(ask_again.refresh == Refresh::Partial);
   CHECK(ui.screen() == Screen::ConfirmUnpair);
-  CHECK(ui.press(Key::Power, 0).effect == Effect::None);
+  const Outcome pwr = ui.press(Key::Power, 0);
+  CHECK(pwr.effect == Effect::None);
+  CHECK(pwr.refresh == Refresh::Partial);
   CHECK(ui.screen() == Screen::UnpairList);
   CHECK(bonds.erases == 0);
 

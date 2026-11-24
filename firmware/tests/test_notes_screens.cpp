@@ -1740,7 +1740,7 @@ TEST("menu: rows in order, Back last") {
   CHECK(std::string(wipe.line1) == "113 NOTES GO");
   CHECK(std::string(wipe.line2) == "THE CARD STAYS");
   // The legend names the key: "hold to wipe" left a person guessing whose hold.
-  CHECK(wipe.hold != nullptr && std::string(wipe.hold) == "HOLD BOOT: wipe");
+  CHECK(wipe.hold != nullptr && std::string(wipe.hold) == "HOLD BOOT 2s");
   CHECK(wipe.why == nullptr);  // idle: the hold is allowed
   // The hero has to fit the panel at scale 3 and the lines at the body size: the
   // wide copy on a 200 px screen is what the ink box below proves.
@@ -1833,7 +1833,7 @@ TEST("confirm: a BOOT tap cancels format and a BOOT hold formats") {
   CHECK(std::string(first.confirm.hero) == "FORMAT");
   CHECK(std::string(first.confirm.line1) == "THE SD CARD");
   CHECK(std::string(first.confirm.line2) == "NOTES AND LOG GO");
-  CHECK(std::string(first.confirm.hold) == "HOLD BOOT: format");
+  CHECK(std::string(first.confirm.hold) == "HOLD BOOT 2s");
 
   const Outcome tap = app.press(Key::BootTap, 0);
   CHECK(tap.effect == Effect::None);
@@ -2068,7 +2068,7 @@ TEST("unpair: a BOOT hold removes the selected phone once, and the list shrinks"
   const ConfirmView ask = ui.app().frame().confirm;
   CHECK(std::string(ask.hero) == "UNPAIR?");
   CHECK(std::string(ask.line1) == "E0:5A:1B:22:9C:04");
-  CHECK(std::string(ask.hold) == "HOLD: unpair");
+  CHECK(std::string(ask.hold) == "HOLD BOOT 2s");
   CHECK(ask.why == nullptr);
   CHECK(bonds.erases == 0);  // the question deletes nothing
 

@@ -73,7 +73,11 @@ constexpr int64_t kBusyTimeoutMs = 3000;
 // A partial waveform leaves residue; twenty of them is a visible ghost on a
 // band that redraws a minute apart. Ten keeps the glass clean without turning
 // every minute into a flash (2026-11-23).
-constexpr int kFullEvery = 10;  // the default; see set_full_every()
+// The panel on this board does not ghost: Jake ran the notes UI for an afternoon
+// of partials and saw no residue (2026-11-24). Ten was the conservative default;
+// sixty-four keeps the periodic clean-up for a panel that needs it without the
+// full-flash every few seconds, and `epd ghost <n>` still moves it from the console.
+constexpr int kFullEvery = 64;  // the default; see set_full_every()
 // The vendor's driver comments name 10 MHz as the panel's clock; a full
 // frame is 5,000 bytes either way, about 4 ms on the wire.
 constexpr int kSpiHz = 10 * 1000 * 1000;

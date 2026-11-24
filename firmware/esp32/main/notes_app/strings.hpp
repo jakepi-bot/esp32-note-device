@@ -66,16 +66,19 @@ inline constexpr const char* kPwrOpen = "PWR: open";
 inline constexpr const char* kBootAllow = "BOOT: allow";
 inline constexpr const char* kPwrRefuse = "PWR: refuse";
 inline constexpr const char* kHoldDiscard = "HOLD: discard";
-inline constexpr const char* kHoldDelete = "HOLD: delete";
+// The legend has 176 px, which is 14 characters at the body size: the key, the
+// gesture and how long, and the verb lives in the hero above it. "HOLD BOOT: wipe"
+// was 15 and fell back to 6 px, which is what Jake could not read (2026-11-24).
+inline constexpr const char* kHoldDelete = "HOLD BOOT 2s";
 // The confirm screens said "hold to wipe, tap to cancel" and never said whose
 // hold: on this device both gestures are BOOT, which a person cannot guess.
-inline constexpr const char* kHoldWipe = "HOLD BOOT: wipe";
+inline constexpr const char* kHoldWipe = "HOLD BOOT 2s";
 // The second question: the same key, again, and only within this screen.
-inline constexpr const char* kHoldAgain = "HOLD AGAIN: do it";
-inline constexpr const char* kHoldFormat = "HOLD BOOT: format";
+inline constexpr const char* kHoldAgain = "HOLD AGAIN 2s";
+inline constexpr const char* kHoldFormat = "HOLD BOOT 2s";
 inline constexpr const char* kHoldBack = "HOLD: back";
 inline constexpr const char* kHoldNothing = "HOLD: nothing";
-inline constexpr const char* kTapKeep = "TAP BOOT: keep";
+inline constexpr const char* kTapKeep = "TAP: cancel";
 // The busy face's one line: neither key does anything while the card is being
 // emptied, so the footer says what the person should do - nothing (t_0070a731).
 inline constexpr const char* kPleaseWait = "PLEASE WAIT";
@@ -198,7 +201,7 @@ inline constexpr const char* kCount = "%u PAIRED";
 inline constexpr const char* kEmpty = "NOTHING PAIRED";
 inline constexpr const char* kEmptyHint = "open PHONE to pair";
 inline constexpr const char* kConfirmHero = "UNPAIR?";
-inline constexpr const char* kHold = "HOLD: unpair";
+inline constexpr const char* kHold = "HOLD BOOT 2s";
 }  // namespace unpair
 
 namespace about {

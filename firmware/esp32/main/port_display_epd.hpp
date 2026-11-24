@@ -34,10 +34,6 @@ class EpdDisplay final : public hg::Display {
   // for a screen that takes the whole panel over from another one, where a
   // partial leaves the previous image ghosted through the new one.
   void request_full_refresh() { force_full_ = true; }
-  // The panel's rail: both rails on this board conduct LOW. It is raised only
-  // around an update - an e-paper panel holds its picture with the rail down,
-  // and a powered panel plus its booster draws for nothing.
-  void panel_power(bool on);
   // How many partial updates may run before a full one clears the residue. 1
   // means every frame is a full refresh (no ghosting, most charge); the default
   // is 10. The bench and a demo can set it from the console.

@@ -22,7 +22,7 @@ const char* TAG = "hg.notes.up";
 // is also how long a key can wait: 64 KB of socket write on a sleeping station is
 // a second or more, 8 KB is a few milliseconds and the loop comes back for the
 // keys (2026-11-24).
-constexpr size_t kChunk = 8 * 1024;
+constexpr size_t kChunk = 16 * 1024;
 
 // Gathers the response body: the contract's answers are small JSON, and an
 // answer that is not read out would leave the socket unusable for the next

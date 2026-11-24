@@ -111,7 +111,7 @@ Snapshot snapshot_for(const Cache& cache, Store& store, Screen screen, uint16_t 
   return snap;
 }
 
-// "A4:C1:38:7F:12:9B" -> a Peer. The tests read like the glass.
+// "AA:BB:CC:DD:EE:01" -> a Peer. The tests read like the glass.
 Peer make_peer(const char* text, const char* name = nullptr) {
   Peer peer;
   unsigned octet[6] = {};
@@ -875,8 +875,8 @@ TEST("render: every screen inks paper only - x 4..196, y <= 186 at 1 bit") {
   // The unpair list and its question, with the widest copy they can carry: a
   // 17-column address, a 12-column name beside it, and a busy line above the rule.
   Snapshot peers;
-  peers.peers[0] = make_peer("A4:C1:38:7F:12:9B", "Annas iPhone");
-  peers.peers[1] = make_peer("E0:5A:1B:22:9C:04", "Pixel 8 Pro");
+  peers.peers[0] = make_peer("AA:BB:CC:DD:EE:01", "Test Handset");
+  peers.peers[1] = make_peer("AA:BB:CC:DD:EE:02", "Pixel 8 Pro");
   peers.peer_count = 2;
 
   static uint16_t fb[200 * 200];
@@ -1870,8 +1870,8 @@ TEST("unpair: the list names every bonded phone, and says so when there are none
   // address is always there - it is the one thing a person can compare with the
   // phone in their hand - and the name is the second column when it exists.
   Snapshot snap;
-  snap.peers[0] = make_peer("A4:C1:38:7F:12:9B", "Annas iPhone");
-  snap.peers[1] = make_peer("E0:5A:1B:22:9C:04");
+  snap.peers[0] = make_peer("AA:BB:CC:DD:EE:01", "Test Handset");
+  snap.peers[1] = make_peer("AA:BB:CC:DD:EE:02");
   snap.peer_count = 2;
 
   ScreenApp app;
@@ -1883,9 +1883,9 @@ TEST("unpair: the list names every bonded phone, and says so when there are none
   CHECK(frame.screen == Screen::UnpairList);
   CHECK(!frame.unpair.empty);
   CHECK(frame.unpair.count == 2);
-  CHECK(std::string(frame.unpair.row[0].addr) == "A4:C1:38:7F:12:9B");
-  CHECK(std::string(frame.unpair.row[0].name) == "Annas iPhone");
-  CHECK(std::string(frame.unpair.row[1].addr) == "E0:5A:1B:22:9C:04");
+  CHECK(std::string(frame.unpair.row[0].addr) == "AA:BB:CC:DD:EE:01");
+  CHECK(std::string(frame.unpair.row[0].name) == "Test Handset");
+  CHECK(std::string(frame.unpair.row[1].addr) == "AA:BB:CC:DD:EE:02");
   CHECK(frame.unpair.row[1].name[0] == '\0');
   CHECK(std::string(frame.unpair.count_line) == "2 PAIRED");
 
@@ -1949,14 +1949,14 @@ TEST("unpair: entering the screen reads the table then, not at boot") {
   while (static_cast<MenuItem>(ui.app().state().menu) != MenuItem::UnpairPhones) {
     ui.press(Key::BootTap, 0);
   }
-  bonds.peers.push_back(make_peer("A4:C1:38:7F:12:9B"));  // the radio came up
+  bonds.peers.push_back(make_peer("AA:BB:CC:DD:EE:01"));  // the radio came up
 
   ui.press(Key::Power, 0);  // select the row
   CHECK(ui.screen() == Screen::UnpairList);
   CHECK(ui.snapshot().peer_count == 1);
   const ScreenDraw list = ui.app().frame();
   CHECK(list.unpair.count == 1);
-  CHECK(std::string(list.unpair.row[0].addr) == "A4:C1:38:7F:12:9B");
+  CHECK(std::string(list.unpair.row[0].addr) == "AA:BB:CC:DD:EE:01");
   CHECK(bonds.erases == 0);
 }
 
@@ -1969,8 +1969,8 @@ TEST("unpair: a store that does not answer leaves the table on the glass") {
   Store store(dir.path + "/notes");
   CHECK(store.ensure());
   FakeBonds bonds;
-  bonds.peers.push_back(make_peer("A4:C1:38:7F:12:9B"));
-  bonds.peers.push_back(make_peer("E0:5A:1B:22:9C:04"));
+  bonds.peers.push_back(make_peer("AA:BB:CC:DD:EE:01"));
+  bonds.peers.push_back(make_peer("AA:BB:CC:DD:EE:02"));
 
   UiState ui;
   Snapshot seed;
@@ -1988,7 +1988,7 @@ TEST("unpair: a store that does not answer leaves the table on the glass") {
   CHECK(ui.snapshot().peer_count == 2); // the answer it could not get changes nothing
   const ScreenDraw list = ui.app().frame();
   CHECK(list.unpair.count == 2);
-  CHECK(std::string(list.unpair.row[1].addr) == "E0:5A:1B:22:9C:04");
+  CHECK(std::string(list.unpair.row[1].addr) == "AA:BB:CC:DD:EE:02");
 
   // And the store speaking again is believed, empty or not.
   bonds.answers = true;
@@ -2003,8 +2003,8 @@ TEST("unpair: a BOOT hold removes the selected phone once, and the list shrinks"
   Store store(dir.path + "/notes");
   CHECK(store.ensure());
   FakeBonds bonds;
-  bonds.peers.push_back(make_peer("A4:C1:38:7F:12:9B"));
-  bonds.peers.push_back(make_peer("E0:5A:1B:22:9C:04"));
+  bonds.peers.push_back(make_peer("AA:BB:CC:DD:EE:01"));
+  bonds.peers.push_back(make_peer("AA:BB:CC:DD:EE:02"));
 
   // The adapter owns the card, the machine and the bond store together: this is
   // the same path the device runs, with the radio replaced by FakeBonds.
@@ -2021,7 +2021,7 @@ TEST("unpair: a BOOT hold removes the selected phone once, and the list shrinks"
   ui.press(Key::Power, 0);  // select the row
   CHECK(ui.screen() == Screen::UnpairList);
   CHECK(ui.snapshot().peer_count == 2);  // the table was read on the way in
-  CHECK(std::string(ui.app().frame().unpair.row[0].addr) == "A4:C1:38:7F:12:9B");
+  CHECK(std::string(ui.app().frame().unpair.row[0].addr) == "AA:BB:CC:DD:EE:01");
   CHECK(bonds.erases == 0);
 
   // The second phone, asked about: the question states the address it removes.
@@ -2031,7 +2031,7 @@ TEST("unpair: a BOOT hold removes the selected phone once, and the list shrinks"
   CHECK(ui.screen() == Screen::ConfirmUnpair);
   const ConfirmView ask = ui.app().frame().confirm;
   CHECK(std::string(ask.hero) == "UNPAIR?");
-  CHECK(std::string(ask.line1) == "E0:5A:1B:22:9C:04");
+  CHECK(std::string(ask.line1) == "AA:BB:CC:DD:EE:02");
   CHECK(std::string(ask.hold) == "HOLD: unpair");
   CHECK(ask.why == nullptr);
   CHECK(bonds.erases == 0);  // the question deletes nothing
@@ -2050,7 +2050,7 @@ TEST("unpair: a BOOT hold removes the selected phone once, and the list shrinks"
   CHECK(ui.snapshot().peer_count == 1);
   const ScreenDraw list = ui.app().frame();
   CHECK(list.unpair.count == 1);
-  CHECK(std::string(list.unpair.row[0].addr) == "A4:C1:38:7F:12:9B");
+  CHECK(std::string(list.unpair.row[0].addr) == "AA:BB:CC:DD:EE:01");
 
   // Doing it again with nothing selected but the last phone leaves an empty list:
   // the hold is one erase per press, never a loop that empties the table.
@@ -2070,7 +2070,7 @@ TEST("unpair: a tap keeps the phone, and a store that refuses keeps the row") {
   Store store(dir.path + "/notes");
   CHECK(store.ensure());
   FakeBonds bonds;
-  bonds.peers.push_back(make_peer("A4:C1:38:7F:12:9B"));
+  bonds.peers.push_back(make_peer("AA:BB:CC:DD:EE:01"));
 
   UiState ui;
   Snapshot seed;
@@ -2123,7 +2123,7 @@ TEST("unpair: a tap keeps the phone, and a store that refuses keeps the row") {
 
 TEST("guard: an unpair is refused while the device is busy") {
   Snapshot snap;
-  snap.peers[0] = make_peer("A4:C1:38:7F:12:9B");
+  snap.peers[0] = make_peer("AA:BB:CC:DD:EE:01");
   snap.peer_count = 1;
   std::snprintf(snap.busy, sizeof snap.busy, "BUSY UPLOADING");
 

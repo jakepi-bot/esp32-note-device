@@ -1146,8 +1146,8 @@ phone is on the page: no scroll, and the bar's wrap is the only movement.
 y=0    ┌──────────────────────────────────────────────────────┐
        │ UNPAIR                                    2 PAIRED   │  y=8
 y=27   ├──────────────────────────────────────────────────────┤
-       │ A4:C1:38:7F:12:9B                                   │  y=32  (selected)
-       │ E0:5A:1B:22:9C:04       Pixel 8 Pro                 │  y=48
+       │ AA:BB:CC:DD:EE:01                                   │  y=32  (selected)
+       │ AA:BB:CC:DD:EE:02       Pixel 8 Pro                 │  y=48
 y=144  ├──────────────────────────────────────────────────────┤
        │ BOOT: next                                           │  y=152
        │ PWR: unpair                                          │  y=170
@@ -1164,7 +1164,7 @@ y=194  └───────────────────────�
 
 **11.4.1 Why the address, at that size.** The address is what a phone's own
 settings show, so it is the one thing a person can compare with the handset in
-their hand. It is 17 columns (`A4:C1:38:7F:12:9B`), which is 203 px at the body
+their hand. It is 17 columns (`AA:BB:CC:DD:EE:01`), which is 203 px at the body
 size — off the 176 px column — so the list rows and the question's two lines are
 scale 1, the size the menu's rows already use. A name is drawn beside the address
 when the radio knew one; the bond store keeps keys, not names, so in practice the
@@ -1176,7 +1176,7 @@ runtime's one-line reason when the hold would be refused:
 
 ```
 y=42   UNPAIR?                        scale 3
-y=72   E0:5A:1B:22:9C:04              scale 1
+y=72   AA:BB:CC:DD:EE:02              scale 1
 y=90   Pixel 8 Pro                    scale 1, empty when unknown
 y=108  BUSY UPLOADING                 scale 1, only while the device is busy
 y=118  ───────────────────────────────

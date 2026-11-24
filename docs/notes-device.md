@@ -144,7 +144,7 @@ Back
 - **Unpair phones** - the paired-phone list (the row is on the menu; the list and
   its confirm are the next change).
   card goes.
-- **Unpair phones** - the bonded phones, one address a row (`A4:C1:38:7F:12:9B`,
+- **Unpair phones** - the bonded phones, one address a row (`AA:BB:CC:DD:EE:01`,
   the form a phone's own settings show), with a name beside it when the radio
   knew one. BOOT tap walks the rows, PWR tap asks about the selected phone, BOOT
   hold goes back to the menu. The question states the address; BOOT hold there

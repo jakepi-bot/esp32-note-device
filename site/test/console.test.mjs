@@ -70,8 +70,8 @@ test("waits out the start-up, then stores each setting", async () => {
   const device = new DeviceConsole(board.port, { onLine: (line) => seen.push(line) });
   assert.deepEqual(await device.waitForStatus(5000), STATUS);
   await device.set("wifi_ssid", "Home");
-  await device.set("server", "ws://192.168.1.20:8765/gadget");
-  assert.deepEqual(stored, { wifi_ssid: "Home", server: "ws://192.168.1.20:8765/gadget" });
+  await device.set("server", "ws://192.0.2.10:8765/gadget");
+  assert.deepEqual(stored, { wifi_ssid: "Home", server: "ws://192.0.2.10:8765/gadget" });
   assert.deepEqual(board.received.slice(0, 2), ["status", "status"]); // the first one was swallowed
   assert.ok(seen.includes("I (312) hg.main: Hermes Gadget 0.1.0 on esp32s3-lcd-154"));
   await device.close();

@@ -19,7 +19,7 @@ pytestmark = [requires_sim, pytest.mark.skipif(shutil.which("node") is None, rea
 SETTINGS = {
     "wifi_ssid": 'Home  "5G"',
     "wifi_pass": 'p\\a "s"  @ok',
-    "server": "ws://192.168.1.20:8765/gadget",
+    "server": "ws://192.0.2.10:8765/gadget",
     "name": "Desk Gadget",
 }
 

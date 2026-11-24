@@ -8,18 +8,18 @@ using hg::TailnetWatch;
 using Node = TailnetWatch::Node;
 
 TEST("tailnet address: only a 100.64.0.0/10 literal is a tailnet address") {
-  CHECK_EQ(hg::tailnet_ip("ws://100.101.102.103:8765/gadget"), uint32_t(0x64656667));
+  CHECK_EQ(hg::tailnet_ip("ws://100.64.0.10:8765/gadget"), uint32_t(0x6440000a));
   CHECK_EQ(hg::tailnet_ip("ws://100.64.0.1/gadget"), uint32_t(0x64400001));
   CHECK_EQ(hg::tailnet_ip("wss://100.127.255.254"), uint32_t(0x647FFFFE));
   CHECK_EQ(hg::tailnet_ip("ws://100.128.0.1:8765/gadget"), uint32_t(0));  // just past the range
   CHECK_EQ(hg::tailnet_ip("ws://100.63.255.255:8765/gadget"), uint32_t(0));
-  CHECK_EQ(hg::tailnet_ip("ws://192.168.1.20:8765/gadget"), uint32_t(0));
+  CHECK_EQ(hg::tailnet_ip("ws://192.0.2.10:8765/gadget"), uint32_t(0));
   CHECK_EQ(hg::tailnet_ip("ws://dev02:8765/gadget"), uint32_t(0));
   CHECK_EQ(hg::tailnet_ip("ws://100.71.189:8765/gadget"), uint32_t(0));
-  CHECK_EQ(hg::tailnet_ip("ws://100.101.102.103.5:8765/gadget"), uint32_t(0));
+  CHECK_EQ(hg::tailnet_ip("ws://100.64.0.10.5:8765/gadget"), uint32_t(0));
   CHECK_EQ(hg::tailnet_ip("ws://100.71.1890.23/"), uint32_t(0));
   CHECK_EQ(hg::tailnet_ip("ws://100.71.189.256/"), uint32_t(0));
-  CHECK_EQ(hg::tailnet_ip("http://100.101.102.103/"), uint32_t(0));
+  CHECK_EQ(hg::tailnet_ip("http://100.64.0.10/"), uint32_t(0));
   CHECK_EQ(hg::tailnet_ip(""), uint32_t(0));
 }
 

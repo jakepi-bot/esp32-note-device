@@ -16,9 +16,9 @@ test("visitors can choose a path and search the guides", async ({page}) => {
 });
 
 test("existing Hermes links keep the server address and reach the installer", async ({page}) => {
-  await page.goto("/#server=ws%3A%2F%2F192.168.1.20%3A8765%2Fgadget");
+  await page.goto("/#server=ws%3A%2F%2F192.0.2.10%3A8765%2Fgadget");
   await expect(page).toHaveURL(/installer.html#server=/);
-  await expect(page.getByLabel("Hermes address", {exact:true})).toHaveValue("ws://192.168.1.20:8765/gadget");
+  await expect(page.getByLabel("Hermes address", {exact:true})).toHaveValue("ws://192.0.2.10:8765/gadget");
 });
 
 test("deep links choose the right platform, and copy gives the displayed commands", async ({page, context}) => {

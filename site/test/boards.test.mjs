@@ -72,17 +72,17 @@ test("a board's factory data is never written", () => {
 
 test("the link from hermes gateway setup fills in the server", () => {
   // As plugin/cli.py's installer_link() encodes it: urllib.parse.quote(server, safe="").
-  const link = "#server=ws%3A%2F%2F192.168.1.20%3A8765%2Fgadget";
-  assert.deepEqual(linkParams(link), { server: "ws://192.168.1.20:8765/gadget" });
+  const link = "#server=ws%3A%2F%2F192.0.2.10%3A8765%2Fgadget";
+  assert.deepEqual(linkParams(link), { server: "ws://192.0.2.10:8765/gadget" });
   assert.deepEqual(linkParams("#server=javascript%3Aalert(1)"), { server: "" });
   assert.deepEqual(linkParams(""), { server: "" });
 });
 
 test("only ws:// and wss:// addresses with a host are accepted", () => {
-  for (const url of ["ws://192.168.1.20:8765/gadget", "wss://hermes.example.com/gadget", "ws://hermes.local:8765"]) {
+  for (const url of ["ws://192.0.2.10:8765/gadget", "wss://hermes.example.com/gadget", "ws://hermes.local:8765"]) {
     assert.ok(validServer(url), url);
   }
-  for (const url of ["http://192.168.1.20:8765/gadget", "ws://", "192.168.1.20:8765", "ws://a b/gadget", ""]) {
+  for (const url of ["http://192.0.2.10:8765/gadget", "ws://", "192.0.2.10:8765", "ws://a b/gadget", ""]) {
     assert.ok(!validServer(url), url);
   }
 });

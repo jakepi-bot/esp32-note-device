@@ -56,7 +56,7 @@ test("installer exposes the release's firmware license archive", async ({page}) 
 test("board setup prepares Hermes, installs with settings preserved, and pairs", async ({page, context}) => {
   await board(page);
   await context.grantPermissions(["clipboard-read","clipboard-write"]);
-  await page.goto("/installer.html#server=ws%3A%2F%2F192.168.1.20%3A8765%2Fgadget");
+  await page.goto("/installer.html#server=ws%3A%2F%2F192.0.2.10%3A8765%2Fgadget");
   await page.getByText("Waveshare ESP32-S3-Touch-AMOLED-1.75",{exact:true}).click();
   await page.getByRole("button",{name:/Continue to Hermes/}).click();
   await expect(page.getByRole("heading",{name:"Prepare your Hermes"})).toBeVisible();
@@ -74,7 +74,7 @@ test("board setup prepares Hermes, installs with settings preserved, and pairs",
   await page.getByLabel("Device name optional",{exact:true}).fill("Kitchen Shelf");
   await page.getByRole("button",{name:"Save to the board"}).click();
   await expect(page.locator("#pair-code")).toHaveText("ABC123");
-  expect(await page.evaluate(()=>window.boardSettings)).toEqual({wifi_ssid:"Home WiFi",wifi_pass:"test-secret",server:"ws://192.168.1.20:8765/gadget",name:"Kitchen Shelf"});
+  expect(await page.evaluate(()=>window.boardSettings)).toEqual({wifi_ssid:"Home WiFi",wifi_pass:"test-secret",server:"ws://192.0.2.10:8765/gadget",name:"Kitchen Shelf"});
   await page.evaluate(()=>{window.boardPaired=true;});
   await expect(page.locator("#pair-done")).toBeVisible();
   await expect(page.locator("#update-command")).toHaveText('hermes gadget update "Kitchen Shelf" --latest');

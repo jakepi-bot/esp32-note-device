@@ -78,7 +78,7 @@ platforms:
   gadget:
     enabled: true
     extra:
-      host: 192.168.1.20          # this machine's LAN address; 127.0.0.1 for a local tunnel or simulator only
+      host: 192.0.2.10          # this machine's LAN address; 127.0.0.1 for a local tunnel or simulator only
       tls_cert: /path/cert.pem    # with tls_key, the gateway serves wss://
       tls_key: /path/key.pem
 ```

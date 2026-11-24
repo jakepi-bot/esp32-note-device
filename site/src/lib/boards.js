@@ -92,7 +92,7 @@ export function validServer(url) {
   return /^wss?:\/\/[^\s/:?#]+(:\d{1,5})?(\/[^\s]*)?$/i.test(String(url ?? "").trim());
 }
 
-/** The installer link's parameters, e.g. `#server=ws%3A%2F%2F192.168.1.20%3A8765%2Fgadget`.
+/** The installer link's parameters, e.g. `#server=ws%3A%2F%2F192.0.2.10%3A8765%2Fgadget`.
  * They ride in the fragment, which the browser never sends to the web host. */
 export function linkParams(hash) {
   const params = new URLSearchParams(String(hash ?? "").replace(/^#/, ""));

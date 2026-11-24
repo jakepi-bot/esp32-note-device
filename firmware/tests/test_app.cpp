@@ -2583,7 +2583,7 @@ TEST("power: a dark screen stays dark while the connection drops and comes back"
   r.advance(5000);
   CHECK_EQ(r.fake.brightness, 0);  // reconnecting in the dark (a commute must not light it)
   r.app.on_network(false, "Wi-Fi lost");
-  r.app.on_network(true, "192.168.1.146");
+  r.app.on_network(true, "192.0.2.146");
   r.advance(5000);
   CHECK_EQ(r.fake.brightness, 0);
   r.app.on_button(hg::Button::Talk, true);  // the user still wakes it
@@ -2727,7 +2727,7 @@ TEST("doze: without Wi-Fi it keeps dozing between join attempts; reconnecting to
   r.advance(60000);
   CHECK(r.fake.dozing);  // the port wakes the chip for each attempt
   CHECK_EQ(r.fake.brightness, 0);
-  r.app.on_network(true, "192.168.1.146");
+  r.app.on_network(true, "192.0.2.146");
   r.advance(1500);  // Wi-Fi is back: reconnecting to Hermes
   CHECK(!r.fake.dozing);
 }
@@ -4440,11 +4440,11 @@ TEST("power: a peripheral rail cannot be selected as device power-off") {
 TEST("Wi-Fi setup: bounded credentials require the current session and never replace valid output on failure") {
   hg::WifiCredentials out;
   std::string error;
-  const std::string body = R"({"nonce":"current","ssid":"Kitchen","password":"example pass","server":"ws://192.168.1.20:8765/gadget"})";
+  const std::string body = R"({"nonce":"current","ssid":"Kitchen","password":"example pass","server":"ws://192.0.2.10:8765/gadget"})";
   CHECK(hg::parse_wifi_setup(body, "current", out, error));
   CHECK_EQ(std::string(out.ssid), std::string("Kitchen"));
   CHECK_EQ(std::string(out.password), std::string("example pass"));
-  CHECK_EQ(std::string(out.server), std::string("ws://192.168.1.20:8765/gadget"));
+  CHECK_EQ(std::string(out.server), std::string("ws://192.0.2.10:8765/gadget"));
   CHECK(!hg::parse_wifi_setup(body, "expired", out, error));
   CHECK(!hg::parse_wifi_setup(body, "", out, error));
   for (const std::string& url : {"http://example.com", "ws://", "ws://host:0", "ws://host:65536",
@@ -4476,7 +4476,7 @@ TEST("Wi-Fi setup: bounded credentials require the current session and never rep
 TEST("Wi-Fi setup: the tailnet fields are optional and the auth key is checked") {
   hg::WifiCredentials out;
   std::string error;
-  const std::string body = R"({"nonce":"n","ssid":"Phone","password":"example pass","server":"ws://100.101.102.103:8765/gadget"})";
+  const std::string body = R"({"nonce":"n","ssid":"Phone","password":"example pass","server":"ws://100.64.0.10:8765/gadget"})";
   CHECK(hg::parse_wifi_setup(body, "n", out, error));
   CHECK(!out.tailnet_given);  // a page without the tailnet section changes nothing
   CHECK_EQ(std::string(out.ts_key), std::string());
@@ -4502,7 +4502,7 @@ TEST("Wi-Fi setup: the tailnet fields are optional and the auth key is checked")
   }
   form.set("ts_key", "").set("tailnet", "yes");
   CHECK(!hg::parse_wifi_setup(form.dump(), "n", kept, error));
-  CHECK_EQ(std::string(kept.server), std::string("ws://100.101.102.103:8765/gadget"));  // untouched on failure
+  CHECK_EQ(std::string(kept.server), std::string("ws://100.64.0.10:8765/gadget"));  // untouched on failure
 }
 
 TEST("Wi-Fi setup: private instructions stay out of diagnostics and prompts close the temporary network") {
@@ -7457,7 +7457,7 @@ const char* const kTsKey = "tskey-auth-kTEST123-abcdefghijklmnopqrstuvwxyz";
 
 // A board that can join a tailnet (DeviceProfile::tailnet), aimed at a tailnet address.
 hg::DeviceProfile tailnet_profile() {
-  hg::DeviceProfile p = Rig::profile("ws://100.101.102.103:8765/gadget");
+  hg::DeviceProfile p = Rig::profile("ws://100.64.0.10:8765/gadget");
   p.tailnet = true;
   return p;
 }
@@ -7504,7 +7504,7 @@ TEST("tailnet: on, the device waits for the tunnel and says why") {
   r.app.on_tunnel(true);
   r.advance(20);  // no backoff left to wait out: the wait was for the tunnel
   CHECK_EQ(r.fake.connects, 1);
-  CHECK_EQ(r.fake.url, std::string("ws://100.101.102.103:8765/gadget"));
+  CHECK_EQ(r.fake.url, std::string("ws://100.64.0.10:8765/gadget"));
   Value st;
   CHECK(hg::json::parse(r.app.console("status").substr(8), st));
   CHECK(st["tailnet"]["on"].as_bool() && st["tailnet"]["key"].as_bool() && st["tailnet"]["up"].as_bool());
@@ -9102,7 +9102,7 @@ TEST("diag: every lost connection is logged and kept with what the device was do
   for (const auto& c : closes) timeout |= c["reason"].as_string() == "connect timeout";
   CHECK(timeout);
   // The Wi-Fi loss ends the attempt, and its reason and signal stay after the network is back.
-  r.app.on_network(true, "192.168.1.20");
+  r.app.on_network(true, "192.0.2.10");
   v = diag_of(r);
   const auto& after = v["connection"]["closes"].elements();
   CHECK(!after.empty());

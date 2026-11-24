@@ -162,8 +162,8 @@ ws://<hermes-host>:8765/gadget          subprotocol: hermes-gadget.v1
 
 - Default port **8765**, path `/gadget`, `ws` (or `wss` when the gateway is
   configured with TLS). On this host the hub is verified listening on
-  `0.0.0.0:8765` (the gateway pid, LAN 192.168.1.20) and the existing Office
-  gadget connects from 192.168.1.21.
+  `0.0.0.0:8765` (the gateway pid, LAN 192.0.2.10) and the existing Office
+  gadget connects from 192.0.2.11.
 - The authoritative URL comes from **`hermes gadget info`** (prints device URL and
   gadget configuration) or `config.yaml` `platforms.gadget.*`. Changing the port
   needs a gateway restart and a device `server_address` update.

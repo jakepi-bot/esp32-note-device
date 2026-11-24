@@ -32,7 +32,7 @@ sudo sh install.sh
 sudoedit /etc/hermes-gadget/config.json
 ```
 
-Set `server` to your Hermes host, such as `ws://192.168.1.20:8765/gadget`, and
+Set `server` to your Hermes host, such as `ws://192.0.2.10:8765/gadget`, and
 choose a `name`. Add `token` if your gateway requires it. The installer downloads
 the release's pinned Python dependencies into a private environment, checking
 each file against the hash recorded in the package's `requirements.txt`, so the
@@ -85,7 +85,7 @@ Create `device-config.json` with your Hermes host address:
 
 ```json
 {
-  "server": "ws://192.168.1.20:8765/gadget",
+  "server": "ws://192.0.2.10:8765/gadget",
   "name": "Kitchen Gadget"
 }
 ```
@@ -143,7 +143,7 @@ part of its name. Names are preferable when USB device numbers change:
 
 ```json
 {
-  "server": "ws://192.168.1.20:8765/gadget",
+  "server": "ws://192.0.2.10:8765/gadget",
   "name": "Kitchen Gadget",
   "audio": {"input": "USB Audio", "output": "USB Audio", "rate": 16000}
 }

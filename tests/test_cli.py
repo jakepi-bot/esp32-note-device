@@ -44,9 +44,9 @@ REPORT = {
     "reset_reason": "brownout", "uptime_s": 42,
     "parts": {"display": "co5300", "microphone": "es7210", "speaker": "es8311", "touch": True, "key": False},
     "i2c": ["0x18", "0x20", "0x34", "0x40", "0x5a"],
-    "wifi": {"joined": True, "ssid": "Home", "rssi": -61, "ip": "192.168.1.42"},
+    "wifi": {"joined": True, "ssid": "Home", "rssi": -61, "ip": "192.0.2.42"},
     "connection": {"attempts": 3, "last_close": "connection error"},
-    "app": {"phase": "connecting", "paired": False, "server": "ws://192.168.1.20:8765/gadget"},
+    "app": {"phase": "connecting", "paired": False, "server": "ws://192.0.2.10:8765/gadget"},
     "stacks": [{"name": f"task{i}", "stack_free": 1000 + i} for i in range(20)],  # a reply many reads long
 }
 
@@ -81,7 +81,7 @@ def test_diag_saves_a_report_and_prints_a_summary(console, tmp_path, capsys):
     assert "reset reason: brownout, up 42 s" in shown
     assert "parts: display co5300, microphone es7210, speaker es8311, touch yes, key no" in shown
     assert "I2C: 0x18, 0x20, 0x34, 0x40, 0x5a" in shown
-    assert "Wi-Fi: joined Home (-61 dBm), 192.168.1.42" in shown
+    assert "Wi-Fi: joined Home (-61 dBm), 192.0.2.42" in shown
     assert "Hermes: connecting, not paired, last connection ended: connection error" in shown
 
 
@@ -124,7 +124,7 @@ def _provision(monkeypatch, board, **values):
 
 def test_provision_gets_every_character_through_the_console(monkeypatch):
     board = EspBoard()
-    values = {"wifi_ssid": 'Home  "5G"', "wifi_pass": 'p\\a "s"  @ok', "server": "ws://192.168.1.20:8765/gadget",
+    values = {"wifi_ssid": 'Home  "5G"', "wifi_pass": 'p\\a "s"  @ok', "server": "ws://192.0.2.10:8765/gadget",
               "name": "Desk Gadget"}
     assert _provision(monkeypatch, board, **values) == 0
     assert board.settings == values

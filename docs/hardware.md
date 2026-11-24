@@ -1497,7 +1497,7 @@ gadget> set wifi_ssid MyWifi
 @ok wifi_ssid
 gadget> set wifi_pass secret
 @ok wifi_pass
-gadget> set server ws://192.168.1.20:8765/gadget
+gadget> set server ws://192.0.2.10:8765/gadget
 @ok server
 gadget> status
 @status {"device_id":"hg-...","phase":"online","screen":"pairing","pairing_code":"ABCD2345",...}

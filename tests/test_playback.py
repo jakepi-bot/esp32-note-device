@@ -670,7 +670,7 @@ def test_the_tool_is_registered_with_a_schema_the_manifest_lists():
 
 @requires_hermes
 @pytest.mark.parametrize("url", [
-    "http://127.0.0.1:8642/v1/audio", "http://localhost/a.mp3", "http://192.168.1.10/a.mp3",
+    "http://127.0.0.1:8642/v1/audio", "http://localhost/a.mp3", "http://192.0.2.10/a.mp3",
     "http://169.254.169.254/latest/meta-data/", "http://[::1]/a.mp3",
 ])
 def test_hermes_refuses_private_and_internal_addresses(url):

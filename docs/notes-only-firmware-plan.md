@@ -425,7 +425,7 @@ host over the console (`about`, `battery`, `clock`, `radio`, `wifi`, `keys`,
 | Item | Evidence |
 |---|---|
 | boots to the status face | `hg.ui: screen home, 57 notes (0 to send)` and a full refresh at 3.7 s; `screen` read back over the console decodes to Home: `ALL SENT`, `READY`, the key hint |
-| joins the configured Wi-Fi | `hg.wifi: connected, ip 192.168.1.106` inside the window; `about` answers `wifi on` only then |
+| joins the configured Wi-Fi | `hg.wifi: connected, ip 192.0.2.106` inside the window; `about` answers `wifi on` only then |
 | SNTP sets the clock | `hg.time: asking pool.ntp.org for the time` at the address, `hg.notes: clock synced` 1.3 s later, `SNTP stopped (the network went down)` when the window closes |
 | uploads a pending note with a valid HMAC | `hg.notes.up: note …: HTTP 202 -> accepted` and the gateway's `notes_ingest` line for it; a 202 is only sent after `protocol.verify_note_mac` passes against the enrolled device key |
 | BLE pairing ask, phone client | `hg.phone: a phone asks to pair; waiting for the screen` on connect, allow, `pairing passkey 449047` shown on the device and typed by the client, `bluetoothctl` then reports `Paired: yes` (bonded, passkey entry) |

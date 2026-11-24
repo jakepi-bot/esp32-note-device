@@ -180,9 +180,9 @@ class ScreenApp {
   Outcome stay(Refresh refresh = Refresh::None);
   Outcome go(Screen next, Refresh refresh = Refresh::Full);
   // The class a hand-over frame gets, and the budget behind it (§15.2): a
-  // hand-over is a page replacing a page, which is a partial now that the
-  // driver drives only the rows either page inked. The fourth in a row is a
-  // full refresh, so no page carries more than three hand-overs of residue.
+  // hand-over is a page replacing a page, and the partial waveform draws one in
+  // ~0.6 s without the flash. The fourth in a row is a full refresh, so no page
+  // carries more than three hand-overs of residue.
   Refresh handover_frame();
   bool hero_changed(const Snapshot& before, const Snapshot& after) const;
   void clamp_cursor();

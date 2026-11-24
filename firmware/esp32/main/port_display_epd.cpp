@@ -97,12 +97,15 @@ bool EpdDisplay::begin(const EpdConfig& cfg) {
   if (!image_) image_ = static_cast<uint8_t*>(heap_caps_malloc(image_bytes, MALLOC_CAP_8BIT));
   sent_ = static_cast<uint8_t*>(heap_caps_malloc(image_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (!sent_) sent_ = static_cast<uint8_t*>(heap_caps_malloc(image_bytes, MALLOC_CAP_8BIT));
+  shown_ = static_cast<uint8_t*>(heap_caps_malloc(image_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!shown_) shown_ = static_cast<uint8_t*>(heap_caps_malloc(image_bytes, MALLOC_CAP_8BIT));
   tx_ = static_cast<uint8_t*>(heap_caps_malloc(kTxChunk, MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
-  if (!fb_ || !image_ || !sent_ || !tx_) {
+  if (!fb_ || !image_ || !sent_ || !shown_ || !tx_) {
     ESP_LOGE(TAG, "no memory for the %ux%u framebuffer", cfg.width, cfg.height);
     return false;
   }
   memset(image_, 0, image_bytes);
+  memset(shown_, 0, image_bytes);
 
   // Both rails on this board conduct LOW; the audio rail is already up
   // (power_rails_on), this one gates the panel.
@@ -311,26 +314,54 @@ void EpdDisplay::update_once() {
       partial_ = false;  // the next update starts from the full sequence
       return;
     }
+    memcpy(shown_, sent_, image_bytes);
     panel_partial_init();
     partial_ = true;
     partials_ = 0;
     ESP_LOGI(TAG, "full refresh");
     return;
   }
-  // A window over the band, full width: 0x44 takes x in bytes and 0x45 y in
-  // pixels, and keeping x whole is what keeps the row arithmetic honest. A band
-  // taller than half the page is not worth the setup, so it takes the whole
-  // page exactly as before.
-  // Two rows of margin each side: the partial waveform leaves a little residue
-  // at the edge of what it drives, and a band that stops exactly on the ink
-  // leaves a ghost line of the row above (seen on the unit, 2026-11-23).
-  if (band0 > 1) band0 -= 2;
-  if (band1 < cfg_.height - 3) band1 += 2;
-  const int band_h = band1 - band0 + 1;
-  const bool windowed = band_h <= cfg_.height / 2;
-  const int y0 = windowed ? band0 : 0;
-  const int y1 = windowed ? band1 : cfg_.height - 1;
-  const int rows = y1 - y0 + 1;
+  // A partial addresses the frame exactly as panel_init does: the window is
+  // written start-row 199 -> end-row 0, the cursor goes on row 199, and the
+  // image is written forward. That is the panel's own order. Measured on the
+  // unit (2026-11-23): the same trigger with the window expressed 0 -> 199
+  // paints nothing at all, and so does any band taller than half the page in
+  // that form - which is why a page-size hand-over used to reach the glass only
+  // on the next full refresh. In this form a whole page paints in 589 ms, and a
+  // one-row change costs the same 589 ms: the partial waveform's duration on
+  // this panel does not depend on how many rows it drives, so there is nothing
+  // to win by narrowing the window and everything to lose by getting the
+  // addressing wrong.
+  const int64_t t0 = now_ms();
+  if (!partial_frame()) {
+    repaint_ = true;  // the panel keeps the frame it has; redraw it in full
+    force_full_ = true;
+    return;
+  }
+  memcpy(shown_, sent_, image_bytes);
+  ++partials_;
+  ESP_LOGI(TAG, "partial %d rows (%d..%d) of %d, %lld ms of driving", band1 - band0 + 1, band0, band1,
+           cfg_.height, static_cast<long long>(now_ms() - t0));
+}
+
+bool EpdDisplay::partial_frame() {
+  const size_t image_bytes = static_cast<size_t>(cfg_.width) * cfg_.height / 8;
+  // 0x26 carries the frame the panel is showing; the partial waveform is a
+  // transition between the two planes, so both have to be in the panel's RAM.
+  auto window = [&]() { set_window(cfg_.height - 1, 0); };
+  window();
+  command(0x24);
+  if (!write(sent_, image_bytes)) return false;
+  window();
+  command(0x26);
+  if (!write(shown_, image_bytes)) return false;
+  command(0x22);
+  data(0xcf);
+  command(0x20);
+  return wait_busy();
+}
+
+void EpdDisplay::set_window(int y0, int y1) {
   command(0x44);
   data(0x00);
   data(static_cast<uint8_t>(cfg_.width / 8 - 1));
@@ -344,28 +375,6 @@ void EpdDisplay::update_once() {
   command(0x4f);
   data(static_cast<uint8_t>(y0 & 0xff));
   data(static_cast<uint8_t>((y0 >> 8) & 0xff));
-  command(0x24);
-  if (!write(sent_ + static_cast<size_t>(y0) * row_bytes,
-             static_cast<size_t>(rows) * row_bytes)) {
-    repaint_ = true;  // the panel keeps the frame it has; redraw it in full
-    force_full_ = true;
-    return;
-  }
-  command(0x22);
-  data(0xcf);
-  command(0x20);
-  wait_busy();
-  // Back to the whole page: a window left set would clip the next full refresh.
-  command(0x44);
-  data(0x00);
-  data(static_cast<uint8_t>(cfg_.width / 8 - 1));
-  command(0x45);
-  data(0x00);
-  data(0x00);
-  data(static_cast<uint8_t>((cfg_.height - 1) & 0xff));
-  data(static_cast<uint8_t>(((cfg_.height - 1) >> 8) & 0xff));
-  ++partials_;
-  ESP_LOGI(TAG, "partial %d rows (%d..%d) of %d", rows, y0, y1, cfg_.height);
 }
 
 void EpdDisplay::convert(int y0, int y1) {

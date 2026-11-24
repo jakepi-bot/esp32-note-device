@@ -66,6 +66,8 @@ class EpdDisplay final : public hg::Display {
   void panel_partial_init();  // arms the partial waveform after a full refresh
   void refresh();             // one panel update from the image snapshot
   void update_once();         // refresh's body; refresh counts the update
+  bool partial_frame();                 // the whole frame, partial waveform
+  void set_window(int y0, int y1);      // 0x44/0x45 window and 0x4e/0x4f cursor
   void convert(int y0, int y1); // RGB565 rows -> 1 bit per pixel
   bool wait_busy();
   void command(uint8_t cmd);
@@ -78,6 +80,7 @@ class EpdDisplay final : public hg::Display {
   uint16_t* fb_ = nullptr;   // the UI's RGB565 framebuffer
   uint8_t* image_ = nullptr;  // next panel image, 1 bit per pixel
   uint8_t* sent_ = nullptr;   // snapshot the refresh task transmits
+  uint8_t* shown_ = nullptr;  // what the panel was last handed (0x26's old frame)
   // The panel image lives in PSRAM, which this chip's SPI cannot DMA from: the
   // driver would ask internal RAM for a private buffer the size of each write
   // (5,000 bytes) and gives up when the largest free block is smaller. One

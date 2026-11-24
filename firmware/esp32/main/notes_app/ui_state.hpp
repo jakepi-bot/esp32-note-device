@@ -49,8 +49,8 @@ class UiState {
   // Something the screens cannot see moved: a note was committed, deleted,
   // moved or pruned, an upload stepped, the card came or went. Re-reads the card
   // and asks the screen machine what that does to the glass. `at_least` is the
-  // refresh class the caller's own transition owes (a screen hand-over is always
-  // full), so one publish can serve both.
+  // refresh class the caller's own transition owes (a screen hand-over is the
+  // class `ScreenApp::handover_frame()` names), so one publish can serve both.
   Outcome publish(uint32_t now_ms, uint16_t dirty, Refresh at_least = Refresh::None);
 
   // The link, the clock, the card's free space and the battery: compared with

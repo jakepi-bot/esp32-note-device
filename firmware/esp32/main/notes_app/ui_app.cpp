@@ -48,13 +48,13 @@ bool same(const HeroFacts& a, const HeroFacts& b) {
 // They used to ask for a full refresh - a ~1.4 s inversion flash on this panel,
 // which is the pause that made the demo path feel unresponsive. The premise was
 // that a partial over a page whose ink the next page does not repeat ghosts the
-// old layout through the new one. The driver no longer works that way: it diffs
-// the frame against what the panel was sent, drives only the rows that moved
-// (padded by two), and skips an update that changes no pixel
-// (port_display_epd.cpp, update_once). So a hand-over now costs the partial
-// waveform over the band that either page inked: where the new page is white,
-// the rows the old one inked are re-driven to white in the same pass, and the
-// rows that were paper on both pages are never driven at all.
+// old layout through the new one. The driver no longer works that way: a
+// partial writes the whole frame into the panel's RAM and triggers the partial
+// waveform, which drives every pixel from its old state to its new one in one
+// pass and skips an update that changes no pixel (port_display_epd.cpp,
+// update_once). So where the new page is paper, the ink the old one left there
+// is driven back to paper in the same refresh, and a hand-over costs the
+// partial waveform (~0.6 s on the unit) instead of the flash (~1.4-2.1 s).
 //
 // What a partial cannot do is *finish* a black-to-white transition: each one
 // leaves a little residue, which is why the panel's kFullEvery exists. A

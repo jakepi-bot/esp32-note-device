@@ -1,0 +1,109 @@
+# Hand-overs that reach the glass (bench, 2026-11-23)
+
+Device: waveshare-epaper-154, notes app 0.7.1
+Firmware: image `1,505,888 B`, md5 `2febc3dfb5fee9a5b9bddf7d29c4bafa`, written to
+          0x20000 in 8 x 192 KB chunks and read back with `verify-flash`
+          ("digest matched") before any of this was measured.
+Camera: /dev/video0, 1280x720, mjpeg. The panel's box in the frame is about
+        x 545..880, y 400..600; every number below is from that crop, z-scored so
+        the camera's auto-exposure cannot be read as a change on the glass.
+Rail:   driven once in `EpdDisplay::begin()` on each boot; never cycled. Between
+        runs only the chip is reset (DTR/RTS, `notes_reset.py`).
+
+## 1. What was wrong
+
+The hand-over was already `Refresh::Partial` (453bdc3, b1e7e89) and the probe read
+"0 ms of drawing" - because the panel drew nothing. `update_once()` narrowed a
+partial to a window over the rows that changed, and every hand-over changes most
+of a 200-row page, so every hand-over partial took the "band taller than half the
+page" branch: a full-page window written 0 -> 199. On this panel that form of the
+partial trigger paints nothing:
+
+| window | rows | driver | glass |
+|---|---|---|---|
+| band 100..159 | 64 | 583 ms driving | painted |
+| band 40..139 | 104 | 585 ms driving | painted |
+| band 10..189 | 184 | 588 ms driving | **3.2 % of the panel changed** (edges only) |
+| whole page, window 0 -> 199 | 200 | 589 ms driving | **nothing** |
+
+and the partial waveform's duration does not depend on the row count: a 27-row bar
+move and a 200-row page both take 589 ms of BUSY. Narrowing the window never
+bought time.
+
+## 2. The fix
+
+`EpdDisplay::partial_frame()` writes the whole frame in the addressing
+`panel_init()` uses - window start-row 199 -> end-row 0, cursor on row 199, the
+image written forward - puts the new frame in `0x24` and the frame on the glass in
+`0x26`, and triggers `0x22 0xCF`. The frame diff still decides *whether* an update
+is sent; it no longer decides what is written. `pio run -e notes` 1,505,888 B,
+63 % of the `ota_0` slot free.
+
+## 3. The hand-over, three runs, each after a chip reset
+
+    hand-over 1  I (9087) hg.ui: key 3 -> screen menu
+                 I (9747) hg.epd: partial 176 rows (8..183) of 200, 589 ms of driving
+    hand-over 2  (this boot's Wi-Fi joined in the middle of the walk and moved the
+                 hero word, which is a full refresh by design: see §15.2)
+                 I (9187) hg.ui: key 3 -> screen menu
+                 I (11387) hg.epd: full refresh
+    hand-over 3  I (9087) hg.ui: key 3 -> screen menu
+                 I (9747) hg.epd: partial 176 rows (8..183) of 200, 589 ms of driving
+
+Key to first change stays 200 ms (`tools/latency_probe.py hold 9`, key 12 s after
+the reset, three runs: `first change at 2.20 s -> 200 ms after the key`). The
+panel finishes 589 ms after the update starts, so the page is settled ~640 ms
+after the key against 1,400-1,600 ms before. The probe's own "settled by"/"ms of
+drawing" reads 0 for a partial (its scene detector reports a single hit), which is
+why the number above comes from the driver's BUSY wait - the same measurement the
+sleeping face uses.
+
+## 4. The walk, photographed
+
+`Home -> menu -> list -> note -> list -> menu -> Home`, one photograph after every
+move (`bench/photos/partial_w2_*`). Change between consecutive photographs, over
+the panel crop, z-scored, "changed" = moved by more than one standard deviation:
+
+| move | driver | changed | reading |
+|---|---|---|---|
+| boot -> Home | full refresh | - | Home |
+| Home -> menu | partial 176 rows, 589 ms | 4.59 % | MENU |
+| menu -> list | partial 176 rows, 589 ms | 2.00 % | NOTES |
+| list -> note | full refresh (a full was asked for while the frame was queued: the Wi-Fi joined mid-walk and moved the Home hero) | 5.70 % | NOTE |
+| note -> list | partial 178 rows, 589 ms | 5.65 % | NOTES |
+| list -> menu | partial 176 rows, 589 ms | 1.95 % | MENU |
+| menu -> Home | full refresh (the hero moved while Home was off the glass, `hero_stale_`) | 4.42 % | READY |
+
+A page change moves 4-6 % of the panel's pixels; a move that never reached the
+glass moved 0.03-0.1 %. Every partial in the walk reads as a page change, and the
+pages in `partial_w2_2_list` and `partial_w2_3_note` were read back from the
+photographs by eye and by transcription.
+
+## 5. Ghosting
+
+Two hand-overs in a row (Home -> menu -> list, both partial) against the same list
+page drawn with `epd full`:
+
+    region 360x220+520+400  changed 0 px (0.00%)  corr 0.998
+
+The same crop's brightness histogram is identical (mean 133.0, p10 42 / p50 137 /
+p90 217, the same bins) - two whole-frame partials leave no measurable residue on
+this page. The budgets are unchanged: `kFullEvery = 10` in the driver and
+`kHandoverFullEvery = 4` in the machine, so a menu session still sees a full
+refresh on the fourth hand-over.
+
+## 6. What stayed full
+
+* Boot: `I (3526) hg.epd: full refresh` is still the first draw after a reset;
+  `boot 9` reads 200 ms to first change with the boot frame's own drawing behind
+  it (and, on some runs, the recording face's 5 s timer, the caveat recorded with
+  the baseline).
+* The sleeping face (`epd sleep` photographs as the moon; full refresh logged).
+* `epd full` / `epd ghost`, and any frame the machine or a hero change asks to be
+  full.
+
+## 7. Host tests
+
+`ctest --test-dir <build>` 9/9, 958 cases, 0 failed (fresh Release build of this
+tree; `hg_notes_ui_tests` 83). Nothing in the UI's refresh classes moved in this
+change - the fix is the driver's - so the cases the QA card tightened still hold.

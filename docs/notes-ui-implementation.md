@@ -48,8 +48,10 @@ table:
   appearing, the playback position;
 * **None** — a publish that changed nothing, and a hold on the pairing ask.
 
-A hand-over is a page replacing a page. It is a partial because the driver
-drives only the rows that moved (§15.1), and `ScreenApp::handover_frame()` caps
+A hand-over is a page replacing a page. It is a partial because the driver hands
+the panel both frames and the partial waveform drives every pixel to its new
+state in one 589 ms refresh, without the flash (§15.1), and
+`ScreenApp::handover_frame()` caps
 a run of them at three so no page carries more than three hand-overs of
 residue: the fourth is the full refresh that clears the glass.
 

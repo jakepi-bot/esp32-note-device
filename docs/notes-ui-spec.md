@@ -55,7 +55,7 @@ lines of `ui_keys.cpp` and reuses the existing "hold = back" invariant.
 | Driver threshold | `convert()`: `luma ≥ 128 → white dot` | exactly two survivable colours; see §2.1 |
 | Font | 5 × 7 bitmap, **integer scale only** | type sizes are quantised: 7 / 14 / 21 / 28 px |
 | Refresh | full waveform `0xC7`, partial waveform `0xCF` | see §15 |
-| Partial refresh | **a band**: the driver diffs the frame and drives only the rows that moved | `flush(y0,y1)` narrows *conversion*; the diff narrows what the panel is sent (§15.1) |
+| Partial refresh | the whole frame in one window, partial waveform, ~0.6 s | `flush(y0,y1)` narrows *conversion*; the frame's diff only decides *whether* an update is sent (§15.1) |
 | BUSY wait | `kBusyTimeoutMs = 3000` | a full update is budgeted at "around a second", see §15.1 |
 | Coalescing | `kQuietMs 80`, `kMaxCoalesceMs 250` | a frame's bands merge; do not reimplement |
 | Rate limit | `kMinGapMs 300` | ~3 updates/s ceiling, enforced by the driver |
@@ -1762,22 +1762,26 @@ the app task and must not allocate (§16).
 | | full | partial |
 |---|---|---|
 | LUT | `kLutFull`, `0xC7` | `kLutPartial`, `0xCF` |
-| sequence | `panel_init()` → `0x24` + `0x26` write of the whole frame → `0x22 0xC7` → `0x20` → BUSY → `panel_partial_init()` | window (`0x44`/`0x45`) → `0x24` write of the band → `0x22 0xCF` → `0x20` → BUSY |
-| visible | a full inversion flash, ~1.4 s of drawing here | a quick settle, no flash |
-| payload | **5,000 bytes** (200 × 200 ÷ 8) | the changed rows × 25 bytes |
+| sequence | `panel_init()` → `0x24` + `0x26` write of the whole frame → `0x22 0xC7` → `0x20` → BUSY → `panel_partial_init()` | window (`0x44`/`0x45`) → `0x24` + `0x26` write of the whole frame → `0x22 0xCF` → `0x20` → BUSY |
+| visible | a full inversion flash, ~1.4-2.1 s of drawing here | a settle with no flash, **589 ms measured** on the unit (200 rows or one, same) |
+| payload | **5,000 bytes** (200 × 200 ÷ 8) | 5,000 bytes into each plane, ~4 ms on the wire at 10 MHz |
 | chosen when | first frame, `force_full_`, `!partial_`, or `partials_ >= kFullEvery` (10) | otherwise |
 
 **Three facts that decide this whole section:**
 
-1. **A partial is a band driven from a frame diff, not the whole page.**
+1. **A partial is the whole frame in one window, in the panel's own addressing.**
    `update_once()` compares the frame it is about to send with the one it sent
-   last, pads the first and last changed row by two (a band that stops exactly on
-   the ink leaves a ghost line of the row above), and drives that window only -
-   full width, because `0x44` takes x in bytes and a whole-width window keeps the
-   row arithmetic honest. A band taller than half the page takes the whole page,
-   and a frame that changes no pixel is not sent at all. `flush(y0, y1)` is a
-   *different* narrowing: it limits the RGB565 → 1-bit conversion, which is 40,000
-   luma computations over the full panel.
+   last and sends nothing if no pixel moved, but what it sends is the whole frame:
+   the window is written start-row 199 → end-row 0 with the cursor on row 199
+   (`panel_init()`'s own form), `0x24` carries the new frame, `0x26` the frame on
+   the glass, and `0x22 0xCF` drives one transition per pixel. Narrowing the
+   window is not the saving it looks like, and on this unit it is not an option:
+   the same trigger with the window expressed 0 → 199 paints nothing, nor does any
+   band taller than half the page in that form (measured 2026-11-23), and the
+   partial waveform's duration does not depend on how many rows it drives (589 ms
+   for a 27-row bar move and for a whole page). `flush(y0, y1)` is a *different*
+   narrowing: it limits the RGB565 → 1-bit conversion, which is 40,000 luma
+   computations over the full panel.
 2. **Updating is off the app task.** `EpdDisplay::task()` owns the BUSY wait; a
    refresh that outlasts the frame budget does not stall the key loop. The app must
    never wait for it (§16) — the sleeping face is the one exception, and it waits
@@ -1820,11 +1824,11 @@ This used to be the one place that was always full. The reason was sound on the
 old driver: a partial re-drove the whole page from what was already in the
 panel's RAM, so two layouts that differ everywhere left the old one legible
 through the new one, and `kFullEvery = 20` was far too lazy to hide it. The
-driver works differently now (§15.1): it drives only the rows that moved, and it
-pads them by two. So where the new page is white, the rows the old page inked are
-re-driven to white in the same pass, and the rows that were paper on both pages
-are never driven at all — which is exactly "clear only the region the previous
-page inked", done by the component that can see both frames.
+driver works differently now (§15.1): it hands the panel both frames — the new one
+in `0x24`, the one on the glass in `0x26` — and the partial waveform drives each
+pixel from where it was to where it is. So where the new page is white, the ink
+the old page left is driven back to white in the same pass, at the partial
+waveform's 589 ms instead of the full refresh's 1.4-2.1 s, and with no inversion.
 
 What a partial still cannot do is *finish* those black → white transitions, so a
 run of hand-overs does leave residue, and the driver's ten-band cadence is not

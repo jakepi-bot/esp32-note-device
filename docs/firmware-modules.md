@@ -428,7 +428,7 @@ draws its own band must follow the e-paper rules in the
 (the board sets `DeviceProfile::animation_default = false`, so the `animation`
 setting starts off here and motion only costs refreshes if you turn it back
 on), no 10 fps expectations, clear before darkening, and the
-driver's refresh policy (partial by default, a full refresh every 20
+driver's refresh policy (partial by default, a full refresh every 10
 partial ones, on boot and after a failed transfer) does the rest.
 
 The panel image and its snapshot live in PSRAM (18.9 KB of an 8 MB part that

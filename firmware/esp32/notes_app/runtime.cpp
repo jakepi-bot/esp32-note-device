@@ -1275,13 +1275,14 @@ std::string Runtime::console(std::string_view args) {
     char buf[420];
     std::snprintf(buf, sizeof buf,
                   "@why pending %u, ids %u, first %s, net %s, clock %s, retry %s %d ms, attempt %u, "
-                  "sync %s, next window %d ms, url %s",
+                  "sync %s, next window %d ms, url %s, slept %u ms",
                   static_cast<unsigned>(pending_), static_cast<unsigned>(ids.size()), first.c_str(),
                   net_open(now) ? net_reason() : "closed", clock_ok() ? "set" : "1970",
                   retry_waiting_ ? "waiting" : "clear", static_cast<int>(retry_in),
                   static_cast<unsigned>(attempt_), sync_id_.empty() ? "none" : sync_id_.c_str(),
                   static_cast<int>(static_cast<int32_t>(next_net_retry_ms_ - now)),
-                  notes_url().empty() ? "none" : "set");
+                  notes_url().empty() ? "none" : "set",
+                  static_cast<unsigned>(hgp::EspSystem::slept_ms_total()));
     return buf;
   }
   if (cmd.empty() || cmd == "status") {

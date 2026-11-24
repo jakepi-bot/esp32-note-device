@@ -524,6 +524,24 @@ std::string console_line(std::string_view line) {
     return "@error usage: wifi [on | off]";
   }
   if (wtrim == "wifi") return g_runtime.console(wtrim);
+  if (line == "pmsleep") {
+    // Force one light sleep with a one-second timer: if this works, the hardware
+    // and the clocks are fine and something is keeping the idle task off the CPU.
+    esp_sleep_enable_timer_wakeup(1000000);
+    const int64_t before = static_cast<int64_t>(g_system.now_us());
+    const esp_err_t err = esp_light_sleep_start();
+    char out[160];
+    std::snprintf(out, sizeof out, "@ok light sleep: %s, awake after %lld ms, slept total %u ms",
+                  esp_err_to_name(err), (static_cast<int64_t>(g_system.now_us()) - before) / 1000,
+                  static_cast<unsigned>(hgp::EspSystem::slept_ms_total()));
+    return out;
+  }
+  if (line == "pm") {
+    // Who is keeping the CPU awake. Light sleep that never engages has a holder,
+    // and this names it: the battery work needs the holder, not a guess.
+    esp_pm_dump_locks(stdout);
+    return "@ok power-management locks dumped above";
+  }
   if (line == "power") {
     // The three lines that decide whether a board on battery stays up: the
     // latch's pad level, the PWR key's own level, and what the port thinks the
@@ -751,6 +769,9 @@ extern "C" void app_main(void) {
     // And the CPU is kept awake while a finger is on a key, so the release is
     // sampled instead of slept through (a hold would otherwise read as a tap).
     if (esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "hg-key", &g_key_awake) != ESP_OK) g_key_awake = nullptr;
+    // The key timing subtracts the light sleep this app actually took, so the
+    // counter has to be running even though this app never takes the doze lock.
+    hgp::EspSystem::enable_sleep_accounting();
   }
   // The clock wants network time: this board has no RTC, so every note recorded
   // before the first sync is stamped 1970 (the uploader restamps it later).

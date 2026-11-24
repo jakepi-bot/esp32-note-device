@@ -64,6 +64,19 @@ esp_err_t count_sleep(int64_t slept_us, void*) {
 #endif
 }  // namespace
 
+// Count light sleep without taking the "may not sleep" lock `enable_doze()` takes:
+// an app that sleeps whenever it is idle still needs to know how much it slept,
+// because the key timing subtracts exactly that (2026-11-24).
+void EspSystem::enable_sleep_accounting() {
+#if CONFIG_PM_ENABLE && CONFIG_PM_LIGHT_SLEEP_CALLBACKS
+  static bool registered = false;
+  if (registered) return;
+  esp_pm_sleep_cbs_register_config_t cbs = {};
+  cbs.exit_cb = &count_sleep;
+  registered = esp_pm_light_sleep_register_cbs(&cbs) == ESP_OK;
+#endif
+}
+
 bool EspSystem::enable_doze() {
 #if CONFIG_PM_ENABLE && CONFIG_FREERTOS_USE_TICKLESS_IDLE
   if (awake_) return true;

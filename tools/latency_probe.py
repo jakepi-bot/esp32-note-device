@@ -6,6 +6,11 @@ panel. The video is the clock: the frame where the panel's pixels move, minus th
 moment the key was sent, is the response time a person feels.
 
 usage: tools/latency_probe.py <key> [seconds] [crop=W:H:X:Y]   (bench camera on /dev/video0)
+
+A hand-over is only partial for the first three moves of a session: the fourth
+`key hold` in a row spends the ghost budget and draws the full 1.4-2 s waveform.
+A number taken without resetting the board is therefore the fourth move's, not
+the one a person waiting on the menu sees - reset first, or count the moves.
 """
 import re
 import subprocess

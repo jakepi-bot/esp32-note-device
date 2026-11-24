@@ -185,6 +185,16 @@ std::vector<std::string> Store::pending_ids() const {
   return out;
 }
 
+std::vector<std::string> Store::ids_with_meta(NoteState state) const {
+  std::vector<std::string> out;
+  for (auto& id : list(state)) {
+    if (exists(meta_path(state, id))) out.push_back(std::move(id));
+  }
+  return out;
+}
+
+// Rows, whoever can act on them: `prune_notes()` is what decides which of them
+// are dead. The planner uses `pending_ids()`, which asks for note.json.
 uint32_t Store::count(NoteState state) const { return static_cast<uint32_t>(list(state).size()); }
 
 uint32_t Store::pending_bytes() const {
@@ -261,6 +271,36 @@ bool Store::locate(std::string_view id, NoteState& out) const {
     }
   }
   return false;
+}
+
+Store::Recover Store::recover() {
+  Recover done;
+  for (NoteState state : {NoteState::Pending, NoteState::Failed}) {
+    for (const auto& id : list(state)) {
+      if (exists(meta_path(state, id))) continue;
+      const std::string wav = audio_path(state, id);
+      const uint64_t bytes = audio_bytes(state, id);
+      // A WAV header is 44 bytes: less than that is not a recording.
+      if (state == NoteState::Pending && bytes > 44) {
+        Meta meta;
+        meta.note_id = id;
+        meta.bytes = bytes;
+        // Nothing records when the audio started once note.json is gone. An empty
+        // recorded_at is stamped at upload time, which is the same rule a note
+        // recorded before the first clock sync follows.
+        std::string error;
+        if (write_meta(id, meta, error)) {
+          ++done.repaired;
+          continue;
+        }
+      }
+      std::remove(wav.c_str());
+      std::remove((wav + ".part").c_str());
+      remove_leftover_files(note_dir(state, id));
+      if (::rmdir(note_dir(state, id).c_str()) == 0) ++done.dropped;
+    }
+  }
+  return done;
 }
 
 bool Store::erase(std::string_view id, NoteState* found) {

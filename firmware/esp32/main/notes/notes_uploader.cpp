@@ -18,7 +18,11 @@ namespace hgp::notes {
 namespace {
 
 const char* TAG = "hg.notes.up";
-constexpr size_t kChunk = 64 * 1024;
+// One step's share of the file. The uploader is stepped from the UI task, so this
+// is also how long a key can wait: 64 KB of socket write on a sleeping station is
+// a second or more, 8 KB is a few milliseconds and the loop comes back for the
+// keys (2026-11-24).
+constexpr size_t kChunk = 8 * 1024;
 
 // Gathers the response body: the contract's answers are small JSON, and an
 // answer that is not read out would leave the socket unusable for the next
@@ -381,7 +385,13 @@ Uploader::Step Uploader::step() {
     // two of five measured runs off; 120 s is above every measured stall and
     // still ends a body that has really stopped. A hub that is not there is
     // caught by the 20 s connect/head clock above, which this does not touch.
-    esp_http_client_set_timeout_ms(client, 120000);
+    // Two minutes of blocking write is two minutes of frozen keys when this runs
+    // on the UI task. A stalled body is retried, not waited out (2026-11-24).
+    // One chunk's write must not own the main loop for longer than this: the
+    // uploader runs on the UI task, so a stalled socket is a frozen key. Two
+    // seconds is two orders of magnitude more than an 8 KB chunk needs on a
+    // healthy link, and a stall is retried rather than waited out.
+    esp_http_client_set_timeout_ms(client, 2000);
     if (!write_all(request_.head.data(), request_.head.size())) {
       close();
       phase_ = Phase::Finished;

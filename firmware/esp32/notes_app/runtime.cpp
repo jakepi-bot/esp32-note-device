@@ -54,6 +54,10 @@ constexpr uint32_t kWindowMs = 120000;
 // minutes keeps the duty cycle honest (two minutes up, a quarter hour down)
 // without leaving a note on the card until the next reboot.
 constexpr uint32_t kNetRetryMs = 900000;
+// With notes waiting, the down half of the duty cycle is a minute, not fifteen:
+// ten notes sat pending for a quarter of an hour while a person watched the queue
+// (Jake, 2026-11-24). A minute still leaves the radio off most of the time.
+constexpr uint32_t kNetRetryBusyMs = 60000;
 // 2020-01-01: an earlier system clock means no clock has been set yet.
 constexpr int64_t kMinPlausibleUnix = 1577836800;
 constexpr const char* kLowSpaceError = "SD almost full, no synced notes to delete";
@@ -164,6 +168,15 @@ bool Runtime::begin(const Io& io) {
   if (!writer_ready_) ESP_LOGW(TAG, "no writer task: a recording writes its audio on the app task");
 
   ensure_sd();
+  // Settle the folders a power cut left half-committed, before the counts are
+  // read: a folder with no note.json is invisible to the planner but was counted
+  // as pending, which is a queue that says "10 to send" and sends nothing.
+  if (sd_ready_) {
+    const notes::Store::Recover fixed = store_.recover();
+    if (fixed.repaired || fixed.dropped)
+      ESP_LOGW(TAG, "card recovery: %u note(s) had their metadata rebuilt, %u empty folder(s) dropped",
+               static_cast<unsigned>(fixed.repaired), static_cast<unsigned>(fixed.dropped));
+  }
   refresh_counts();
   refresh_battery();
   // The radio's standing choice: on by default, and whatever it was last set to
@@ -285,6 +298,15 @@ void Runtime::shutdown() {
 // Network windows
 
 void Runtime::open_net(uint32_t now, Net why) {
+  // A person asking, or a fresh recording, means "now": the note in backoff is
+  // not the queue's turn to wait. Without this a 5-minute retry outlived the
+  // window that caused it and `notes sync` opened a window that uploaded nothing
+  // (bench, 2026-11-24).
+  if (why == Net::Manual || why == Net::Note) {
+    retry_waiting_ = false;
+    retry_at_ms_ = 0;
+    attempt_ = 0;
+  }
   const uint32_t until = now + kWindowMs;
   if (net_ == Net::Closed || static_cast<int32_t>(until - net_until_ms_) > 0) net_until_ms_ = until;
   net_ = why;
@@ -317,7 +339,7 @@ void Runtime::close_net(uint32_t now) {
   net_was_up_ = false;
   // The retry clock starts from the close, not from the boot: that is the duty
   // cycle's down half.
-  next_net_retry_ms_ = now + kNetRetryMs;
+  next_net_retry_ms_ = now + (pending_ > 0 ? kNetRetryBusyMs : kNetRetryMs);
   // The bar belongs to the window: a closed window has no batch to draw.
   if (batch_running_) {
     batch_running_ = false;
@@ -1124,7 +1146,11 @@ void Runtime::refresh_counts(bool notify) {
     if (was_ready && notify) notify_ui();
     return;
   }
-  pending_ = store_.count(notes::NoteState::Pending);
+  // Pending means "the planner can send this". A folder without note.json was
+  // counted here and skipped by the planner, so the glass said "10 to send" while
+  // the queue was empty (Jake, 2026-11-24). `recover()` repairs what it can at
+  // boot; this keeps the count honest if one ever appears again.
+  pending_ = static_cast<uint32_t>(store_.pending_ids().size());
   sent_ = store_.count(notes::NoteState::Sent);
   failed_ = store_.count(notes::NoteState::Failed);
   // A waiting note is the reason to advertise: the port opens a window for it.
@@ -1230,6 +1256,34 @@ std::string Runtime::console(std::string_view args) {
   const std::string rest = sp == std::string::npos ? std::string() : trim(std::string_view(line).substr(sp + 1));
   const uint32_t now = now_ms();
 
+  if (cmd == "why") {
+    // Why the queue is not moving, in the planner's own terms: the console could
+    // say "10 pending" and nothing about what was holding them (2026-11-24).
+    const int32_t retry_in = retry_waiting_ ? static_cast<int32_t>(retry_at_ms_ - now) : 0;
+    // The planner's own first step, so "nothing uploaded" has a reason instead of
+    // a shrug: how many ids the store hands back, and what the first one says.
+    const auto ids = store_.pending_ids();
+    std::string first = "none";
+    if (!ids.empty()) {
+      notes::Meta meta;
+      const bool meta_ok = store_.read_meta(ids[0], meta);
+      const uint64_t audio = store_.audio_bytes(notes::NoteState::Pending, ids[0]);
+      first = ids[0] + " meta " + (meta_ok ? "ok" : "unreadable") + ", " +
+              notes::human_bytes(audio) + ", plan " +
+              (notes::plan_upload(audio) == notes::QueueAction::Upload ? "upload" : "skip");
+    }
+    char buf[420];
+    std::snprintf(buf, sizeof buf,
+                  "@why pending %u, ids %u, first %s, net %s, clock %s, retry %s %d ms, attempt %u, "
+                  "sync %s, next window %d ms, url %s",
+                  static_cast<unsigned>(pending_), static_cast<unsigned>(ids.size()), first.c_str(),
+                  net_open(now) ? net_reason() : "closed", clock_ok() ? "set" : "1970",
+                  retry_waiting_ ? "waiting" : "clear", static_cast<int>(retry_in),
+                  static_cast<unsigned>(attempt_), sync_id_.empty() ? "none" : sync_id_.c_str(),
+                  static_cast<int>(static_cast<int32_t>(next_net_retry_ms_ - now)),
+                  notes_url().empty() ? "none" : "set");
+    return buf;
+  }
   if (cmd.empty() || cmd == "status") {
     char buf[400];
     std::snprintf(buf, sizeof buf,

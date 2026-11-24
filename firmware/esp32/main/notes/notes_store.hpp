@@ -56,7 +56,15 @@ class Store {
   std::vector<std::string> list(NoteState state) const;
   // Pending notes that carry a note.json, oldest first.
   std::vector<std::string> pending_ids() const;
+  // Notes in `state` that carry a note.json: the count the queue can act on.
+  std::vector<std::string> ids_with_meta(NoteState state) const;
   uint32_t count(NoteState state) const;
+  // A folder without note.json is a commit that a power cut interrupted. This is
+  // the pass at boot that settles them: a folder with audio and no note.json gets
+  // its metadata rebuilt (so a real recording is not stranded), and a folder with
+  // neither is removed. Returns how many were repaired and how many dropped.
+  struct Recover { uint32_t repaired = 0; uint32_t dropped = 0; };
+  Recover recover();
   // Bytes of the audio waiting under pending/ (about what the queue weighs).
   uint32_t pending_bytes() const;
   // Bytes of one note's `recording.wav`, 0 when the file is missing or empty.

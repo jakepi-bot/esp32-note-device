@@ -38,7 +38,9 @@ class WifiPowerSave {
   // honour. The notes app is a note uploader, not a stream - a second of extra
   // latency on an inbound frame costs nothing, and every skipped beacon is a
   // radio wake that does not happen (2026-11-23).
-  static constexpr uint8_t kListenInterval = 10;
+  // 10 was tried and reverted: a 1 s listen interval plus modem sleep stalls TCP
+  // mid-body on a bulk upload, and a stalled write is a frozen UI (2026-11-24).
+  static constexpr uint8_t kListenInterval = 3;
 
   // The sleep to switch to, or nothing when the applied one is right. `dozing` is
   // App::dozing(); `traffic_at` App::traffic_at(), the last frame from

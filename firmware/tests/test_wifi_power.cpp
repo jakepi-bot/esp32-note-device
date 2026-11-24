@@ -27,10 +27,13 @@ Want doze(hg::WifiPowerSave& p, uint32_t now, bool on_battery, bool dozing, uint
 
 }  // namespace
 
-TEST("wifi power save: modem sleep only on battery, and full power when plugged in") {
+TEST("wifi power save: modem sleep on the cable too, and full power only during a turn") {
+  // Modem sleep used to be battery-only, and a device on a charger idled at
+  // 200 mA for it. The cable is not a reason to keep the radio awake: only a turn
+  // is (2026-11-23).
   hg::WifiPowerSave plugged;
-  CHECK(step(plugged, 0, false, false) == Want(WifiSleep::None));  // the first call always applies
-  CHECK(!step(plugged, 10, false, false));                         // then nothing until it changes
+  CHECK(step(plugged, 0, false, false) == Want(WifiSleep::Min));  // the first call always applies
+  CHECK(!step(plugged, 10, false, false));                        // then nothing until it changes
   hg::WifiPowerSave battery;
   CHECK(step(battery, 0, true, false) == Want(WifiSleep::Min));
   CHECK(!step(battery, 10, true, false));
@@ -45,15 +48,19 @@ TEST("wifi power save: a turn wakes the radio at once and lets it sleep again wh
   CHECK(step(p, 300, true, false) == Want(WifiSleep::Min));
 }
 
-TEST("wifi power save: the battery is read every 5 s, and unplugging applies at the next read") {
+TEST("wifi power save: the battery is read every 5 s, and plugging in applies at the next read") {
+  // Dozing on the cell is the state that differs: max sleep on battery, min the
+  // moment the cable is seen, and only at the check - not on the caller's word.
   hg::WifiPowerSave p;
   int reads = 0;
-  step(p, 0, true, false, &reads);
-  for (uint32_t t = 10; t < hg::WifiPowerSave::kBatteryCheckMs; t += 10) step(p, t, true, t % 20 == 0, &reads);
+  CHECK(step(p, 0, true, false, &reads, true) == Want(WifiSleep::Max));
+  for (uint32_t t = 10; t < hg::WifiPowerSave::kBatteryCheckMs; t += 10) {
+    step(p, t, true, false, &reads, true);  // on the cell, no turn, dozing
+  }
   CHECK_EQ(reads, 1);
   // Plugged in now: the reading only changes at the next check.
-  CHECK(!step(p, hg::WifiPowerSave::kBatteryCheckMs - 10, false, false, &reads));
-  CHECK(step(p, hg::WifiPowerSave::kBatteryCheckMs, false, false, &reads) == Want(WifiSleep::None));
+  CHECK(!step(p, hg::WifiPowerSave::kBatteryCheckMs - 10, false, false, &reads, true));
+  CHECK(step(p, hg::WifiPowerSave::kBatteryCheckMs, false, false, &reads, true) == Want(WifiSleep::Min));
   CHECK_EQ(reads, 2);
 }
 
@@ -88,8 +95,10 @@ TEST("wifi power save: a turn or USB beats dozing") {
   CHECK(doze(p, 0, true, true) == Want(WifiSleep::Max));
   CHECK(doze(p, 10, true, true, 0, true) == Want(WifiSleep::None));  // a turn: full power
   CHECK(doze(p, 20, true, true) == Want(WifiSleep::Max));
+  // Plugged in: dozing still sleeps the modem, it just does not go to max - the
+  // cable carries the charge, so the deeper sleep buys nothing worth its wake cost.
   hg::WifiPowerSave plugged;
-  CHECK(doze(plugged, 0, false, true) == Want(WifiSleep::None));
+  CHECK(doze(plugged, 0, false, true) == Want(WifiSleep::Min));
 }
 
 TEST("wifi power save: the quiet time survives the clock wrapping") {

@@ -47,10 +47,14 @@ class WifiPowerSave {
       battery_checked_ = true;
       battery_checked_at_ = now;
     }
+    // Modem sleep is not a battery-only trick: an associated station that never
+    // sleeps holds the radio awake between beacons, and on the cable that was
+    // 1.02 W idle against 0.20 W with the radio off (meter, 2026-11-23). Only
+    // the deeper MAX mode is the battery's, because it costs latency.
     WifiSleep want = WifiSleep::None;
-    if (on_battery_ && !in_turn) {
+    if (!in_turn) {
       const bool quiet = traffic_at == 0 || now - traffic_at >= kQuietMs;
-      want = dozing && quiet ? WifiSleep::Max : WifiSleep::Min;
+      want = on_battery_ && dozing && quiet ? WifiSleep::Max : WifiSleep::Min;
     }
     if (applied_ && *applied_ == want) return std::nullopt;
     return want;

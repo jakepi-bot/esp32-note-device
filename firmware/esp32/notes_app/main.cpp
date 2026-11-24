@@ -24,6 +24,7 @@
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_pm.h"
 #include "esp_sleep.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -477,7 +478,28 @@ std::string console_line(std::string_view line) {
   if (line.rfind("notes", 0) == 0 && (line.size() == 5 || line[5] == ' ')) {
     return g_runtime.console(line.size() > 6 ? line.substr(6) : std::string_view());
   }
-  if (line == "battery" || line == "wifi" || line == "clock") return g_runtime.console(line);
+  // `wifi` and its arguments: the runtime owns on/off and the status line. Only
+  // the bare verb used to reach it, so `wifi off` - which the usage advertises -
+  // answered "unknown command" (2026-11-23).
+  if (line == "battery" || line == "clock") return g_runtime.console(line);
+  std::string wtrim(line);
+  while (!wtrim.empty() && (wtrim.back() == '\r' || wtrim.back() == '\n' || wtrim.back() == ' '))
+    wtrim.pop_back();
+  // `wifi` is the one verb port_console re-quotes, because a Wi-Fi password may
+  // hold spaces: the app sees `wifi "off"`, quotes and all. Unquote before
+  // matching, or the one spelling the usage advertises never works (2026-11-23).
+  if (wtrim.rfind("wifi ", 0) == 0) {
+    std::string arg = wtrim.substr(5);
+    if (arg.size() >= 2 && arg.front() == '"' && arg.back() == '"') arg = arg.substr(1, arg.size() - 2);
+    if (arg == "on" || arg == "off") {
+      const bool on = arg == "on";
+      g_runtime.set_wifi_stay(on);
+      return std::string("@ok wifi ") + (on ? "on: the station stays associated while plugged in"
+                                            : "off: windows only");
+    }
+    return "@error usage: wifi [on | off]";
+  }
+  if (wtrim == "wifi") return g_runtime.console(wtrim);
   if (line == "power") {
     // The three lines that decide whether a board on battery stays up: the
     // latch's pad level, the PWR key's own level, and what the port thinks the
@@ -651,6 +673,22 @@ extern "C" void app_main(void) {
   }
 
   g_config.begin(g_storage);
+  // Power management: the full gadget app configures it, and the notes build
+  // inherited the Kconfig without the call - so the CPU sat at 240 MHz and light
+  // sleep never engaged. With the radio off this app idled at 39 mA (meter,
+  // 2026-11-23), which is a processor awake for nothing.
+  {
+    esp_pm_config_t pm = {};
+    pm.max_freq_mhz = 240;
+    pm.min_freq_mhz = 80;
+    pm.light_sleep_enable = hgp::board_config().light_sleep;
+    if (esp_pm_configure(&pm) != ESP_OK) {
+      ESP_LOGW(TAG, "power management unavailable; the CPU stays at full speed");
+    } else {
+      ESP_LOGI(TAG, "power management: %d-%d MHz, light sleep %s", static_cast<int>(pm.min_freq_mhz),
+               static_cast<int>(pm.max_freq_mhz), pm.light_sleep_enable ? "on" : "off");
+    }
+  }
   // The clock wants network time: this board has no RTC, so every note recorded
   // before the first sync is stamped 1970 (the uploader restamps it later).
   g_time.begin(board.rtc, i2c_bus, g_storage);

@@ -21,6 +21,7 @@
 #include <string_view>
 
 #include "device_config.hpp"
+#include "key_poll.hpp"
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
@@ -187,13 +188,14 @@ bool run_effect(hgp::notesui::Effect effect, uint16_t note) {
 // part of the power circuit, and a level that sits low while the board changes
 // from cable to battery must not read as a finger. The board then powers down
 // 1.5 s later, on a press nobody made, and will not come back on.
-struct KeyPoll {
-  bool down = false;
-  bool armed = false;    // the key has been seen up since boot / since a power change
-  bool ignored = false;  // this press began while presses did not count: its release does nothing
-  uint32_t since = 0;
-};
+// KeyPoll and its timing rules live in key_poll.hpp so the host tests can drive
+// them without a chip: the sleep-gap rule is the one that broke.
+using hgp::KeyPoll;
 KeyPoll g_pwr, g_boot;
+// A press the bench can make without a finger: the same poll path a GPIO level
+// takes, so the timing rules are exercised for real (`key virtual boot down`).
+bool g_virtual_boot = false, g_virtual_pwr = false;
+esp_pm_lock_handle_t g_key_awake = nullptr;  // held while a key is down
 uint32_t g_keys_ready_ms = 0;  // no press counts before this (boot, power change)
 bool g_keys_locked = false;    // a key is being ignored until it is released
 
@@ -208,9 +210,19 @@ void lock_keys(uint32_t now) {
 }
 
 template <typename OnTap, typename OnHold>
-void poll_key(int pin, KeyPoll& k, uint32_t now, uint32_t hold_ms, OnTap tap, OnHold hold) {
-  if (pin < 0) return;
-  const bool pressed = gpio_get_level(static_cast<gpio_num_t>(pin)) == 0;  // both keys are active low
+void poll_key(int pin, KeyPoll& k, uint32_t now, uint32_t hold_ms, bool virtual_down, OnTap tap, OnHold hold) {
+  if (pin < 0 && !virtual_down) return;
+  const bool pressed = virtual_down || (pin >= 0 && gpio_get_level(static_cast<gpio_num_t>(pin)) == 0);
+  // Light sleep is time nobody can hold a key through: the chip is asleep, the
+  // clock is not. Take exactly that out of the press, and only that - a loop busy
+  // with an upload step is still a finger on the key (Jake, 2026-11-24: a tap
+  // opened the menu because the release landed after a doze).
+  const uint32_t slept = hgp::EspSystem::slept_ms_total();
+  if (slept != k.slept_at) {
+    hgp::discount_sleep(k, slept - k.slept_at);
+    k.slept_at = slept;
+  }
+  k.polled_at = now;
   if (!pressed) {
     k.armed = true;
     if (!k.down) return;
@@ -256,21 +268,33 @@ void power_hold(uint32_t held) {
   g_runtime.shutdown();
 }
 
+// True while a finger is on either key: the loop polls faster and light sleep
+// waits, so a press is measured from the moment it was seen.
+bool key_down_now() { return g_boot.down || g_pwr.down; }
+
 void poll_keys(uint32_t now) {
   const auto& board = hgp::board_config();
-  poll_key(board.latch_power.key, g_pwr, now, kPowerHoldMs,
+  poll_key(board.latch_power.key, g_pwr, now, kPowerHoldMs, g_virtual_pwr,
            // A PWR tap is never a power-off: ui_keys decides what the screen does
            // with it (open, select, refuse, stop and go back) and the effect
            // takes it from there. The tap used to reach Action::PowerOff from
            // Home, Recording, About and the player, so one press switched the
            // device off (t_dec6f9ef).
            [now] { g_ui.press(hgp::notesui::Key::Power); }, power_hold);
-  poll_key(board.buttons.record, g_boot, now, kBootHoldMs,
+  poll_key(board.buttons.record, g_boot, now, kBootHoldMs, g_virtual_boot,
            [now] { g_ui.press(hgp::notesui::Key::BootTap); },
            [now](uint32_t held) {
              ESP_LOGI(TAG, "BOOT held %u ms", static_cast<unsigned>(held));
              g_ui.press(hgp::notesui::Key::BootHold);
            });
+  // Keep the CPU awake for as long as the key is down, and give it back the
+  // moment it is released.
+  if (g_key_awake != nullptr) {
+    static bool held = false;
+    const bool down = key_down_now();
+    if (down && !held) { esp_pm_lock_acquire(g_key_awake); held = true; }
+    else if (!down && held) { esp_pm_lock_release(g_key_awake); held = false; }
+  }
   (void)now;
 }
 
@@ -515,6 +539,20 @@ std::string console_line(std::string_view line) {
                   ext.has_value() ? (*ext ? "cable" : "battery") : "unknown");
     return out;
   }
+  if (line.rfind("key virtual ", 0) == 0) {
+    // A press held down and released by the console, through the poll path a GPIO
+    // level takes - including the light sleep in between, which is where a tap
+    // used to be measured as a hold and open the menu instead of recording.
+    const std::string_view arg(line.substr(12));
+    const bool down = arg.size() > 5 && arg.substr(arg.size() - 5) == " down";
+    const bool up = arg.size() > 3 && arg.substr(arg.size() - 3) == " up";
+    if (!down && !up) return "@error usage: key virtual boot|pwr down|up";
+    const bool value = down;
+    if (arg.rfind("boot", 0) == 0) g_virtual_boot = value;
+    else if (arg.rfind("pwr", 0) == 0) g_virtual_pwr = value;
+    else return "@error usage: key virtual boot|pwr down|up";
+    return down ? "@ok key down" : "@ok key up";
+  }
   if (line.rfind("key ", 0) == 0) {
     // The same press the keys make, for a bench with no finger on the board.
     // `press()` runs the screen machine and the effect synchronously, so the
@@ -699,6 +737,20 @@ extern "C" void app_main(void) {
       ESP_LOGI(TAG, "power management: %d-%d MHz, light sleep %s", static_cast<int>(pm.min_freq_mhz),
                static_cast<int>(pm.max_freq_mhz), pm.light_sleep_enable ? "on" : "off");
     }
+    // The keys are polled, and a chip in light sleep cannot poll: without a wake
+    // source a press waits for the next timer (up to 2 s) and a short tap is lost
+    // entirely - "I cannot start a recording" (Jake, 2026-11-24). Both keys are
+    // active low, so the low level is the wake.
+    const auto& b = hgp::board_config();
+    for (int pin : {b.buttons.record, b.latch_power.key}) {
+      if (pin >= 0) gpio_wakeup_enable(static_cast<gpio_num_t>(pin), GPIO_INTR_LOW_LEVEL);
+    }
+    if (esp_sleep_enable_gpio_wakeup() != ESP_OK) {
+      ESP_LOGW(TAG, "the keys cannot wake light sleep: presses wait for the next timer");
+    }
+    // And the CPU is kept awake while a finger is on a key, so the release is
+    // sampled instead of slept through (a hold would otherwise read as a tap).
+    if (esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "hg-key", &g_key_awake) != ESP_OK) g_key_awake = nullptr;
   }
   // The clock wants network time: this board has no RTC, so every note recorded
   // before the first sync is stamped 1970 (the uploader restamps it later).
@@ -810,7 +862,11 @@ extern "C" void app_main(void) {
     // the work arrives as an event (a key, a console line, a phone, the clock).
     // A key's edge ends the wait at once, so the poll below runs at once too.
     // A working device polls five times a second; a resting one, once.
-    const uint32_t wait_ms = g_runtime.busy(g_system.now_ms()) ? 200 : 2000;
+    // 10 ms while a finger is on a key: a 100 ms tap is then three samples and
+    // the release is seen at once. A resting device still waits two seconds.
+    const uint32_t wait_ms = key_down_now() ? hgp::kKeyPollMs
+                            : g_runtime.busy(g_system.now_ms()) ? 200
+                                                                : 2000;
     if (hgp::events::receive(ev, pdMS_TO_TICKS(wait_ms))) {
       do {
         dispatch(ev);

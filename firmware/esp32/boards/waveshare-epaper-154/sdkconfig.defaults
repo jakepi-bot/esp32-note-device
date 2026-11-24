@@ -24,9 +24,11 @@ CONFIG_HG_BOARD_WS_EPAPER_154=y
 CONFIG_PM_ENABLE=y
 # Light sleep while dozing (on battery, screen off, idle; see EspSystem::enable_doze).
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
-# And never while a USB host is connected: the serial console and JTAG stop
-# working under light sleep. The app's on-battery check is the main guard.
-CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
+# Light sleep is allowed while a USB host is connected: this is the bench's only
+# way to see what the device does on a cell, since the console lives on that same
+# cable. The cost is that the console drops while the chip sleeps, so every test
+# wakes it with a key press first (2026-11-24).
+# CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION is not set
 # Wi-Fi wakes for each beacon from light sleep on the slow clock's timing; the
 # 17.5 MHz / 256 oscillator drifts less than the default 150 kHz RC.
 # CONFIG_RTC_CLK_SRC_INT_RC is not set

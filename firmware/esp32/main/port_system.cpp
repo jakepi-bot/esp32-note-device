@@ -50,12 +50,14 @@ void EspSystem::log(hg::LogLevel level, std::string_view message) {
 namespace {
 // Light sleep taken since the doze began, for the log line that ends it.
 std::atomic<int64_t> g_slept_us{0};
+std::atomic<int64_t> g_slept_total_us{0};  // since boot, for the key timing
 std::atomic<uint32_t> g_sleeps{0};
 std::atomic<bool> g_dozing{false};
 
 #if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
 esp_err_t count_sleep(int64_t slept_us, void*) {
   g_slept_us.fetch_add(slept_us, std::memory_order_relaxed);
+  g_slept_total_us.fetch_add(slept_us, std::memory_order_relaxed);
   g_sleeps.fetch_add(1, std::memory_order_relaxed);
   return ESP_OK;
 }
@@ -82,6 +84,12 @@ bool EspSystem::enable_doze() {
 }
 
 bool EspSystem::dozing_now() { return g_dozing.load(std::memory_order_relaxed); }
+
+// Light sleep since boot, in milliseconds: the key timing subtracts exactly this
+// from a press, so time the loop merely took is not mistaken for sleep.
+uint32_t EspSystem::slept_ms_total() {
+  return static_cast<uint32_t>(g_slept_total_us.load(std::memory_order_relaxed) / 1000);
+}
 
 namespace {
 std::atomic<bool> g_sleep_held{false};

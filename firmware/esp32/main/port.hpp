@@ -163,6 +163,9 @@ class EspSystem final : public hg::System {
   bool enable_doze();
   void set_dozing(bool dozing) override;
   static bool dozing_now();  // for tasks that poll: poll less while dozing
+  // Light sleep since boot, in ms. The key timing subtracts this from a press so
+  // that only time the chip was actually asleep is forgiven, not a slow loop.
+  static uint32_t slept_ms_total();
   // A lock holds the chip out of light sleep even while dozing (a Wi-Fi join attempt).
   // A task that relies on light-sleep wakes then keeps its awake path instead.
   static void set_sleep_held(bool held);

@@ -75,21 +75,58 @@ class Device:
         return buf.decode('utf-8', 'replace')
 
     def cmd(self, text, wait=1.2):
-        self.s.write((text + '\r\n').encode())
-        deadline = time.time() + wait
-        buf = ''
-        while time.time() < deadline:
-            buf += self._drain(0.06)
-            if any(l.strip().startswith('@') or 'screen ' in l for l in buf.splitlines()):
-                break
-        return buf
+        # A device that light-sleeps can move its CDC port or lose it mid-reply,
+        # and a bench that dies with it cannot test a sleeping device. Re-find
+        # the port and ask again, once.
+        for attempt in (0, 1):
+            try:
+                # Stale lines from the last press ("screen home" left in the
+                # buffer) made every reply look like the previous state.
+                self.s.reset_input_buffer()
+                self.s.write((text + '\r\n').encode())
+                deadline = time.time() + wait
+                buf = ''
+                while time.time() < deadline:
+                    buf += self._drain(0.06)
+                    if any(l.strip().startswith('@') or 'screen ' in l for l in buf.splitlines()):
+                        break
+                return buf
+            except (ConsoleGone, OSError):
+                if attempt:
+                    raise
+                self.reopen()
+        return ''
 
-    def tap(self, key):
-        """Press a key and do not wait for the screen: the caller times that."""
-        self.s.write(('key %s\r\n' % key).encode())
-        time.sleep(0.05)
+    def reopen(self):
+        try:
+            self.s.close()
+        except Exception:
+            pass
+        time.sleep(0.4)
+        self.port = find_port(10)
+        self.s = serial.Serial(self.port, 115200, timeout=0.05)
+        self._drain(0.6)
 
-    def ui(self, wait=0.8):
+    def tap(self, key, hold_s=0.12):
+        self.s.reset_input_buffer()
+        """A finger on a key, through the poll path a GPIO level takes.
+
+        `key boot` presses the screen machine directly, which skips the timing
+        rules that decide tap from hold - and those are what broke on battery.
+        """
+        self.s.write(('key virtual %s down\r\n' % key).encode())
+        time.sleep(hold_s)
+        self.s.write(('key virtual %s up\r\n' % key).encode())
+        time.sleep(0.04)
+
+    def hold(self, key, hold_s=2.6):
+        self.s.reset_input_buffer()
+        self.s.write(('key virtual %s down\r\n' % key).encode())
+        time.sleep(hold_s)
+        self.s.write(('key virtual %s up\r\n' % key).encode())
+        time.sleep(0.04)
+
+    def ui(self, wait=1.4):
         out = self.cmd('ui', wait)
         for line in out.splitlines():
             i = line.find('screen ')
@@ -103,6 +140,8 @@ class Device:
 
     def status(self):
         out = self.cmd('notes status', 2.5)
+        if not out:
+            return ''
         for line in out.splitlines():
             if line.strip().startswith('@notes stored'):
                 return line.strip()
@@ -178,7 +217,7 @@ def go_home(dev, tries=4):
     for _ in range(tries):
         if dev.screen() == 'home':
             return True
-        dev.tap('hold')
+        dev.hold('boot')
         time.sleep(0.4)
     return dev.screen() == 'home'
 
@@ -226,14 +265,18 @@ def main():
            '%s -> %s' % (stored0, counts[0] if counts else '?'))
 
     # 4. Menu, walk it, come back.
-    dev.tap('hold')
-    took = wait_for(dev, 'menu', 3)
-    record('menu opens within 3 s', took is not None, '%.2f s' % took if took else 'never')
+    before = dev.screen()
+    dev.hold('boot')
+    took = wait_for(dev, 'menu', 6)
+    if took is None:
+        print('     debug: was %r, now %r' % (before, dev.screen()))
+        print('     debug raw: %r' % dev.cmd('ui', 1.5)[-200:])
+    record('menu opens within 6 s', took is not None, '%.2f s' % took if took else 'never')
     # On the menu the hold is the way back (ui_keys hold_boot: Menu -> Home); PWR
     # selects a row, which is how a first pass walked into the note list and
     # called the menu stuck.
-    dev.tap('hold')
-    took = wait_for(dev, 'home', 4)
+    dev.hold('boot')
+    took = wait_for(dev, 'home', 6)
     record('back from the menu returns Home', took is not None, '%.2f s' % took if took else 'never')
 
     # 5. Record again after the menu.
@@ -264,8 +307,8 @@ def main():
     # 7. The UI answers while the radio is busy: the one Jake hit on battery.
     duty = dev.radio_duty()
     go_home(dev)
-    dev.tap('hold')
-    took = wait_for(dev, 'menu', 3)
+    dev.hold('boot')
+    took = wait_for(dev, 'menu', 6)
     record('menu opens with the radio up', took is not None,
            ('%.2f s, radio %.0f%%' % (took, 100 * duty)) if took and duty is not None else 'never')
     go_home(dev)

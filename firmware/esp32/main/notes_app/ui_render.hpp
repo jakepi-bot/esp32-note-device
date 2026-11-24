@@ -41,6 +41,11 @@ inline constexpr int kRowPitch = 18;
 inline constexpr int kMenuPitch = 12;
 inline constexpr int kMenuBar = 11;
 inline constexpr int kMenuLabelScale = 1;
+// A two-line footer at the hero size: 18 px lines leave 4 px between them and
+// 8 px under the rule, and both Home strings fit the 200 px width at that size.
+inline constexpr int kRuleTwoBig = 132;
+inline constexpr int kFooterBigA = 136;
+inline constexpr int kFooterBigB = 162;
 inline constexpr int kRuleTwoLine = 144;  // rule above a two-line footer
 inline constexpr int kRuleOneLine = 162;  // rule above a one-line footer
 inline constexpr int kFooterTwoA = 152;
@@ -80,7 +85,8 @@ void draw_band(hg::Canvas& canvas, const char* queue, const char* clock, bool wi
 void draw_selection(hg::Canvas& canvas, int row_y);
 void draw_panel_text_on(hg::Canvas& canvas, int x, int y, const char* text, bool on_bar);
 void draw_progress(hg::Canvas& canvas, int y, uint8_t pct);
-void draw_footer(hg::Canvas& canvas, const char* line1, const char* line2 = nullptr);
+void draw_footer(hg::Canvas& c, const char* line1, const char* line2 = nullptr,
+                 int scale = grid::kScale);
 void draw_centred(hg::Canvas& canvas, int y, const char* text, int scale);
 
 // The sleeping face: paper, a moon with 'zzz', and one line saying what the

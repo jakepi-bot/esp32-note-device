@@ -111,7 +111,7 @@ void home_face(hg::Canvas& c, const ScreenDraw& d) {
   // Home is a two-line footer now: the key legend at the body size, both keys,
   // where a person reads them. The 6 px hint that used to sit above the rule was
   // legible to nobody (Jake, 2026-11-23).
-  const int bottom = grid::kRuleTwoLine;
+  const int bottom = grid::kRuleTwoBig;
   const int group_h = 21 + 12 + 14;
   const int top = 28 + ((bottom - 28) - group_h) / 2;
   draw_centred(c, top, v.hero, grid::kHero);
@@ -120,7 +120,10 @@ void home_face(hg::Canvas& c, const ScreenDraw& d) {
     // Growth-only, so the bar leaves no residue at all (§15.3).
     draw_progress(c, top + group_h + 16, v.bar_pct);
   }
-  draw_footer(c, key::kBootRecord, key::kHoldMenu);
+  // Both keys at the hero size. At the body size this was still a squint on a
+  // 1.54" panel (Jake, 2026-11-23): "BOOT: REC" is 9 characters and "HOLD: MENU"
+  // is 10, which is what the 200 px width affords at 18 px.
+  draw_footer(c, key::kBootRecord, key::kHoldMenu, grid::kHero);
 }
 
 void recording_face(hg::Canvas& c, const ScreenDraw& d) {
@@ -347,7 +350,8 @@ void SleepFace(hg::Canvas& c) {
   // The body size, not the 6 px caption: this is the line that tells a person
   // the device is off and how to bring it back, and it was unreadable
   // (Jake, 2026-11-23).
-  draw_centred(c, 108, sleep::kHint, grid::kScale);
+  draw_centred(c, 96, sleep::kHint, grid::kHero);
+  draw_centred(c, 124, sleep::kHint2, grid::kScale);
 }
 
 }  // namespace
@@ -393,11 +397,15 @@ void draw_progress(hg::Canvas& c, int y, uint8_t pct) {
   if (w > 0) c.fill_rect(grid::kLeft + 2, y + 2, w, 5, kInk);
 }
 
-void draw_footer(hg::Canvas& c, const char* line1, const char* line2) {
+void draw_footer(hg::Canvas& c, const char* line1, const char* line2, int scale) {
   const bool two = line2 != nullptr && line2[0] != '\0';
-  rule(c, two ? grid::kRuleTwoLine : grid::kRuleOneLine);
-  text_at(c, grid::kLeft, two ? grid::kFooterTwoA : grid::kFooterOne, line1, grid::kScale, kInk);
-  if (two) text_at(c, grid::kLeft, grid::kFooterTwoB, line2, grid::kScale, kInk);
+  const bool big = scale > grid::kScale;
+  rule(c, two ? (big ? grid::kRuleTwoBig : grid::kRuleTwoLine) : grid::kRuleOneLine);
+  text_at(c, grid::kLeft, two ? (big ? grid::kFooterBigA : grid::kFooterTwoA) : grid::kFooterOne,
+          line1, scale, kInk);
+  if (two) {
+    text_at(c, grid::kLeft, big ? grid::kFooterBigB : grid::kFooterTwoB, line2, scale, kInk);
+  }
 }
 
 void draw_centred(hg::Canvas& c, int y, const char* text, int scale) {

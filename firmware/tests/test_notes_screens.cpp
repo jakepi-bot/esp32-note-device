@@ -1582,7 +1582,9 @@ TEST("sleep: the frame is the sleeping face, and the panel is cleared") {
   // A sleeping face is a drawing on paper, not a page: under a third of what
   // Home inks (a run of text and rows is thousands of pixels), and nothing at
   // all where Home's band, hint and footer were.
-  constexpr int kClearedInk = 1200;
+  // Bigger type on the sleeping face costs ink: 18 px "hold PWR" plus a body-size
+  // "2 seconds" is still a drawing, not a page, but the ceiling moves with it.
+  constexpr int kClearedInk = 2000;
   const InkBox all = ink_in(fb, 0, 0, 200, 200);
   CHECK(all.ink > 400);   // the moon, the zzz and the line are there
   CHECK(all.ink < kClearedInk);
@@ -1604,14 +1606,18 @@ TEST("sleep: the frame is the sleeping face, and the panel is cleared") {
   // The line, centred at the body size where draw_centred puts it, between the
   // motif and the bottom of the page. It was a 6 px caption and unreadable, so
   // the assertion is on the size a person can read, not just on its position.
-  const InkBox line = ink_in(fb, 0, 100, 200, 145);
+  const InkBox line = ink_in(fb, 0, 92, 200, 118);
   CHECK(line.ink > 200);
-  const int want_x = (200 - hg::Canvas::text_width(sleep::kHint, 2)) / 2;
+  const int want_x = (200 - hg::Canvas::text_width(sleep::kHint, 3)) / 2;
   CHECK(line.min_x >= want_x);
   CHECK(line.min_x <= want_x + 2);
-  CHECK(line.max_x <= want_x + hg::Canvas::text_width(sleep::kHint, 2));
-  CHECK(line.min_y >= 104);
-  CHECK(line.max_y <= 128);
+  CHECK(line.max_x <= want_x + hg::Canvas::text_width(sleep::kHint, 3));
+  CHECK(line.min_y >= 92);
+  CHECK(line.max_y <= 116);
+  // And the duration under it, at the body size, still inside the page.
+  const InkBox under = ink_in(fb, 0, 118, 200, 145);
+  CHECK(under.ink > 60);
+  CHECK(under.max_x <= 196);
 }
 
 TEST("sleep: the face draws with a full refresh") {

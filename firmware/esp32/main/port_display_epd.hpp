@@ -37,6 +37,14 @@ class EpdDisplay final : public hg::Display {
   // How many partial updates may run before a full one clears the residue. 1
   // means every frame is a full refresh (no ghosting, most charge); the default
   // is 10. The bench and a demo can set it from the console.
+  // The panel's rail. E-paper holds its picture with the rail down, so a device
+  // nobody is looking at pays nothing for a screen (the rail plus its booster is
+  // about 7 mA on the meter). The controller loses its previous-frame RAM with the
+  // power, which is why coming back is always a full refresh (2026-11-23: a
+  // partial over a cold panel drew nothing at all).
+  void panel_power(bool on);
+  bool panel_powered() const { return powered_; }
+
   void set_full_every(int n) { full_every_ = n < 1 ? 1 : (n > 100 ? 100 : n); }
   int full_every() const { return full_every_; }
 
@@ -94,6 +102,10 @@ class EpdDisplay final : public hg::Display {
   bool dirty_ = false;         // the panel does not show image_ yet
   bool partial_ = false;       // the partial waveform is armed
   int partials_ = 0;           // partial updates since the last full one
+ private:
+  int pwr_pin_ = -1;
+  bool pwr_on_level_ = true;
+  bool powered_ = true;
   int full_every_ = 10;  // the .cpp's kFullEvery; the console can move it
 };
 

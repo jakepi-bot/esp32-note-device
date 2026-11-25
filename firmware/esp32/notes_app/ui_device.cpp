@@ -378,6 +378,27 @@ void NotesUi::render(notesui::Refresh refresh) {
   ports_.display->flush(0, info.height);
 }
 
+// Idle: nobody has touched the device for a while, on the cell, with nothing
+// running. The panel holds its picture with the rail down, so the screen costs
+// nothing to keep - and every render is refused until a key brings it back, which
+// also means the 10 s facts poll and the band's clock cannot spend the battery
+// refreshing a page no one is reading (Jake, 2026-11-24: 6 hours idle).
+void NotesUi::idle(bool on) {
+  if (!begun_) return;
+  if (on) {
+    if (asleep_) return;
+    asleep_ = true;
+    if (ports_.display != nullptr) ports_.display->panel_power(false);
+    return;
+  }
+  if (!asleep_) return;
+  asleep_ = false;
+  // The rail comes up here as well as in flush(): the wake is a full redraw by
+  // definition (the panel lost its previous-frame RAM with the power).
+  if (ports_.display != nullptr) ports_.display->panel_power(true);
+  render(notesui::Refresh::Full);
+}
+
 void NotesUi::wake_from_sleep_face() {
   if (!begun_ || !asleep_) return;
   asleep_ = false;

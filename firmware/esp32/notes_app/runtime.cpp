@@ -44,6 +44,9 @@ constexpr uint8_t kSdFastProbes = 12;
 constexpr uint32_t kRetentionMs = 300000;
 constexpr uint32_t kRetentionLowMs = 60000;
 constexpr uint32_t kBatteryMs = 30000;
+// While the UI is idle the same two jobs run every five minutes instead: a card
+// walk and a battery ADC read are a wake-up each, and nobody is looking.
+constexpr uint32_t kIdleLongMs = 300000;
 // A recording re-reads the card's free space on the counter's own cadence (the
 // glass repaints at 30 s): one number, one clock, and no second timer for it.
 constexpr uint32_t kSpaceCheckMs = 30000;
@@ -456,11 +459,12 @@ void Runtime::tick(uint32_t now, bool wifi_link) {
   }
 
   if (static_cast<int32_t>(now - next_scan_ms_) >= 0) {
-    next_scan_ms_ = now + ((pending_ == 0 && failed_ == 0) ? kIdleScanMs : kScanMs);
+    next_scan_ms_ = now + (idle_ ? kIdleLongMs
+                                 : ((pending_ == 0 && failed_ == 0) ? kIdleScanMs : kScanMs));
     refresh_counts();
   }
   if (static_cast<int32_t>(now - next_battery_ms_) >= 0) {
-    next_battery_ms_ = now + kBatteryMs;
+    next_battery_ms_ = now + (idle_ ? kIdleLongMs : kBatteryMs);
     refresh_battery();
   }
   if (static_cast<int32_t>(now - next_retention_ms_) >= 0) run_retention(now, false);

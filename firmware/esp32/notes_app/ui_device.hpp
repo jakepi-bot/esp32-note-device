@@ -154,6 +154,10 @@ class NotesUi {
   // way back without a reboot, or the panel stops answering for the rest of the
   // session (2026-11-23).
   void wake_from_sleep_face();
+  // The idle state: drop the panel's rail and refuse every render until a key
+  // comes back. Battery only - a device on the cable is somebody's bench.
+  void idle(bool on);
+  bool idle() const { return asleep_; }
 
   // The console's `ui` command: what the glass is showing, in words.
   std::string console(std::string_view line);

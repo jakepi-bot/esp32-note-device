@@ -146,6 +146,10 @@ class Runtime {
   // board on its cell that holds an association for the hub's benefit is a radio
   // flattening the cell (2026-11-23, "a few hours when unused").
   bool stay_net() const { return wifi_stay_ && external_; }
+  // The UI is idle (nobody touching it, on the cell): the card walk and the
+  // battery read stretch from 30 s to five minutes. They are the two things that
+  // wake a resting device for no one's benefit (2026-11-24).
+  void set_idle(bool on) { idle_ = on; }
   // Something is moving: the app loop can wait a fifth of a second. Idle, it can
   // wait a whole one - five wakes a second on a resting device is battery spent
   // on nothing (2026-11-23).
@@ -322,6 +326,7 @@ class Runtime {
   int battery_pct_ = -1;
   uint16_t battery_mv_ = 0;
   bool charging_ = false, external_ = false;
+  bool idle_ = false;
   bool charging_known_ = false;  // the board has a charge signal to read
 
   std::vector<uint8_t> key_;  // 32 bytes; the HMAC's key, never logged

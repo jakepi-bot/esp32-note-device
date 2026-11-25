@@ -71,6 +71,14 @@ hgp::NotesUi g_ui;
 // hardware cutoff (2.5 s): the flush needs the time, and the release is
 // immediate once the card is quiet.
 constexpr uint32_t kBootHoldMs = 2000;
+// Nothing has been touched for this long, on the cell, with no work in flight:
+// the device goes idle - the panel's rail drops and every render is refused until
+// a key or a console line comes back. Sixty seconds is past the point where a
+// person is still reading the screen (2026-11-24: 6 hours idle on a cell).
+constexpr uint32_t kIdleEnterMs = 60000;
+// The loop's wait while idle: the key interrupt wakes it, so this only sets how
+// often the timers check in, and ten seconds is cheap against a 2 s heartbeat.
+constexpr uint32_t kIdleWaitMs = 10000;
 constexpr uint32_t kPowerHoldMs = 1500;
 // A power source that changes under the firmware must not read as a finger on
 // PWR for this long: the sense line is part of the power circuit on this board.
@@ -640,6 +648,15 @@ std::string console_line(std::string_view line) {
     // clean page), `epd ghost N` trades charge for cleanliness - 1 is a full
     // refresh every frame, 10 the default.
     const std::string_view rest(line.substr(4));
+    if (rest.rfind("idle", 0) == 0) {
+      // The bench has to see the idle state without unplugging: on the cable the
+      // device never idles by design (somebody is at the desk with a meter).
+      const bool on = rest != "idle off";
+      g_ui.idle(on);
+      g_runtime.set_idle(on);
+      return on ? "@ok idle: panel rail down, a key wakes it (epd idle off)"
+                : "@ok awake: rail up, full redraw";
+    }
     if (rest == "wake") {
       g_ui.wake_from_sleep_face();
       return "@ok awake again (full redraw)";
@@ -662,7 +679,7 @@ std::string console_line(std::string_view line) {
       std::snprintf(out, sizeof out, "@ok full refresh every %d partials", g_epd.full_every());
       return out;
     }
-    return "@error usage: epd full | epd sleep | epd wake | epd ghost <1..100>";
+    return "@error usage: epd full | epd sleep | epd wake | epd idle [on|off] | epd ghost <1..100>";
   }
   if (line.rfind("set ", 0) == 0) return set_line(line.substr(4));
   // `screen` proves what the panel is showing without a camera pointed at it;
@@ -905,6 +922,7 @@ extern "C" void app_main(void) {
   lock_keys(g_system.now_ms());
 
   bool power_known = false, power_cable = false;
+  uint32_t last_touch_ms = g_system.now_ms();
   for (;;) {
     hgp::Event ev;
     // A resting notes device has nothing to animate: the panel is bistable and
@@ -914,12 +932,18 @@ extern "C" void app_main(void) {
     // 10 ms while a finger is on a key: a 100 ms tap is then three samples and
     // the release is seen at once. A resting device still waits two seconds.
     const uint32_t wait_ms = key_down_now() ? hgp::kKeyPollMs
+                            : g_ui.idle()    ? kIdleWaitMs
                             : g_runtime.busy(g_system.now_ms()) ? 200
                                                                 : 2000;
     if (hgp::events::receive(ev, pdMS_TO_TICKS(wait_ms))) {
       do {
+        // Only a person's own input ends idle: the radio and the card have their
+        // own timers and must not keep the screen powered by arriving.
+        const bool person = ev.type == hgp::EventType::KeyEdge || ev.type == hgp::EventType::Key ||
+                            ev.type == hgp::EventType::Console;
         dispatch(ev);
         hgp::events::release(ev);
+        if (person) last_touch_ms = g_system.now_ms();
       } while (hgp::events::receive(ev, 0));
     }
     const uint32_t now = g_system.now_ms();
@@ -941,6 +965,24 @@ extern "C" void app_main(void) {
     poll_network(now);
     g_runtime.tick(now, g_link == Link::Up);
     poll_keys(now);
+    // Idle, on the cell only: drop the panel's rail and stop drawing until a
+    // person comes back. A device on the cable is somebody's bench with a meter
+    // on it, and the console has to keep working there.
+    if (power_cable) {
+      if (g_ui.idle()) {
+        g_ui.idle(false);
+        g_runtime.set_idle(false);
+        last_touch_ms = now;
+      }
+    } else if (!g_ui.idle() && !g_runtime.busy(now) && now - last_touch_ms > kIdleEnterMs) {
+      ESP_LOGI(TAG, "idle after %u s: panel rail down, a key wakes it",
+               static_cast<unsigned>((now - last_touch_ms) / 1000));
+      g_ui.idle(true);
+      g_runtime.set_idle(true);
+    } else if (g_ui.idle() && (g_runtime.busy(now) || now - last_touch_ms <= kIdleEnterMs)) {
+      g_ui.idle(false);
+      g_runtime.set_idle(false);
+    }
     // The screens' heartbeat: the recording counter, the playback position and
     // the panel's own redraw request. Nothing here runs on a timer of its own.
     g_ui.tick(now);

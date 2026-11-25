@@ -91,6 +91,16 @@ constexpr size_t kTxChunk = 1024;
 
 }  // namespace
 
+void EpdDisplay::panel_power(bool on) {
+  if (pwr_pin_ < 0 || on == powered_) return;
+  // Both rails on this board conduct LOW, so "on" is the configured level and
+  // "off" is its opposite.
+  const int level = on ? (pwr_on_level_ ? 1 : 0) : (pwr_on_level_ ? 0 : 1);
+  gpio_set_level(static_cast<gpio_num_t>(pwr_pin_), level);
+  powered_ = on;
+  if (on) vTaskDelay(pdMS_TO_TICKS(kRailSettleMs));
+}
+
 bool EpdDisplay::begin(const EpdConfig& cfg) {
   cfg_ = cfg;
   const size_t pixels = static_cast<size_t>(cfg.width) * cfg.height;
@@ -113,6 +123,9 @@ bool EpdDisplay::begin(const EpdConfig& cfg) {
 
   // Both rails on this board conduct LOW; the audio rail is already up
   // (power_rails_on), this one gates the panel.
+  pwr_pin_ = cfg.pwr;
+  pwr_on_level_ = cfg.pwr_on_level;
+  powered_ = true;
   if (cfg.pwr >= 0) {
     gpio_config_t rail = {};
     rail.pin_bit_mask = 1ULL << cfg.pwr;
@@ -206,6 +219,13 @@ std::string EpdDisplay::image_slice(size_t first, size_t count) {
 }
 
 void EpdDisplay::flush(uint16_t y0, uint16_t y1) {
+  // A frame that arrives while the rail is down (idle ended) wakes it: the panel
+  // lost its previous-frame RAM with the power, so ask for a full waveform
+  // whatever the caller wanted - a partial over a cold panel draws nothing.
+  if (!powered_) {
+    panel_power(true);
+    request_full_refresh();
+  }
   if (!fb_ || !image_) return;
   if (y1 > cfg_.height) y1 = cfg_.height;
   if (y0 >= y1) return;

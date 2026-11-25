@@ -154,6 +154,10 @@ class Runtime {
   // wait a whole one - five wakes a second on a resting device is battery spent
   // on nothing (2026-11-23).
   bool busy(uint32_t now_ms) const { return mode_ != Mode::Idle || net_open(now_ms); }
+  // Real work only: a recording, a card job, an upload. `busy()` also counts an
+  // open network window, which on USB is permanent - using it as the idle wake
+  // condition cancelled idle on every loop pass (the frames kept climbing).
+  bool working() const { return mode_ != Mode::Idle; }
   void set_wifi_stay(bool on);
   // The setup page a phone opened: the window must not close under it.
   bool setup_window() const;

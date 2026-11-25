@@ -203,6 +203,11 @@ KeyPoll g_pwr, g_boot;
 // A press the bench can make without a finger: the same poll path a GPIO level
 // takes, so the timing rules are exercised for real (`key virtual boot down`).
 bool g_virtual_boot = false, g_virtual_pwr = false;
+// A press arrived with the screen dark - from the GPIO or from the console's
+// `key` verb, which is a press for a bench with no finger on the board. The loop
+// consumes it on the next pass, so a scripted press wakes idle exactly like a
+// real one.
+bool g_key_while_idle = false;
 esp_pm_lock_handle_t g_key_awake = nullptr;  // held while a key is down
 uint32_t g_keys_ready_ms = 0;  // no press counts before this (boot, power change)
 bool g_keys_locked = false;    // a key is being ignored until it is released
@@ -607,6 +612,9 @@ std::string console_line(std::string_view line) {
     return down ? "@ok key down" : "@ok key up";
   }
   if (line.rfind("key ", 0) == 0) {
+    // A scripted press counts as a finger, so it also ends an idle the console
+    // put the device into (otherwise the state moves and the glass stays dark).
+    g_key_while_idle = true;
     // The same press the keys make, for a bench with no finger on the board.
     // `press()` runs the screen machine and the effect synchronously, so the
     // screen this prints is the one the glass was handed, not a guess.
@@ -937,13 +945,16 @@ extern "C" void app_main(void) {
                                                                 : 2000;
     if (hgp::events::receive(ev, pdMS_TO_TICKS(wait_ms))) {
       do {
-        // Only a person's own input ends idle: the radio and the card have their
-        // own timers and must not keep the screen powered by arriving.
-        const bool person = ev.type == hgp::EventType::KeyEdge || ev.type == hgp::EventType::Key ||
-                            ev.type == hgp::EventType::Console;
+        // Only a finger ends idle. A console line is somebody at a bench too,
+        // but counting it would mean a script polling `ui` keeps the panel powered
+        // forever, and the console's own way out is `epd idle off`.
+        const bool person = ev.type == hgp::EventType::KeyEdge || ev.type == hgp::EventType::Key;
         dispatch(ev);
         hgp::events::release(ev);
-        if (person) last_touch_ms = g_system.now_ms();
+        if (person) {
+          last_touch_ms = g_system.now_ms();
+          g_key_while_idle = true;
+        }
       } while (hgp::events::receive(ev, 0));
     }
     const uint32_t now = g_system.now_ms();
@@ -965,24 +976,26 @@ extern "C" void app_main(void) {
     poll_network(now);
     g_runtime.tick(now, g_link == Link::Up);
     poll_keys(now);
-    // Idle, on the cell only: drop the panel's rail and stop drawing until a
-    // person comes back. A device on the cable is somebody's bench with a meter
-    // on it, and the console has to keep working there.
-    if (power_cable) {
-      if (g_ui.idle()) {
-        g_ui.idle(false);
-        g_runtime.set_idle(false);
-        last_touch_ms = now;
+    // Idle, entered on the cell only - a device on the cable is somebody's bench
+    // with a meter on it - and left only for a reason: a key, or work to do. The
+    // first version also woke it merely because the cable was present, which
+    // cancelled `epd idle on` within one loop pass (frames climbed 4 -> 6 in the
+    // 45 s it was supposed to be dark).
+    if (!g_ui.idle()) {
+      if (!power_cable && !g_runtime.busy(now) && now - last_touch_ms > kIdleEnterMs) {
+        ESP_LOGI(TAG, "idle after %u s: panel rail down, a key wakes it",
+                 static_cast<unsigned>((now - last_touch_ms) / 1000));
+        g_ui.idle(true);
+        g_runtime.set_idle(true);
       }
-    } else if (!g_ui.idle() && !g_runtime.busy(now) && now - last_touch_ms > kIdleEnterMs) {
-      ESP_LOGI(TAG, "idle after %u s: panel rail down, a key wakes it",
-               static_cast<unsigned>((now - last_touch_ms) / 1000));
-      g_ui.idle(true);
-      g_runtime.set_idle(true);
-    } else if (g_ui.idle() && (g_runtime.busy(now) || now - last_touch_ms <= kIdleEnterMs)) {
+    } else if (g_runtime.working() || g_key_while_idle) {
+      // The trigger is the finger itself, not "a key in the last minute": a
+      // timestamp window undid `epd idle on` for a minute after every boot, and
+      // a console poll must never wake the glass.
       g_ui.idle(false);
       g_runtime.set_idle(false);
     }
+    g_key_while_idle = false;
     // The screens' heartbeat: the recording counter, the playback position and
     // the panel's own redraw request. Nothing here runs on a timer of its own.
     g_ui.tick(now);

@@ -65,7 +65,7 @@
 <script type="module">
 import {
   Assembler, CONTROL_UUID, DATA_UUID, SERVICE_UUID, TAG,
-  parseListLines, postNote, sha256Hex,
+  hmacBase64, parseListLines, postNote, sha256Hex,
 } from './relay.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -216,11 +216,36 @@ async function connect() {
   await hello;
   const answer = session.assembler.lines.at(-1) ?? 'no answer';
   if (session.assembler.errors.length) {
-    log(`connected, but the gadget answered: ${answer} — pair this phone on the device first`);
+    log(`connected, but the gadget answered: ${answer}`);
     toggle(false);
     return;
   }
   log(`connected: ${answer}`);
+
+  // The link is not encrypted: iOS Web Bluetooth cannot pair at all, so the gadget
+  // asks the protocol instead (docs/ble-note-sync.md). Prove we hold its key, or
+  // every later command answers "auth required".
+  const nonceLine = session.next(['text', 'error']);
+  await session.write('challenge');
+  await nonceLine;
+  const nonce = (session.assembler.lines.at(-1) || '').replace(/^nonce\s+/, '');
+  if (!nonce) {
+    log('the gadget did not send a challenge: it is running older firmware');
+    toggle(false);
+    return;
+  }
+  const keyBytes = Uint8Array.from(atob(keyBase64), (c) => c.charCodeAt(0));
+  const mac = await hmacBase64(keyBytes, 'hg-ble|' + nonce);
+  const authLine = session.next(['text', 'error']);
+  await session.write('auth ' + mac);
+  await authLine;
+  const authAnswer = session.assembler.lines.at(-1) ?? 'no answer';
+  if (session.assembler.errors.length || authAnswer !== 'ok auth') {
+    log(`the gadget refused the key: ${authAnswer} — check the device key in the form`);
+    toggle(false);
+    return;
+  }
+  log('authenticated with the device key');
   toggle(true);
   await refresh();
 }

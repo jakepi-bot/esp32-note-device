@@ -141,6 +141,9 @@ void radio_set_pending(uint32_t count) {
   g_window.set_pending(count, now_ms());
 }
 std::atomic<uint16_t> g_conn{kNone};
+// A link that wants pairing: the host queue starts security for it, because the
+// connect callback runs under NimBLE's lock and cannot.
+std::atomic<uint16_t> g_sec_wanted{kNone};
 uint16_t g_pairing_conn = kNone;  // host task only: the connection shown a passkey
 uint8_t g_own_addr_type = 0;
 std::mutex g_name_mutex;
@@ -263,7 +266,18 @@ void advertise() {
   if (rc != 0) ESP_LOGE(TAG, "can't advertise (%d)", rc);
 }
 
-void on_update(ble_npl_event*) { advertise(); }
+void on_update(ble_npl_event*) {
+  advertise();
+  // Security cannot be started from inside the connect callback that saw the
+  // phone: NimBLE is still holding its own lock there and answers "SMP: proc alloc
+  // failed" (bench, 2026-11-24). This runs on the host queue a beat later, when the
+  // lock is free, and is what puts the passkey on the glass.
+  const uint16_t want = g_sec_wanted.exchange(kNone);
+  if (want != kNone) {
+    const int rc = ble_gap_security_initiate(want);
+    if (rc != 0) ESP_LOGW(TAG, "cannot start pairing on this link (%d)", rc);
+  }
+}
 
 void on_drop(ble_npl_event*) {
   const uint16_t conn = g_conn.load();
@@ -393,6 +407,14 @@ int on_gap(ble_gap_event* event, void*) {
       g_note_subscribed = false;
       g_note_mtu = ble_att_mtu(event->connect.conn_handle);
       ESP_LOGI(TAG, "phone connected");
+      // A phone that is not in the bond table has to be asked, and asking starts
+      // with the device: nothing else in the stack initiates pairing on an inbound
+      // link, so an unpaired phone used to encrypt, fail, and be dropped - which is
+      // exactly what Jake's phone saw (2026-11-24). Only inside a pairing window.
+      // No security request on connect. The link is plain by design now (iOS Web
+      // Bluetooth cannot pair) and the note protocol authenticates with the device
+      // key; asking for pairing here is what made every client start an exchange it
+      // could not finish and hang up (2026-11-24).
       post(PhoneSample::Kind::Status);
       return 0;
 
@@ -493,14 +515,21 @@ int on_gap(ble_gap_event* event, void*) {
         post(PhoneSample::Kind::Status);
         return 0;
       }
-      // Without a passkey (Just Works) the keys prove nothing about who paired:
-      // don't keep them.
-      ESP_LOGW(TAG, "%s (%d); disconnecting",
+      // A phone that failed to encrypt inside a pairing window is the one that
+      // wants to pair: start it rather than dropping the link.
+      // A client that tries to encrypt on its own (Android auto-pairs, some stacks
+      // do) is left alone: the protocol's handshake decides whether it may read
+      // anything, and dropping it here only loses a client that was fine.
+      // Nothing here drops the link any more. A client that tried to encrypt and
+      // could not (no keys, no pairing support, a stack that auto-pairs) is exactly
+      // the client the protocol handshake exists for; terminating it is what turned
+      // "cannot pair" into "cannot connect" (2026-11-24). Keys that prove nothing
+      // (Just Works) are not kept, but the link stays.
+      ESP_LOGW(TAG, "%s (%d); keeping the link, the handshake decides",
                closed_too_soon ? "pairing finished after it closed" : "encryption without a paired phone's keys",
                event->enc_change.status);
       if (event->enc_change.status == 0) ble_store_util_delete_peer(&d.peer_id_addr);
       if (pairing_conn) post(PhoneSample::Kind::Failed);
-      ble_gap_terminate(conn, BLE_ERR_AUTH_FAIL);
       return 0;
     }
 
@@ -517,7 +546,8 @@ int on_gap(ble_gap_event* event, void*) {
 
 int on_access(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctxt, void*) {
   if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) return BLE_ATT_ERR_UNLIKELY;
-  if (!trusted(conn)) return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
+  // Same rule as the note service: refusing at the ATT layer starts a pairing the
+  // client cannot finish. The window and the protocol are the gates.
   Line line;
   line.conn = conn;
   uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
@@ -531,10 +561,11 @@ int on_access(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctxt, void*) {
 }
 
 int on_note_access(uint16_t conn, uint16_t, ble_gatt_access_ctxt* ctxt, void*) {
-  // The control characteristic: one command line per write, only from a phone
-  // paired with the passkey (`trusted`), and never longer than a line.
+  // The control characteristic: one command line per write, never longer than a
+  // line. The link is not encrypted on purpose (iOS Web Bluetooth cannot pair), so
+  // this callback must not answer INSUFFICIENT_AUTHEN: the client would start a
+  // pairing it cannot finish and hang up. notes::BleSync::set_auth is the gate.
   if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) return BLE_ATT_ERR_UNLIKELY;
-  if (!trusted(conn)) return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
   NoteLine line;
   uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
   if (len == 0) return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
@@ -712,7 +743,11 @@ bool PhoneLink::begin(const std::string& name) {
   g_chrs[0] = {};
   g_chrs[0].uuid = &g_command_uuid.u;
   g_chrs[0].access_cb = on_access;
-  g_chrs[0].flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC | BLE_GATT_CHR_F_WRITE_AUTHEN;
+  // Plain write for the same reason as the note service: a client that cannot pair
+  // is dropped by the ATT layer before it can be asked for anything, and iOS Web
+  // Bluetooth cannot pair at all. The window is the gate; the note protocol carries
+  // its own challenge/response.
+  g_chrs[0].flags = BLE_GATT_CHR_F_WRITE;
   g_chrs[1] = {};
   g_chrs[1].uuid = &g_reply_uuid.u;
   g_chrs[1].access_cb = on_access;
@@ -734,7 +769,11 @@ bool PhoneLink::begin(const std::string& name) {
   g_note_chrs[0] = {};
   g_note_chrs[0].uuid = &g_note_control_uuid.u;
   g_note_chrs[0].access_cb = on_note_access;
-  g_note_chrs[0].flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC | BLE_GATT_CHR_F_WRITE_AUTHEN;
+  // Plain write, inside the radio window, with the protocol's own challenge/
+  // response on top (notes::BleSync::set_auth). It cannot be WRITE_ENC|WRITE_AUTHEN:
+  // iOS Web Bluetooth cannot pair at all, and the app on Jake's phone was dropped
+  // 40 ms after connecting because of it (2026-11-24).
+  g_note_chrs[0].flags = BLE_GATT_CHR_F_WRITE;
   g_note_chrs[0].val_handle = &g_note_control_handle;
   g_note_chrs[1] = {};
   g_note_chrs[1].uuid = &g_note_data_uuid.u;

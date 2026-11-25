@@ -162,6 +162,17 @@ bool Runtime::begin(const Io& io) {
   if (io_.ble && io_.ble->available()) {
     ble_source_ = std::make_unique<CardBleSource>(store_, [this] { return sd_ready_; });
     ble_sync_.begin(ble_source_.get());
+    // The control link carries a challenge/response over the device key instead of
+    // relying on BLE pairing: an iPhone's Web Bluetooth cannot pair, so a phone
+    // would connect and be dropped before it ever saw the gadget (2026-11-24).
+    ble_sync_.set_auth([this](const std::string& nonce, const std::string& mac) {
+      const std::string want = sign("hg-ble|" + nonce);
+      if (want.empty() || want.size() != mac.size()) return false;
+      // Constant time: the comparison is a secret and a phone may retry at will.
+      unsigned diff = 0;
+      for (size_t i = 0; i < want.size(); ++i) diff |= static_cast<unsigned>(want[i] ^ mac[i]);
+      return diff == 0;
+    });
   }
   writer_ready_ = writer_.begin();
   writer_.bind(&capture_);
@@ -1088,6 +1099,9 @@ void Runtime::step_ble(uint32_t) {
       // The note stays pending/: the phone resumes from the offset it
       // acknowledged, so a dropped link costs the bytes in flight, nothing more.
       ble_sync_.disconnected();
+      // A new link proves itself again: the handshake is per connection, so a
+      // second phone cannot inherit the first one's success.
+      ble_sync_.reset_auth();
       refresh_counts();
     }
     return;

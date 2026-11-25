@@ -87,6 +87,20 @@ class BleSync {
 
   // `source` must outlive the object.
   void begin(BleSource* source) { source_ = source; }
+
+  // Authentication for the control link. The notes used to rely on an encrypted,
+  // authenticated BLE link - which iOS Web Bluetooth cannot set up (no pairing from
+  // a web page), so the phone connected, tried to encrypt, was refused and hung up
+  // 40 ms later (2026-11-24). The link is now plain inside the radio window and the
+  // protocol carries the proof: `challenge`, then `auth <HMAC-SHA256(device key,
+  // "hg-ble|" + nonce) base64>`, and nothing else is answered until it holds.
+  using Auth = std::function<bool(const std::string& nonce, const std::string& mac_b64)>;
+  void set_auth(Auth auth) { auth_ = std::move(auth); }
+  void reset_auth() {
+    authed_ = false;
+    nonce_.clear();
+  }
+  bool authed() const { return authed_; }
   // The link's negotiated ATT MTU (23 until the phone asks for more).
   void set_mtu(uint16_t mtu);
   uint16_t mtu() const { return mtu_; }
@@ -129,6 +143,9 @@ class BleSync {
 
   BleSource* source_ = nullptr;
   uint16_t mtu_ = 23;
+  Auth auth_;              // set by the owner: it holds the device key
+  std::string nonce_;      // the challenge this link was given, empty once used
+  bool authed_ = false;
 
   // Packets waiting for the link, and how many of them it has taken.
   std::vector<std::vector<uint8_t>> queue_;

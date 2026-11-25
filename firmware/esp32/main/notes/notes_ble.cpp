@@ -7,6 +7,10 @@
 #include <cstdio>
 #include <cstring>
 
+#if defined(ESP_PLATFORM)
+#include "esp_random.h"
+#endif
+
 namespace hgp::notes {
 namespace {
 
@@ -232,10 +236,49 @@ void BleSync::command(std::string_view raw, uint32_t now_ms) {
   const std::string cmd = line.substr(0, sp);
   const std::string rest = sp == std::string::npos ? std::string() : trim(line.substr(sp + 1));
 
+  // Everything but the challenge and the protocol probe needs the handshake.
+  if (cmd == "challenge") {
+    char raw[16];
+    // The port hands the app a TRNG (esp_fill_random on the device); on the host
+    // this path is only reached by tests, which do not need unpredictability.
+#if defined(ESP_PLATFORM)
+    for (int i = 0; i < 16; i += 4) {
+      const uint32_t word = esp_random();
+      std::memcpy(raw + i, &word, 4);
+    }
+#else
+    for (int i = 0; i < 16; ++i) raw[i] = static_cast<char>(i * 37 + 11);
+#endif
+    nonce_.clear();
+    char hex[3];
+    for (int i = 0; i < 16; ++i) {
+      std::snprintf(hex, sizeof hex, "%02x", static_cast<unsigned char>(raw[i]));
+      nonce_ += hex;
+    }
+    authed_ = false;
+    send_text(kTagText, "nonce " + nonce_);
+    return;
+  }
+  if (cmd == "auth") {
+    if (auth_ && nonce_.size() == 32 && auth_(nonce_, rest)) {
+      authed_ = true;
+      nonce_.clear();  // one challenge, one answer
+      send_text(kTagText, "ok auth");
+    } else {
+      authed_ = false;
+      nonce_.clear();
+      send_text(kTagError, "auth failed");
+    }
+    return;
+  }
   if (cmd == "hello" || cmd == "info") {
     char answer[64];
     std::snprintf(answer, sizeof(answer), "ok ble-note-sync/1 mtu %u", static_cast<unsigned>(mtu_));
     send_text(kTagText, answer);
+    return;
+  }
+  if (!authed_) {
+    send_text(kTagError, "auth required: challenge, then auth <hmac>");
     return;
   }
   if (cmd == "list") {

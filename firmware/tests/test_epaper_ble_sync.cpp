@@ -175,6 +175,23 @@ class Phone {
   std::string partial_[256];
 };
 
+// The control link authenticates before it answers anything. The key itself is the
+// runtime's (it holds the device key); here the verifier accepts and the handshake
+// is walked for real, so the tests exercise the same two commands a phone sends.
+void authenticate(BleSync& sync, uint32_t now_ms = 0) {
+  // A phone negotiates the MTU before it writes anything, and the device refuses a
+  // command below kMinMtu before it looks at what the command is.
+  if (sync.mtu() < BleSync::kMinMtu) sync.set_mtu(185);
+  sync.set_auth([](const std::string& nonce, const std::string& mac) {
+    return nonce.size() == 32 && mac == "test-mac";
+  });
+  sync.command("challenge", now_ms);
+  sync.command("auth test-mac", now_ms);
+  // Swallow the handshake's two answers, so a test's line indices are its own
+  // commands' and not "nonce ..." and "ok auth".
+  sync.tick(now_ms, [](const uint8_t*, size_t) { return true; });
+}
+
 void drain(BleSync& sync, Phone& phone, uint32_t now_ms) {
   // The device reads the link's MTU every tick (NotesModeImpl::step_ble), and
   // one tick sends what was queued and queues the next window. The app loop
@@ -228,6 +245,7 @@ TEST("list names every pending note with what the header will repeat") {
                              {"dev-20261120T081600-0002", pattern(64), 2, "def456", "2026-11-20T08:16:00Z"}});
   BleSync sync;
   sync.begin(&card);
+  authenticate(sync);
   sync.set_mtu(185);  // what a phone negotiates before it writes a command
   Phone phone;
   sync.command("list", 0);
@@ -248,6 +266,7 @@ TEST("a long list line is split across packets and still arrives whole") {
   }
   BleSync sync;
   sync.begin(&card);
+  authenticate(sync);
   sync.set_mtu(185);  // what a phone negotiates before it writes a command
   sync.set_mtu(64);
   Phone phone(64);
@@ -262,6 +281,7 @@ TEST("get transfers the note byte for byte, at the link's MTU") {
   FakeCard card = card_with({{"dev-20261120T081504-0001", audio, 4, "abc123", "2026-11-20T08:15:04Z"}});
   BleSync sync;
   sync.begin(&card);
+  authenticate(sync);
   sync.set_mtu(185);  // what a phone negotiates before it writes a command
   sync.set_mtu(185);
   Phone phone(185);
@@ -282,6 +302,7 @@ TEST("the transfer writes nothing: the note is still pending afterwards") {
   FakeCard card = card_with({{"n1", pattern(500), 1, "d", "2026-11-20T08:15:04Z"}});
   BleSync sync;
   sync.begin(&card);
+  authenticate(sync);
   sync.set_mtu(185);  // what a phone negotiates before it writes a command
   Phone phone;
   uint32_t now = 0;
@@ -296,6 +317,7 @@ TEST("a window the phone missed is resent from what it really has") {
   FakeCard card = card_with({{"n1", audio, 2, "d", "2026-11-20T08:15:04Z"}});
   BleSync sync;
   sync.begin(&card);
+  authenticate(sync);
   sync.set_mtu(185);  // what a phone negotiates before it writes a command
   Phone phone;
   uint32_t now = 0;
@@ -324,6 +346,7 @@ TEST("a dropped link resumes at the acknowledged offset") {
   FakeCard card = card_with({{"n1", audio, 3, "d", "2026-11-20T08:15:04Z"}});
   BleSync sync;
   sync.begin(&card);
+  authenticate(sync);
   sync.set_mtu(185);  // what a phone negotiates before it writes a command
   Phone phone;
   uint32_t now = 0;
@@ -361,6 +384,7 @@ TEST("an empty note is refused, not transferred") {
   FakeCard card = card_with({{"n1", {}, 1, "d", "2026-11-20T08:15:04Z"}});
   BleSync sync;
   sync.begin(&card);
+  authenticate(sync);
   sync.set_mtu(185);  // what a phone negotiates before it writes a command
   Phone phone;
   uint32_t now = 0;
@@ -373,6 +397,7 @@ TEST("an unknown id, a bad offset and no card each get their own error") {
   FakeCard card = card_with({{"n1", pattern(100), 1, "d", "2026-11-20T08:15:04Z"}});
   BleSync sync;
   sync.begin(&card);
+  authenticate(sync);
   sync.set_mtu(185);  // what a phone negotiates before it writes a command
   {
     Phone phone;
@@ -396,10 +421,48 @@ TEST("an unknown id, a bad offset and no card each get their own error") {
   }
 }
 
+TEST("the control link answers nothing until the device key is proved") {
+  // The link is plain (iOS Web Bluetooth cannot pair), so the protocol is the gate:
+  // a phone that cannot prove it holds the device key gets no note list at all.
+  FakeCard card = card_with({{"n1", pattern(3000), 2, "d", "2026-11-20T08:15:04Z"}});
+  BleSync sync;
+  sync.begin(&card);
+  sync.set_mtu(185);
+  Phone phone;
+  uint32_t now = 0;
+
+  sync.command("list", now);
+  drain(sync, phone, now);
+  CHECK(phone.saw('E', "auth required"));
+
+  // A wrong answer does not open it, and the challenge is spent either way.
+  sync.set_auth([](const std::string&, const std::string&) { return false; });
+  sync.command("challenge", now);
+  sync.command("auth not-the-key", now);
+  drain(sync, phone, now);
+  CHECK(phone.saw('E', "auth failed"));
+  sync.command("list", now);
+  drain(sync, phone, now);
+  CHECK(!phone.saw('L', "1"));
+
+  // The right one does.
+  sync.set_auth([](const std::string& nonce, const std::string& mac) {
+    return nonce.size() == 32 && mac == "test-mac";
+  });
+  sync.command("challenge", now);
+  sync.command("auth test-mac", now);
+  drain(sync, phone, now);
+  CHECK(phone.saw('L', "ok auth"));
+  sync.command("list", now);
+  drain(sync, phone, now);
+  CHECK(phone.saw('L', "END"));
+}
+
 TEST("done moves the note out of pending and answers") {
   FakeCard card = card_with({{"n1", pattern(3000), 2, "d", "2026-11-20T08:15:04Z"}});
   BleSync sync;
   sync.begin(&card);
+  authenticate(sync);
   sync.set_mtu(185);  // what a phone negotiates before it writes a command
   Phone phone;
   uint32_t now = 0;
@@ -424,6 +487,7 @@ TEST("a phone that stops acknowledging ends the transfer, not the note") {
   FakeCard card = card_with({{"n1", pattern(9000), 5, "d", "2026-11-20T08:15:04Z"}});
   BleSync sync;
   sync.begin(&card);
+  authenticate(sync);
   sync.set_mtu(185);  // what a phone negotiates before it writes a command
   Phone phone;
   uint32_t now = 0;
@@ -442,6 +506,7 @@ TEST("a link that cannot take a packet stalls without losing it") {
   FakeCard card = card_with({{"n1", pattern(1000), 1, "d", "2026-11-20T08:15:04Z"}});
   BleSync sync;
   sync.begin(&card);
+  authenticate(sync);
   sync.set_mtu(185);  // what a phone negotiates before it writes a command
   Phone phone;
   phone.accept = false;
@@ -465,6 +530,7 @@ TEST("a small MTU is refused before any bytes move") {
   FakeCard card = card_with({{"n1", pattern(100), 1, "d", "2026-11-20T08:15:04Z"}});
   BleSync sync;
   sync.begin(&card);
+  authenticate(sync);
   sync.set_mtu(185);  // what a phone negotiates before it writes a command
   sync.set_mtu(23);  // the ATT default: a command would not fit a write
   Phone phone(23);
@@ -479,6 +545,7 @@ TEST("get next is the oldest pending note, and an empty queue says so") {
                              {"newer", pattern(200), 1, "d", "2026-11-20T08:16:04Z"}});
   BleSync sync;
   sync.begin(&card);
+  authenticate(sync);
   sync.set_mtu(185);  // what a phone negotiates before it writes a command
   Phone phone;
   uint32_t now = 0;
@@ -508,6 +575,7 @@ TEST("a second get replaces the transfer in flight") {
                              {"b", second_audio, 1, "e", "2026-11-20T08:16:04Z"}});
   BleSync sync;
   sync.begin(&card);
+  authenticate(sync);
   sync.set_mtu(185);  // what a phone negotiates before it writes a command
   Phone phone;
   uint32_t now = 0;
@@ -530,6 +598,7 @@ TEST("unknown commands get the usage line, not silence") {
   FakeCard card;
   BleSync sync;
   sync.begin(&card);
+  authenticate(sync);
   sync.set_mtu(185);  // what a phone negotiates before it writes a command
   Phone phone;
   sync.command("frobnicate", 0);

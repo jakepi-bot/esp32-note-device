@@ -383,7 +383,12 @@ void BleSync::tick(uint32_t now_ms, const Emit& emit) {
 
   while (in_flight_ < kWindow && offset_ < total_) {
     uint8_t block[kMaxBlock];
-    const uint32_t want = block_payload();
+    // Never ask for more than the note claims: the file on the card can be
+    // longer than `note.bytes` (the uploader and the sync header disagree by a
+    // few hundred bytes on a real note), and a read that overshoots makes
+    // offset_ pass total_, so the phone's next ack is "past the end of the
+    // note" and the transfer aborts before it starts - measured 2026-11-26.
+    const uint32_t want = std::min<uint32_t>(block_payload(), total_ - offset_);
     const size_t got = source_->read(block, want);
     if (got == 0) {
       abort_transfer("short read from the card", now_ms);

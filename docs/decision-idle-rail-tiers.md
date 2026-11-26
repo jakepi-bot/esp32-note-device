@@ -21,6 +21,6 @@
 - **Ghosting observations**: If any windowed-full attempt leaves residue at band edges, revert to whole-panel full.
 - **Idle-current measurement**: If rail-up idle current > 12 mA, cut N to 30 s; if < 5 mA, extend to 120 s.
 - **Telemetry**: If >95% of wakes occur >5 min after last input, the hot window is not earning its keep → revisit to 30 s.
-- **Battery target**: If daily rail-up cost >5% of battery capacity, cut N to 30 s. The capacity is still unrecorded, so this rule cannot be applied yet; see [note taker battery cell capacity](hardware-validation.md#note-taker-battery-cell-capacity).
+- **Battery target**: If daily rail-up cost >5% of battery capacity, cut N to 30 s. The cell is a 320 mAh EEMB LP402535 ([capacity](hardware-validation.md#note-taker-battery-cell-capacity)), so 5% is 16 mAh per day, about 137 rail-ups at the 0.1167 mAh cost above. The number of rail-ups per day is not recorded, so the rule still cannot be settled from measurement.
 
 **Bottom line**: N = 60 s, single constant `kIdleEnterMs`, forced full is correct and stays whole-panel. Measure before adding complexity.

@@ -13,7 +13,7 @@ Firmware builds and simulator tests check software behavior. A physical verifica
 | M5Stack Cardputer ADV, K132-Adv / Stamp-S3A | ST7789 240x135; G0 and TCA8418 keyboard; local ASCII editor | ES8311 microphone and speaker, BCLK-derived clock | Calibrated battery voltage and screen timeout; mechanical power switch; no charge-state or percentage | Experimental; [port status](#cardputer-adv-port-status); full physical checklist pending |
 | ESP32-S3-DevKitC-1 N8R8 breadboard | Wired ST7789, TALK and CANCEL buttons | Wired I2S microphone; optional MAX98357A speaker | External power | CI build; physical report not recorded |
 | Waveshare ESP32-S3-LCD-1.54, SKUs 33866/33867, and Touch-LCD-1.54, SKUs 33868/33869 | ST7789 240×240; BOOT, PLUS and PWR (screen on/off, hold to power off); CST816 touch on the touch SKUs | ES7210 microphones and ES8311 speaker | Calibrated voltage, charging signal, battery latch and screen timeout; idle CPU at 80 MHz and light sleep while dozing on battery; USB bypasses shutdown | CI build; physical report not recorded |
-| Waveshare ESP32-S3-ePaper-1.54 (V2) | 200×200 SSD1681-class e-paper (no backlight, so the power key's screen toggle and the screen timeout do not apply); BOOT and PWR (voice-note key, hold to power off) | One ES8311 for the microphone and the speaker | GPIO 6 panel rail and GPIO 42 audio rail (both active low); GPIO 17 battery latch; battery voltage on GPIO 4 (divider of two, read as 4172 mV with USB power); no charging signal read; light sleep while dozing on battery | Experimental; firmware builds and boots on the board: boot log clean, the first full refresh completes without a BUSY timeout, the Wi-Fi setup screen renders legibly (camera), the NVS boot counter persists across resets, and the SD slot detects the inserted card over 1-bit SDIO (that card has no FAT32 volume); microphone, speaker and buttons not yet exercised; the cell's capacity is not recorded, see [note taker battery cell](#note-taker-battery-cell-capacity); full checklist not completed |
+| Waveshare ESP32-S3-ePaper-1.54 (V2) | 200×200 SSD1681-class e-paper (no backlight, so the power key's screen toggle and the screen timeout do not apply); BOOT and PWR (voice-note key, hold to power off) | One ES8311 for the microphone and the speaker | GPIO 6 panel rail and GPIO 42 audio rail (both active low); GPIO 17 battery latch; battery voltage on GPIO 4 (divider of two, read as 4172 mV with USB power); no charging signal read; light sleep while dozing on battery | Experimental; firmware builds and boots on the board: boot log clean, the first full refresh completes without a BUSY timeout, the Wi-Fi setup screen renders legibly (camera), the NVS boot counter persists across resets, and the SD slot detects the inserted card over 1-bit SDIO (that card has no FAT32 volume); microphone, speaker and buttons not yet exercised; a 320 mAh EEMB LP402535 cell, see [note taker battery cell](#note-taker-battery-cell-capacity); full checklist not completed |
 | Waveshare ESP32-S3-Touch-LCD-1.83, SKUs 32790/32791 | ST7789P 240×284; CST816D touch, BOOT and PWR (short press from the AXP2101 turns the screen off and on) | ES7210 microphones (MIC1 and MIC2) and ES8311 speaker; echo reference unused | AXP2101 voltage, charging and external power; ALDO1 at 3.3 V for the microphone; no measured battery curve; IMU, RTC and TF card unused | Experimental; firmware builds; not run on a board; full checklist not completed |
 | Waveshare ESP32-S3-Touch-AMOLED-1.32 | CO5300 466×466; CST820 touch, BOOT, and PWR on GPIO 17 (short press turns the screen off and on, a hold releases the latch) | One ES8311 for the microphone and the speaker | GPIO 18 held high keeps the battery latch on; no battery voltage pin in the sources used here, so no percentage and no measured curve | Experimental; firmware builds; not run on a board; full checklist not completed |
 | Waveshare ESP32-S3-Touch-AMOLED-1.43C | CO5300 466×466; CST820 touch and BOOT. Not the older 1.43 board | ES7210 microphones (MIC1 and MIC2) and ES8311 speaker; MIC3 playback reference unused | GPIO 18 held high enables the codec LDO; GPIO 4 reads the cell through a divider of two; GPIO 7 is low while charging; no latch and no measured curve | Experimental; firmware builds; not run on a board; full checklist not completed |
@@ -89,34 +89,24 @@ The port stays experimental. This report covers a bounded feature smoke check, n
 
 ## Note taker battery cell capacity
 
-The note taker is the Waveshare ESP32-S3-ePaper-1.54 V2 (`waveshare-epaper-154`) in its printed case, with a single-cell Li-ion cell on the board's MX1.25 2-pin header. **The cell's capacity has never been recorded.** This section is where that number goes. It is written to be filled in from a label, not inferred from the device's behaviour.
+The note taker is the Waveshare ESP32-S3-ePaper-1.54 V2 (`waveshare-epaper-154`) in its printed case, with a single-cell Li-po battery on the board's MX1.25 2-pin header. This section records that cell. Capacity was identified on 2026-11-26 from the purchase listing, not from the cell's own printed label, and the label is still owed a read.
 
-- **Capacity:** not recorded. No label on this cell has been read.
-- **Nominal voltage, chemistry, part, SKU:** not recorded. Only the board side is known: one single-cell Li-ion at 3.7 V nominal on an MX1.25 2-pin header, charged by an ETA6098 with ISET ≈ 200 mA ([board notes §9](waveshare-epaper-154-v2.md#9-power-and-charging)). None of that states what the cell is.
-- **How the value was obtained:** nothing was obtained. Searched on 2026-11-26: this repository's docs and source comments, the Obsidian vault, the iCloud and Gmail purchase records, and the bench camera. No order confirmation for a cell exists in either mailbox, so there is no order record to quote instead.
-- **Why it is still missing:** the cell went in when the device was built and was never noted down, and it sits inside the closed case. At the time of writing the bench camera on `/dev/video0` returned a black frame (the room was dark) and no `/dev/ttyACM*` port enumerated, so the cell was neither visible nor reachable through the board.
-- **Date / read by:** recorded as missing on 2026-11-26 by the Hermes agent (default profile). The read itself is still owed by the owner.
+- **Capacity:** 320 mAh nominal.
+- **Nominal voltage:** 3.7 V.
+- **Chemistry:** lithium-polymer (Li-po), one cell.
+- **Part / SKU:** EEMB LP402535, where `402535` is the bare cell size in tenths of a millimetre (4.0 × 25 × 35 mm). Bought as Amazon ASIN [`B08215N9R8`](https://www.amazon.com/dp/B08215N9R8) (also listed as EEMB LP402535 on the manufacturer's product page), 3.7 V 320 mAh with a 1.25 mm 2-pin connector that matches the board's MX1.25 header. The board charges it through an ETA6098 with ISET ≈ 200 mA ([board notes §9](waveshare-epaper-154-v2.md#9-power-and-charging)).
+- **C-rate, max discharge:** not established. The product listing states the standard CC/CV charge with a 6 mA CV cut-off and gives no discharge rate, and no printed marking has been read off the cell itself.
+- **How the value was obtained:** the owner identified the cell fitted in the case against its purchase listing on 2026-11-26. This is an order-listing identification, **not a label read**: the cell sits inside the closed case, and its printed label has not been read by anyone.
+- **Date / recorded by:** 2026-11-26, Jake (owner identification of the installed cell); recorded here by the Hermes agent, default profile.
 
-**Two numbers that are not this cell's capacity.**
+**Still owed, and what to do when the case is next open.** Read the printed label and compare it to the four fields above. If the label disagrees, correct this section to the label: a purchase listing identifies the part that was ordered, not necessarily the one that was soldered in. Add the C-rate and max discharge if the label prints them, and a photograph of the label.
 
-- `SKU 33228 3.7V 1000mA MX1.25 2P 50mm` is the label of a different board, the Touch-LCD-1.54 (SKU 33869), in the [LCD-1.54 report](#waveshare-lcd-154-partial-physical-report). It says nothing about the note taker's cell, and its `1000mA` is a current marking, not a capacity. Any figure carried across from it is wrong.
-- "about 250 mAh" is an inference from roughly 6 hours of use at a 40 mA USB-side idle current. Neither input was measured on the cell, so it stays an inference and is not a capacity.
+**What 320 mAh does to the budget.** 320 mAh over 24 hours allows an average draw of 13.3 mA. Metered on 2026-11-26 with an inline USB meter, the device draws 37 mA awake and 6 mA idle with the panel rail down and the radio off. At 6 mA the idle state alone would last about 53 hours, so 24 hours survives with margin as long as the awake fraction stays small; the awake figure is the one that has to come down. The [idle rail-up decision](decision-idle-rail-tiers.md) can now evaluate its 5% rule: 5% of 320 mAh is 16 mAh per day, or about 137 rail-ups at 0.1167 mAh each.
 
-**The exact next step.** Open the case, read the printed label, and replace the fields above with these, in the same shape:
+**Two earlier figures this supersedes.**
 
-```text
-Capacity:              NNN mAh
-Nominal voltage:       3.7 V
-Chemistry:             Li-ion or Li-po, as printed
-Part or SKU:           as printed
-C-rate, max discharge: as printed, or "not printed"
-How obtained:          label read, photograph <file> attached to the card
-Date / read by:        YYYY-MM-DD, Jake
-```
-
-Then delete the two bullets that say "not recorded" and the "Two numbers" paragraph, and keep the filled fields.
-
-Those fields are what the [idle rail-up decision](decision-idle-rail-tiers.md) needs. Its rule, cut N to 30 s when the daily rail-up cost is more than 5% of battery capacity, and the 24-hour idle target both stop at "capacity unknown" until the read happens.
+- `SKU 33228 3.7V 1000mA MX1.25 2P 50mm` is the label of a different unit, the Touch-LCD-1.54 (SKU 33869), in the [LCD-1.54 report](#waveshare-lcd-154-partial-physical-report). Its `1000mA` is a current marking, not a capacity, and nothing in that label applies to the note taker.
+- "about 250 mAh", inferred from roughly 6 hours of use at a 40 mA USB-side current, is retired. 320 mAh at 40 mA would be 8 hours, and the 6-hour figure was never a measured full discharge, so it was never a capacity.
 
 ## CrowPanel Advanced P4 partial physical test record
 

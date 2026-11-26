@@ -375,8 +375,8 @@ void NotesUi::render(notesui::Refresh refresh) {
 // Idle: nobody has touched the device for a while, on the cell, with nothing
 // running. The panel holds its picture with the rail down, so the screen costs
 // nothing to keep - and every render is refused until a key brings it back, which
-// also means the 10 s facts poll and the band's clock cannot spend the battery
-// refreshing a page no one is reading (Jake, 2026-11-24: 6 hours idle).
+// also means the 10 s facts poll cannot spend the battery refreshing a page no
+// one is reading (Jake, 2026-11-24: 6 hours idle).
 void NotesUi::idle(bool on) {
   if (!begun_) return;
   if (on) {

@@ -1,0 +1,1121 @@
+Start testing: Nov 26 07:00 CST
+----------------------------------------------------------
+1/9 Testing: hg_core_tests
+1/9 Test: hg_core_tests
+Command: "/home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host/hg_core_tests"
+Directory: /home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host
+"hg_core_tests" start time: Nov 26 07:00 CST
+Output:
+----------------------------------------------------------
+[ ok ] json: round trip preserves structure and escapes
+[ ok ] json: unicode escapes decode to utf-8, including surrogate pairs
+[ ok ] json: malformed input and excessive nesting are rejected
+[ ok ] json: missing keys and wrong types fall back safely
+[ ok ] crypto: sha256 matches FIPS vectors
+[ ok ] crypto: hmac-sha256 matches RFC 4231 vectors
+[ ok ] crypto: base64 round trips every length
+[ ok ] crypto: base64 into a buffer stops at its end
+[ ok ] protocol: identity and auth mac match the host implementation
+[ ok ] protocol: binary frame header round trips
+[ ok ] canvas: word wrap keeps words whole and splits overlong ones
+[ ok ] canvas: drawing respects the row clip
+[ ok ] canvas: a band canvas writes only the rows its framebuffer holds
+[ ok ] vad: speech followed by silence ends the utterance
+[ ok ] vad: a whistle above the voice band is neither speech nor silence broken
+[ ok ] vad: blocks that are not whole milliseconds add up to the time they hold
+[ ok ] vad: silence alone gives up
+[ ok ] app: connects after boot and sends a hello describing the device
+[ ok ] app: hello announces the speaker's playback buffer when the port knows it
+[ ok ] app: first contact enrolls the key, later contact proves it with an HMAC
+[ ok ] app: the device key persists across restarts
+[ ok ] app: unpaired devices show the pairing code until approved
+[ ok ] app: a device a route refuses says so until a new connection or approval
+[ ok ] app: a refusal for a route drops a pairing code shown before
+[ ok ] app: push-to-talk streams audio and shows the reply
+[ ok ] ring: the listening arc grows with the seconds and turns amber in the last 5 s
+[ ok ] app: a turn lasts from TALK until the reply has finished playing
+[ ok ] app: a reply that arrives on its own is a turn while it plays, and a lost connection ends one
+[ ok ] app: microphone frames the link refused are counted when the recording ends
+[ ok ] app: microphone audio goes in 40 ms frames whatever size the port delivers
+[ ok ] app: a recording whose end can't be sent says so instead of waiting for a reply
+[ ok ] app: tap mode hears speech at the board's microphone level
+[ ok ] app: a held recording with no speech in it is not sent, on a board that asks for it
+[ ok ] app: a short tap is discarded instead of sent
+[ ok ] app: reply audio plays through the speaker and barge-in stops it
+[ ok ] app: a speaker decoder adds its format to hello and decodes compressed reply audio
+[ ok ] app: agent actions run on the device and report results
+[ ok ] app: lost connections retry with backoff
+[ ok ] app: a silent server is detected by the heartbeat timeout
+[ ok ] app: traffic_at counts every frame from Hermes but its heartbeat ping
+[ ok ] app: console reconfigures the server and reconnects
+[ ok ] app: diag reports the core's state plus what the port adds
+[ ok ] app: diag crash clear erases the saved core dump, and only when asked
+[ ok ] app: the hub's diag request gets the console's report and the recent log
+[ ok ] app: log sets a tag's level through the port and refuses unknown levels
+[ ok ] ota: an authorized image streams in, is checked, and the device restarts into it
+[ ok ] ota: the device refuses images it can't trust or hold
+[ ok ] ota: a missing chunk, a stall or a dropped connection abandons the update
+[ ok ] ota: a newly installed firmware is kept once it reaches Hermes
+[ ok ] app: sensor readings are reported, rate limited
+[ ok ] app: the mascot fills idle, listening and thinking screens
+[ ok ] app: text, then speech: the face talks over the reply's latest lines, and the text shows when it ends
+[ ok ] app: speech, then text: the face talks from the start, and the text shows when the speech ends
+[ ok ] app: a reply with no speech is text from its first words
+[ ok ] app: a tap or a scroll during speech shows the whole text, and the speech goes on
+[ ok ] app: a question or a short card over a reply keeps its tap
+[ ok ] app: a long reply spoken under the caption gives its first page the whole reading time after the speech
+[ ok ] app: where the face and two caption lines don't fit, a spoken reply shows its text as before
+[ ok ] app: a finished reply stays readable, then the mascot returns; UP brings it back
+[ ok ] app: once Hermes starts the turn, Thinking waits with the screen lit through a long task
+[ ok ] app: a reply the screen went dark on comes back with the wake until an input meets it
+[ ok ] app: an input over the mascot leaves the reply unread
+[ ok ] app: a press over the speaking mascot leaves the reply unread
+[ ok ] app: PWR over a card leaves the reply under it unread
+[ ok ] app: hero animation redraws only a slice of the screen
+[ ok ] app: holding CANCEL starts a new session; a short press still cancels
+[ ok ] app: a new session discards a recording in progress
+[ ok ] app: rendering is deterministic for the same model
+[ ok ] app: a question from Hermes shows the mascot with TALK/CANCEL answers
+[ ok ] app: CANCEL answers no and holding it does not start a new session
+[ ok ] app: a question waits for a recording, and can be withdrawn or expire
+[ ok ] app: connection, pairing and setup screens show the mascot
+[ ok ] app: short cards sit under the mascot, long ones use the text layout
+[ ok ] app: long replies page themselves; UP/DOWN pauses the paging
+[ ok ] app: on a round panel everything stays inside the circle
+[ ok ] touch: hold to talk, lift to send
+[ ok ] touch: with touch_wake off, a dark screen ignores the touchscreen until a key lights it
+[ ok ] touch: touch_wake stays on without a key to wake the screen, and takes only on or off
+[ ok ] touch: the Touch wakes screen item follows Screen timeout on a touchscreen with a wake key, and toggles
+[ ok ] touch: the Touch wakes screen item is never offered without a wake key or a touchscreen
+[ ok ] touch: with touch_talk off, holds and taps on the screen never record in hold mode; BOOT does
+[ ok ] touch: with touch_talk off in tap mode, a screen tap neither starts nor sends a recording
+[ ok ] touch: with touch_talk off, the screen still answers questions, works settings and stops an alarm
+[ ok ] touch: touch_talk takes only on or off, survives a restart, and stays on without a TALK key
+[ ok ] touch: the Touch to talk item follows Talk mode on a touchscreen with a TALK key, and toggles
+[ ok ] touch: the Touch to talk item is never offered without a TALK key or a touchscreen
+[ ok ] touch: swipe down while holding discards the recording
+[ ok ] touch: tap answers yes, swipe answers no, sideways drags do nothing
+[ ok ] touch: swipes can be turned off; board settings go through the console
+[ ok ] settings: physical chord opens locally and saves volume, brightness and talk mode
+[ ok ] settings: hardware checks are local and prompts release the microphone
+[ ok ] settings: title hold and a drag on the list work without starting a recording
+[ ok ] settings: round 360 target holds without recording and leaves TALK outside it
+[ ok ] settings: round 466 target holds without recording and leaves TALK outside it
+[ ok ] settings: round header redraws its return label and restores settings label
+[ ok ] settings: round target is drawn only while the hold works
+[ ok ] settings: rectangular boards keep the full-width title strip and their header
+[ ok ] power: idle screen dims, sleeps and consumes the wake input without recording
+[ ok ] power: the power key turns the screen off and back on, without a screen timeout
+[ ok ] power: other input wakes a screen the power key turned off, and only wakes it
+[ ok ] power: a prompt turns a screen the power key turned off back on
+[ ok ] power: a dark screen stays dark while the connection drops and comes back
+[ ok ] power: a lit screen stays lit while reconnecting, as before
+[ ok ] power: the power key brings a dimmed screen back to full brightness
+[ ok ] doze: a dark, idle screen on battery dozes; any input ends it before drawing
+[ ok ] doze: a resting bistable panel lets the chip sleep with no backlight and no timeout
+[ ok ] doze: external power never dozes, and plugging in ends a doze within 100 ms
+[ ok ] doze: an unknown power source counts as plugged in
+[ ok ] doze: a prompt or a lost connection ends it; Screen timeout dozes too
+[ ok ] doze: without Wi-Fi it keeps dozing between join attempts; reconnecting to Hermes is awake
+[ ok ] doze: boards without a power reading never doze
+[ ok ] face down: off by default; a motion board lying face down stays lit
+[ ok ] face down: set face_down_sleep takes on or off only, and the choice survives a restart
+[ ok ] face down: the screen goes dark, listening is cancelled and Hermes is told; turned over it lights
+[ ok ] face down: a reply being spoken goes quiet, the turn goes on, and its text waits for the turn-over
+[ ok ] face down: speech that arrives face down plays nothing, and its text waits for the turn-over
+[ ok ] face down: nothing lights the screen - a press, a question, brightness and volume changes
+[ ok ] face down: a ringing alarm goes quiet; a timer that ends face down rings with a dark screen
+[ ok ] face down: a sensor that stops reporting for two seconds lights the screen
+[ ok ] face down: turning the setting off while face down lights the screen on the next tick
+[ ok ] face down: boards without a motion sensor or without a backlight never offer it
+[ ok ] face down: the settings item follows Screen timeout, shows Off and toggles
+[ ok ] power: an idle settings menu sleeps on every view; the wake input restores it where it was
+[ ok ] power: failed readings replace stale data and shutdown requires a second local selection
+[ ok ] battery alert: each level lights the dark screen once per discharge, and a press closes it and acts
+[ ok ] battery alert: never on USB, and only charging clear of a level rearms it
+[ ok ] battery alert: waits for a quiet screen and gives way to a turn or a question
+[ ok ] battery alert: the power key closes it and darkens the screen as usual
+[ ok ] battery alert: on a touchscreen a touch closes it and acts on the screen underneath
+[ ok ] battery alert: a touch that wakes a dark screen is only a wake, as before
+[ ok ] battery alert: beeps by default, once with each alert, and battery_alert_sound off keeps it silent
+[ ok ] tones: each note lasts its time plus its gap, and starts and ends silent
+[ ok ] battery alert: the indicator turns red at 15%, or at the highest alert level when higher
+[ ok ] charging notice: PWR that closes it leaves the reply it covered unread
+[ ok ] charging notice: plugging in lights the dark screen with the level, which then times out as usual
+[ ok ] charging notice: replaces the low battery alert, a press closes it and acts, and no timeout darkens it back
+[ ok ] charging notice: off leaves the screen dark, and the settings item toggles it
+[ ok ] charging notice: silent by default; charging_sound on chirps once on plugging in
+[ ok ] full battery: once per charge, when charging ends or the gauge reaches 100%, with a chime
+[ ok ] full battery: on the StopWatch a charger pausing below a full cell is not the end of the charge
+[ ok ] full battery: the screen is on by default and the chime off, so a charge ending at night is silent
+[ ok ] battery alert: on a voltage estimate, a charger's high reading rearms nothing until the battery reads clear
+[ ok ] charging notice: a driver that reports only charging shows no plug-in when a charge stops and resumes
+[ ok ] full battery: a failed reading keeps the charge, and the chime alone waits for a free speaker
+[ ok ] full battery: the screen and the chime are separate settings, and a busy screen waits
+[ ok ] full battery: a charger still starting up, or flickering off for a reading, is no full battery
+[ ok ] power notices: every notice and sound is optional, from the settings and from the console
+[ ok ] battery alert: the setting takes off or up to three levels, and the settings item steps through presets
+[ ok ] battery alert: the Low battery sound item turns the beep off and on
+[ ok ] battery indicator: the top band shows the level, colours charging and low, and hides without a reading
+[ ok ] display: an emissive panel leaves its background unlit; a backlit one keeps near black
+[ ok ] battery estimate: voltage requires opt-in and selecting percentage produces text only
+[ ok ] battery estimate: plausible limits, missing inputs and explicit absence control visibility
+[ ok ] battery estimate: voltage and charging change at normal five-second polls and failure clears them
+[ ok ] battery estimate: native percentages including zero take precedence without requiring voltage
+[ ok ] battery estimate: disabling and clearing hide only the derived value immediately
+[ ok ] battery estimate: both settings survive a fresh App and factory reset removes the opt-in
+[ ok ] battery estimate: invalid saved values and rejected writes never activate it
+[ ok ] battery estimate: Power-page selection uses the display value and changes only indicator style
+[ ok ] battery estimate: raw status and gateway telemetry remain unestimated, including unavailable transitions
+[ ok ] battery indicator: off by default, follows readings once chosen, and each select picks the next style
+[ ok ] battery indicator: the battery page offers it only when a percentage can appear
+[ ok ] battery indicator: touch screens say tap
+[ ok ] battery indicator: boards without a power driver have no battery page
+[ ok ] power: a peripheral rail cannot be selected as device power-off
+[ ok ] Wi-Fi setup: bounded credentials require the current session and never replace valid output on failure
+[ ok ] Wi-Fi setup: the tailnet fields are optional and the auth key is checked
+[ ok ] Wi-Fi setup: private instructions stay out of diagnostics and prompts close the temporary network
+[ ok ] Wi-Fi setup: the screen carries a scannable code for the temporary network
+[ ok ] Wi-Fi setup: a port without credentials still shows the text screen
+[ ok ] Wi-Fi setup: the code is drawn inside the content band, dark on light
+[ ok ] Wi-Fi setup: a code that does not fit beside the instructions leaves the text screen
+[ ok ] display: a banded framebuffer shows the same screens as a whole-panel one
+[ ok ] display: the Wi-Fi code reaches the panel from a banded framebuffer
+[ ok ] display: a banded framebuffer doesn't offer images, and refuses one sent anyway
+[ ok ] Wi-Fi setup: opening from USB releases an active talk button
+[ ok ] app: a setting that can't be saved is reported, not silently kept in memory
+[ ok ] app: the device still gets an identity when its key can't be saved
+[ ok ] app: wifi saves, lists, joins and forgets networks without showing passwords
+[ ok ] app: wifi refuses bad networks, a sixth network and malformed commands
+[ ok ] app: set wifi_ssid and wifi_pass put a network first and keep the others
+[ ok ] app: factory-reset forgets every saved network
+[ ok ] phone: boards without Bluetooth have no phone item, command or status
+[ ok ] phone: the settings item opens pairing, shows the passkey and closes when paired
+[ ok ] phone: the window closes on cancel and after two minutes; a late passkey is ignored
+[ ok ] phone: a phone asking to pair waits for Allow, and only then gets the code
+[ ok ] notes device: its faces name PWR and BOOT, and the ask names them the other way round
+[ ok ] phone: Wi-Fi setup, a question and failed pairing each end the window
+[ ok ] phone: Bluetooth that won't start leaves no window; forget and factory-reset remove phones
+[ ok ] phone: the pairing screen stays lit through the screen timeout
+[ ok ] power: Hermes is told at once when the screen goes dark and lights up
+[ ok ] power: a device that reconnects in the dark says so in its hello
+[ ok ] dashboard: the hello offers it, versioned, with the rows that fit
+[ ok ] dashboard: arrives quietly, opens with CANCEL on the idle screen and closes with it
+[ ok ] dashboard: talking or a question takes over; a lost connection forgets it
+[ ok ] dashboard: a session's state shows in its colour, and long lists page
+[ ok ] battery alert and charging notice: show over an open dashboard, which is still there after
+[ ok ] dashboard: touch boards open it with a swipe down
+[ ok ] language: English by default, and set language switches the device's own text
+[ ok ] language: an unknown code is refused and changes nothing
+[ ok ] language: the choice survives a restart
+[ ok ] language: the settings menu has a Language item that steps through the languages
+[ ok ] language: the agent can set it through the screen.language action
+[ ok ] language: a touch board's control phrase is translated with the rest
+[ ok ] language: the dashboard's headings and states are translated
+[ ok ] language: the status report keeps its English reason while the screen translates it
+[ ok ] profiles: hello offers switching; welcome brings the roster
+[ ok ] profiles: settings ask Hermes for the next profile and keep what it confirms
+[ ok ] profiles: without a roster the settings menu has no profile entry
+[ ok ] profiles: no switching while a turn runs or before pairing
+[ ok ] profiles: a stored profile Hermes no longer offers is dropped; the console cannot set one
+[ ok ] profiles: hello names only the stored choice, through reconnects and settings edits
+[ ok ] profiles: a quick tap on the name opens the grid; a hold on it talks
+[ ok ] profiles: a tap on a row asks Hermes for it; a hold or a swipe down picks nothing
+[ ok ] profiles: a refused switch keeps the profile; no list while a turn runs
+[ ok ] profiles: a long name never runs under the name panel's marker
+[ ok ] profiles: buttons show Change in Settings, tap-to-talk the swipe; one profile shows nothing new
+[ ok ] profiles: with touch_talk off, the name is a tap target in tap-to-talk mode too; a hold on it records nothing
+[ ok ] profiles: one switch at a time; a later pick waits for Hermes's answer
+[ ok ] profiles: no answer to a switch reconnects, and the welcome says which profile answers
+[ ok ] profiles: the name and every grid cell are about 7 mm tall and wide on each touch board, any grid
+[ ok ] profiles: the 2.06 and the round 1.75 show the grid asked for; few profiles get big icons
+[ ok ] profiles: a swipe from right to left on Ready opens the grid at the current profile's page; on the grid it turns the page
+[ ok ] profiles: a sideways swipe opens nothing while a turn runs, on other screens or with one profile; a hold still talks
+[ ok ] profiles: a profile's initial is always a capital letter
+[ ok ] profiles: the grid dims and darkens on the screen timeout; a touch on it keeps it lit
+[ ok ] profiles: PWR on the grid goes back to Ready with the screen lit; the next press darkens it
+[ ok ] profiles: the grid ends with a Settings cell that opens Settings, pages like a profile and is never current
+[ ok ] profiles: a profiles message replaces the list, and an open grid updates in place
+[ ok ] profiles: a shorter list keeps the grid's page, or moves it to the last page there is
+[ ok ] protocol: a message type the device doesn't know changes nothing
+[ ok ] profiles: a welcome brings up to 32 profiles; the rest are dropped
+[ ok ] profiles: profile_grid is 4, 6, 9 or 16, and the settings item steps through them
+[ ok ] profiles: a reset Hermes sends on its own does not end the wait for a pending switch
+[ ok ] language: auto follows the language Hermes names in welcome
+[ ok ] language: auto is English when Hermes names none, or one this firmware lacks
+[ ok ] language: a chosen language ignores Hermes's, and auto picks it up when chosen later
+[ ok ] language: a later welcome with another language switches an auto device
+[ ok ] language: the agent can set auto through screen.language
+[ ok ] profiles: the names of cells side by side never touch, on the 2.06 and the round 1.75
+[ ok ] profiles: the current profile's face is its icon in the grid; the default one keeps the mascot otherwise
+[ ok ] profiles: after switching away from a profile with a face, its cell shows its initial again
+[ ok ] faces: a face replaces the mascot until a face without bits brings it back
+[ ok ] faces: a malformed face shows the mascot
+[ ok ] faces: a late face or clear for the previous profile leaves this one's alone
+[ ok ] faces: an unpaired device shows the mascot and names no face
+[ ok ] faces: a board without the memory for a face offers none and ignores one
+[ ok ] faces: a reconnect keeps the face only when the welcome names it
+[ ok ] faces: another profile shows the mascot until its own face arrives
+[ ok ] faces: a face made of the mascot's own bitmaps draws the mascot
+[ ok ] colour faces: a board with room offers its Ready face size and draws the face in colour
+[ ok ] colour faces: a board without room keeps one-colour faces
+[ ok ] colour faces: a bad start or a broken transfer leaves the mascot
+[ ok ] colour faces: a new start replaces a transfer, and nothing resumes one that was cut off
+[ ok ] colour faces: stream ids, sizes and anchors must be whole numbers in range
+[ ok ] colour faces: a switch mid-transfer shows the mascot, and a reconnect keeps a named face
+[ ok ] colour frames: a board with room for the bands offers frames; one with room for the still face only does not
+[ ok ] colour frames: face.start names the bands, and the device takes exactly their bytes
+[ ok ] colour frames: the device blinks a colour face that has a blink band, and never one without
+[ ok ] clock: off by default, a long rest keeps the Ready screen
+[ ok ] clock: the console checks clock and time_format, and both survive a restart
+[ ok ] clock: it needs the time, and the settings body says so until then
+[ ok ] clock: after a rest it shows at 70% of the brightness setting
+[ ok ] clock: a tap ends it and records nothing; the name opens nothing; a hold talks; TALK records
+[ ok ] clock: it gives way to whatever needs the screen, and comes back after a new rest
+[ ok ] clock: rest counts from the end of the speech and of the reply text
+[ ok ] clock: the screen timeout dims and darkens it, and what wakes it comes back at the setting
+[ ok ] clock: a screen.brightness action on the clock keeps 70% of the new level
+[ ok ] clock: the settings item cycles Off, 30 s, 1 min, 2 min and 5 min
+[ ok ] clock: the face's strings in 12- and 24-hour time and in Spanish
+[ ok ] tailnet: a board without it has no tailnet settings
+[ ok ] tailnet: off, a tailnet board connects as soon as the network is up
+[ ok ] tailnet: on, the device waits for the tunnel and says why
+[ ok ] connect: a connection isn't timed out as it opens when the clock moves on mid-tick
+[ ok ] tailnet: losing the tunnel ends the session until it is back
+[ ok ] tailnet: turning it on reconnects through the tunnel; off connects directly
+[ ok ] tailnet: the auth key is checked, kept secret and never logged
+[ ok ] tailnet: factory reset forgets the settings and the tailnet identity
+[ ok ] tailnet: factory reset says so when the tailnet identity can't be scheduled for erasing
+[ ok ] profile thumbnails: a touch board with room asks for the grid's largest icon and draws them
+[ ok ] profile thumbnails: kept by hash through reconnects; a new one replaces only its profile's
+[ ok ] profile thumbnails: a clear, a profile no longer offered and unpairing bring the initials back
+[ ok ] profile thumbnails: a malformed or interrupted one is ignored, and a colour face still arrives beside it
+[ ok ] profile thumbnails: with room only at 32 px, the last fallback is 32 px
+[ ok ] profile thumbnails: none without room, without colour faces or without a touchscreen
+[ ok ] screen: an open profile list or dashboard times out, closes in the dark and wakes to Ready
+[ ok ] screen: the PWR key turns the screen off over a list or a card, and wakes to Ready
+[ ok ] screen: in settings the PWR key is Back: the menu closes, the screen stays lit, the next press darkens it
+[ ok ] double press: TALK twice goes home, closes the dashboard and asks for the default profile
+[ ok ] double press: on the default profile it only goes home; slow presses each talk
+[ ok ] double press: in tap mode the second press throws the recording away instead of sending it
+[ ok ] double press: it stops a reply the first press talked over
+[ ok ] double press: touch, the settings menu, a question and double_home off keep TALK as it was
+[ ok ] double press: a press that only wakes the screen starts none
+[ ok ] wake talk: off by default, a press on a dark screen only wakes; on, it wakes and talks at once
+[ ok ] wake talk: a double press on a dark screen lights it and goes home to the default profile
+[ ok ] wake talk: touch, a question, the menu and no connection still only wake
+[ ok ] settings: Double press home and Talk from dark screen toggle their settings; boards without a TALK key hide them
+[ ok ] double press: a press that answers a question or selects Back in the menu starts none
+[ ok ] double press: a first press held long enough to send its recording starts none
+[ ok ] double press: an alarm that rings between the presses takes the second one
+[ ok ] screen: the PWR key leaves a running hardware check straight to the home screen
+[ ok ] settings list: every offered item is a row with its icon and state, and the selected one is marked
+[ ok ] settings list: the battery alert and charging items have their icons and switches
+[ ok ] settings: Deep Wi-Fi sleep is on by default, toggles wifi_deep_sleep, and shows only with a battery and Wi-Fi
+[ ok ] settings list: buttons scroll the list smoothly to the selection, and back to the top on the next visit
+[ ok ] settings list: a drag scrolls with the finger, stops at the ends, and changes nothing
+[ ok ] settings list: a tap selects a row and changes it; toggles flip on the first tap
+[ ok ] settings list: Touch to talk is a switch, and with it off a tap on its row still flips it
+[ ok ] settings list: a slider opens on the first tap, then a tap or a drag on its bar sets the level
+[ ok ] settings list: a value cut short on its row keeps its full text in the description
+[ ok ] settings list: a tap while the list eases changes the row that was under the finger
+[ ok ] settings list: a slide is not saved when a knob moves the selection before the lift
+[ ok ] settings list: with a check running, a tap stops it and a swipe down moves on, as before
+[ ok ] settings list: Double press home and Talk from dark screen are toggle rows with their state
+[ ok ] recording buffer: sized for the utterance limit, and keeps what fits
+[ ok ] recording buffer: online, the recording streams in 40 ms frames as before
+[ ok ] recording buffer: at 24 kHz the buffered upload goes in 960-sample (40 ms) frames too
+[ ok ] recording buffer: a slow link delays frames instead of dropping them, and audio.end waits
+[ ok ] recording buffer: a connection lost mid-recording keeps recording, and all of it goes after reconnecting
+[ ok ] recording buffer: reconnecting during the recording sends what was held, then streams on
+[ ok ] recording buffer: a finished recording waits 45 s for the connection, then is dropped
+[ ok ] recording buffer: cancel discards a held recording, while recording or waiting
+[ ok ] recording buffer: tap mode ends a held recording with a tap, and the limit still ends it
+[ ok ] recording buffer: a device unpaired on reconnect drops the held recording
+[ ok ] recording buffer: a connection lost after audio.end went ends the turn, as before
+[ ok ] recording buffer: a board without one ends the recording on a lost connection, as before
+[ ok ] diag: every lost connection is logged and kept with what the device was doing
+[ ok ] diag: a Wi-Fi loss after the WebSocket reported its own loss counts once
+[ ok ] diag: a recording a lost connection cut short is the last recording
+[ ok ] diag: the close history keeps the last five
+[ ok ] diag: the last recording's length and lost frames
+[ ok ] recording buffer: a turn that ends some other way takes its unsent recording with it
+[ ok ] diag: a buffered recording logs its length, frames lost and the link's backlog, and diag keeps the last
+[ ok ] diag: a recording dropped for want of a connection is counted
+[ ok ] recording buffer: set aside only when about 1 MB of PSRAM stays free after it
+[ ok ] recording buffer: an earlier turn's reply arriving during the upload leaves the new recording alone
+[ ok ] recording buffer: a new session drops a recording still uploading
+[ ok ] recording buffer: talking over a recording still uploading replaces it, and the hub hears so
+[ ok ] recording buffer: once its audio.end goes, the Thinking timeout is the short one again
+[ ok ] camera: the settings item opens the mode; a tap counts down, captures once, and the photo holds
+[ ok ] camera: the live view still draws after 24.8 days of uptime
+[ ok ] camera: a tap during the countdown takes the live view back without capturing
+[ ok ] camera: a swipe down leaves the mode, like CANCEL on any other screen
+[ ok ] camera: a swipe that grows past the tap slop over several samples still leaves
+[ ok ] camera: holding the screen never records, and its lift is still a tap
+[ ok ] camera: the screen stays lit while the live view runs, and 60 s with no touch leaves
+[ ok ] camera: a failed capture says so and goes back to the live view
+[ ok ] camera: a TALK key press is the trigger too, and boards without a camera never offer the item
+[ ok ] camera: a card Hermes sends waits until the mode leaves, and what asks to take the screen gets it
+[ ok ] qr: the bytes a card's code may hold match the encoder, version by version
+[ ok ] cards: hello offers structured cards on every panel, with the code size that fits
+[ ok ] cards: a list and a progress bar draw in the text layout, and the same id updates in place
+[ ok ] cards: a list longer than the screen pages itself
+[ ok ] choice: hello offers choices only where the board can pick an answer
+[ ok ] choice: Up and Down move the highlight, TALK answers and CANCEL cancels
+[ ok ] choice: with TALK and CANCEL alone, CANCEL steps through the answers and a last row cancels
+[ ok ] choice: on a touchscreen a tap on a row answers it, a swipe down cancels, a swipe up shows more
+[ ok ] choice: it is withdrawn, expires, ends with the connection and takes the console's answer
+[ ok ] choice: a yes/no question asked meanwhile goes first and leaves the choice as it was
+[ ok ] choice: a finger held on an answer, or put down inside the press guard, picks nothing
+[ ok ] choice: a choice or a question that arrives over the open profile grid closes it and takes the tap
+[ ok ] choice: a question longer than the header wraps above the answers, whole, on every panel
+[ ok ] choice: the press guard starts again when the choice comes back to the front
+[ ok ] choice: options that are not all text are refused, so an index never means another option
+[ ok ] cards: a code keeps its size with a progress bar, on the smallest panel too
+[ ok ] widgets: a board that can page them asks for layout 2, and one that cannot for layout 1
+[ ok ] widgets: they arrive quietly; DOWN opens and pages them, UP goes back, and both ends lead to Ready
+[ ok ] widgets: a newer snapshot replaces them in place, and one without widgets closes them
+[ ok ] widgets: at most eight, four items each, a percent within 0 to 100, and unknown kinds are skipped
+[ ok ] widgets: a reply on screen keeps DOWN for scrolling; talking, a question or a card takes over
+[ ok ] widgets: a lost connection forgets them, and an unpaired device never opens them
+[ ok ] widgets: touch opens them with a swipe from left to right, pages both ways and closes with a swipe down
+[ ok ] widgets: left open, they time out like a list: dim, dark, closed, and the wake shows Ready
+[ ok ] widgets: left open at rest, the clock takes turns with them, dimmed, and a touch brings the page back
+[ ok ] widgets: a turn or a reply takes the screen from an open widget
+[ ok ] widgets: once the widgets are gone, the resting clock moves by its own minutes again
+[ ok ] widgets: at rest every face is drawn at all nine burn-in offsets, for any number of widgets
+[ ok ] widgets: at rest UP and DOWN page from the widget on screen, and on the clock face they only wake
+[ ok ] widgets: one with nothing to draw is no page, and long text is cut on the device
+[ ok ] widgets: a swipe down closes them with swipe-to-cancel off, and records nothing
+[ ok ] widgets: under a question a sideways swipe does nothing, and the widgets are still there after it
+[ ok ] interpret: hello says the device draws interpreter mode
+[ ok ] interpret: the idle screen names the languages until Hermes turns the mode off
+[ ok ] interpret: the translation is drawn large with what was said above it
+[ ok ] interpret: a short CANCEL press asks Hermes to switch who speaks next
+[ ok ] interpret: holding CANCEL counts down and asks to leave the mode, never for a new session
+[ ok ] interpret: what is typed or recorded in the mode says so
+[ ok ] interpret: the mode outlives a lost connection, and only Hermes ends it
+[ ok ] interpret: a recording made in the mode is marked when it is sent again, even after the mode ended
+[ ok ] interpret: the reply names who speaks next while the translation is spoken too
+[ ok ] interpret: a choice or a question on screen goes when the mode starts, and none is taken in it
+[ ok ] interpret: the owner's last reply and card are gone when the mode starts; a translation stays
+[ ok ] interpret: an owner's notice and working-state phrase are gone when the mode starts
+[ ok ] timer: the actions are listed on a board with a display or a speaker, not on one with neither
+[ ok ] timer: start checks its seconds, and cuts a long label to 40 characters
+[ ok ] timer: the seconds left reach timer.status, status and the Ready caption, and the arc shrinks
+[ ok ] timer: timer.cancel stops a timer; timer.start replaces one and dismisses a ringing alarm
+[ ok ] timer: at zero it sends timer.done, shows TIMER DONE, beeps, and a press dismisses it
+[ ok ] timer: the alarm beeps for a minute, then stays up quietly until dismissed
+[ ok ] timer: the alarm beeps when a send moves the clock past the moment it started
+[ ok ] timer: expiry while recording waits until the recording ends
+[ ok ] timer: a question from Hermes delays the alarm until it is answered
+[ ok ] timer: a question that arrives while the alarm rings shows first, and the alarm comes back after it
+[ ok ] timer: settings do not open over the alarm
+[ ok ] timer: an alarm shows over a dropped connection and rings
+[ ok ] timer: Hermes speech stops the ringing, and the alarm stays on screen
+[ ok ] timer: an alarm wakes an asleep screen, and a quiet alarm lets it sleep again
+[ ok ] timer: a board without a speaker shows the countdown and the alarm, and writes no samples
+[ ok ] timer: round panel: the arc shows the time left clockwise from 12 o'clock, and nothing without a timer
+[ ok ] ring: a recording takes the ring from a running timer, and the timer's arc returns after the turn
+[ ok ] timer: round panel: the arc stays in the corner wedge where the UI square meets the glass
+[ ok ] timer: round panel: the battery strip starts below the arc, and the top of the arc stays amber
+[ ok ] timer: rectangular panel: the top-bar line's amber part shrinks with the time
+[ ok ] timer: the alarm is green across the glass on a flash, and its Spanish text stays inside the panel
+[ ok ] timer: Spanish alarm text fits the smallest round and rectangular panels
+[ ok ] timer: the alarm's label stays clear of the hint at the bottom
+[ ok ] timer: a face that arrives or goes while the alarm is up quietly redraws it
+[ ok ] a radio window rests until something asks for it
+[ ok ] boot opens a window, and the grace ends it
+[ ok ] the pairing window lasts two minutes, and closing it early does not
+[ ok ] a recorded note keeps the radio up for three minutes
+[ ok ] an explicit wake is the shortest window
+[ ok ] a link keeps the radio up whatever else expired
+[ ok ] a waiting note advertises now, then retries on its own clock
+[ ok ] the last note taken stops the retries at once
+[ ok ] the reasons stack: the longest one wins and the rest still end
+[ ok ] the phone window is five minutes, then the grace, then rest
+[ ok ] a connected phone holds the phone window open, and it ends a minute after it leaves
+[ ok ] closing the phone window by hand ends it at once, with no grace
+[ ok ] face: face.set is listed on a board with a display, and not on one without
+[ ok ] face: face.set checks its expression and its seconds
+[ ok ] face: an expression reaches the screen and status, and neutral clears it
+[ ok ] face: an expression with seconds goes back to neutral when they are over
+[ ok ] face: an expression set during a turn outlasts its reply, and the user's next turn ends it
+[ ok ] face: a recording ends an expression, in any mode
+[ ok ] face: a message typed while a reply shows ends an expression, and so does a new session
+[ ok ] face: a turn Hermes starts by itself leaves the expression
+[ ok ] face: a typed message that cannot be sent leaves the expression
+[ ok ] face: a new face.set replaces the time of the one before
+[ ok ] face: an expression's seconds run across the clock's wrap
+[ ok ] face: the mark moves for a minute, then stands still
+[ ok ] face: the mascot bench draws the same frames whatever expression is set
+[ ok ] face: the console sets, reports and refuses expressions
+[ ok ] face: every expression draws something of its own on the idle screen
+[ ok ] face: sleepy shuts the eyes and alert never blinks
+[ ok ] face: sleepy shuts the eyes while thinking and under a reply too, and alert keeps them open
+[ ok ] face: a change of expression redraws only its rows, and leaves what a whole repaint would
+[ ok ] face: with animation off the idle mascot never blinks, so the screen stands still
+[ ok ] face: a mark's step flushes only the mark's rows, and stands still with animation off
+[ ok ] face: a step of the mark flushes the mark's rows alone, for alert as for the others
+[ ok ] face: a blink under an expression still repaints the eyes
+[ ok ] face: the mark stays whole on small, narrow and round panels, wherever the face puts its anchor
+[ ok ] face: while thinking the mark takes the dots' place
+[ ok ] face: screens other than idle, thinking and speaking ignore the expression
+[ ok ] face: a still colour face shows the mark and keeps its picture
+[ ok ] ring: listening fills from 12 o'clock, green, and turns amber for the last sixth
+[ ok ] ring: the thinking comet is blue at its head, dark 90 degrees away, and moves 15 degrees a frame
+[ ok ] ring: speaking is an amber comet nine degrees a frame, and a silent response has no ring
+[ ok ] ring: with animation off, thinking, responding, boot and connecting show no ring
+[ ok ] updating: with animation off, the Updating screen stands still across the mascot blink boundary
+[ ok ] ring: boot and connecting show the amber comet
+[ ok ] ring: updating covers the received part, and the restart fills the band
+[ ok ] ring: a running timer keeps its arc over the comets, while listening and updating take the ring
+[ ok ] ring: the clock's grey ticks cross the band, the hours 2s+1 px wide, and the dot is the only amber
+[ ok ] ring: the clock's next second moves only the dot, sends few rows, and touches nothing outside the clock ring
+[ ok ] ring: second by second and across minutes, the clock's update leaves exactly what a full paint draws
+[ ok ] ring: each minute the clock's dot turns with the face's burn-in shift, and no tick pixel stays lit
+[ ok ] ring: on every round size and at every turn, the clock's ticks follow their rule around the turned lines
+[ ok ] ring: leaving the clock clears the dot's reach past the band, to Ready and to the alarm
+[ ok ] ring: two listening frames that differ only in the ring change nothing outside the band
+[ ok ] ring: without a ring no band pixel outside the UI square holds a ring colour, also right after one
+[ ok ] ring: the alarm and the battery faces own the glass with no ring, even with a timer's arc in the model
+[ ok ] ring: a comet step sends only the rows it crossed, and a repeated frame sends nothing
+[ ok ] ring: step by step on every round size, each comet's update leaves exactly what a full paint draws
+[ ok ] ring: a comet's step leaves the band away from both of its places alone
+[ ok ] ring: on every round size, every state's lit pixels outside the UI square lie in the band
+[ ok ] ring: the battery strip sits below the band's inner edge, in the same rows ring or no ring
+[ ok ] clock face: the face's ink keeps 3 px clear of the clock ring at every shift, on every round size
+[ ok ] clock face: small panels keep the time and drop the mascot
+[ ok ] clock face: the Spanish date draws whole
+[ ok ] clock face: a new minute repaints, the same minute does not, and the alarm comes back clean
+[ ok ] clock face: a profile's face takes the mascot's place, and a new face repaints in the same minute
+[ ok ] clock face: a colour face moves with the burn-in shift and its transparent middle shows the background
+[ ok ] ready: a colour face is sent at the largest size Ready draws it, so it is only ever scaled down
+[ ok ] ready: a colour face blinks and talks at the mascot's cadence, and repaints every row its bands change
+[ ok ] clock face: the icon grows to 96 px and sits below the middle of the free rows
+[ ok ] clock face: a small round panel keeps a 64 px icon
+[ ok ] widget face: every kind draws whole on round, small and large panels
+[ ok ] widget face: at rest it moves with the burn-in shift and still stays inside
+[ ok ] widget face: long text is cut to the box instead of leaving it
+[ ok ] widget face: a state colours the value, the bar and the headline
+[ ok ] widget face: the bar fills with the percentage, from nothing to its whole track
+[ ok ] widget face: one dot per widget, the current one lit, and none for a single widget
+[ ok ] widget face: it repaints on a change and after another screen, and not otherwise
+[ ok ] qr: the payload is the standard WIFI scheme a phone camera reads
+[ ok ] qr: reserved characters in the credentials are escaped
+[ ok ] qr: a Wi-Fi payload encodes to a square matrix of the right size
+[ ok ] qr: the encoder's output is pinned to a known-good matrix
+[ ok ] qr: a payload too large to encode is refused, not truncated
+[ ok ] qr: encoding is deterministic
+[ ok ] i18n: every language has a code, a name and parses back
+[ ok ] i18n: English is the catalogue's own text, and other languages fall back to it
+[ ok ] i18n: each translation is complete and keeps the English placeholders
+[ ok ] i18n: drawn text is in the font: ASCII and Latin-1, as written
+[ ok ] i18n: weekday and month names are at most 3 columns in every language
+[ ok ] i18n: folding to the font keeps Latin-1 and replaces the rest
+[ ok ] i18n: folding keeps ASCII and finds the nearest letter for the rest
+[ ok ] i18n: format fills placeholders in any order and keeps the ones it has no value for
+[ ok ] i18n: control names in words are translated, printed button names are kept
+[ ok ] i18n: one-line text fits wherever the English fits
+[ ok ] i18n: the timer's one-line texts fit the 128x128 panel in every language
+[ ok ] i18n: the talking face's two-line caption is on only where it fits, and its headline fits there
+[ ok ] font: every Latin-1 code point has its own glyph
+[ ok ] font: every Russian letter has its own glyph
+[ ok ] font: UTF-8 reads one code point at a time and survives malformed input
+[ ok ] font: widths, wrapping and cuts count letters, not bytes
+[ ok ] battery estimate: the shared single-cell map clamps endpoints and floors intermediate levels
+[ ok ] STC8 battery: reads register bytes and maps only the Gadget power fields
+[ ok ] STC8 battery: charging state maps to the generic charging flag
+[ ok ] STC8 battery: error state is preserved without claiming not charging
+[ ok ] STC8 battery: a register read failure discards the sample and stops the sequence
+[ ok ] STC8 battery: invalid values are omitted rather than reported as real telemetry
+[ ok ] battery estimate: the resting-voltage curve clamps endpoints, interpolates and floors
+[ ok ] AXP2101: battery, USB and charging readings never alter power configuration
+[ ok ] AXP2101: audio supply enables ALDO1 at 3.3 V and preserves other rails
+[ ok ] CoreS3: peripheral power preserves charger and external output configuration
+[ ok ] CoreS3: failed power access stops initialization without releasing reset
+[ ok ] StickS3: the LCD rail comes on and the amplifier stays off; other PM1 pins are preserved
+[ ok ] StickS3: a PM1 that does not answer stops initialization
+[ ok ] StickS3: battery millivolts, USB and the active-low charge status are reported
+[ ok ] StickS3: power off turns the amplifier off, then sends the PM1 shutdown command
+[ ok ] AXP2101: the power key's short press is read once and cleared; enabling touches only interrupts
+[ ok ] AXP2101: external power is read from VBUS good, and a failed read is unknown
+[ ok ] StopWatch: supplies come on, touch and panel are reset, motor and amplifier stay off
+[ ok ] StopWatch: a chip that does not answer stops initialization
+[ ok ] StopWatch: the amplifier is switched only on a change and leaves the other outputs alone
+[ ok ] StopWatch: cell and VIN millivolts and the active-low charge status are reported
+[ ok ] StopWatch: with the cell's curves the percentage follows the voltage, and resting on USB near full is 100
+[ ok ] StopWatch: a short press of the red key is reported once, on its release; a long hold is not
+[ ok ] StopWatch: power-off silences the amplifier, then sends the PM1's shutdown command
+[ ok ] TCA9554 reset: latch low before output mode, preserve all other expander bits
+[ ok ] TCA9554 reset: another board's mask changes only its own bits
+[ ok ] TCA9554 reset: every failed expander operation stops initialization
+[ ok ] CST816: count and 12-bit coordinates, release and invalid reports
+[ ok ] WS185: RMNM conversion uses both mics and excludes reference/unused
+[ ok ] CST816: touch fault releases only a held touch after five failures and recovers
+[ ok ] WS185: signed PCM16 expands to stereo32 without negative-shift UB
+[ ok ] AXS5106: one point becomes a press inside the panel
+[ ok ] AXS5106: flags in the high nibble still count as one point
+[ ok ] AXS5106: a zero count is a release
+[ ok ] AXS5106: the invalid point is ignored
+[ ok ] AXS5106: a point past the glass is ignored
+[ ok ] SpeakerPa: abort empties the queue at once and keeps audio queued after it
+[ ok ] SpeakerPa: a chunk taken before abort cannot turn the amplifier back on
+[ ok ] whole_sample_bytes: a nearly full buffer takes whole samples only
+[ ok ] whole_sample_bytes: a write that fits is queued whole
+[ ok ] mono-to-stereo expansion preserves all samples across bounded writes
+[ ok ] speaker underruns: each gap while the stream is open is counted, timed and kept as longest
+[ ok ] speaker underruns: the silence after the last frame is the end of the reply, not a gap
+[ ok ] speaker underruns: each stream starts from zero, after an end or an abort
+[ ok ] speaker underruns: the millisecond clock wrapping inside a gap still gives its length
+[ ok ] BandFlush: each band's transfer completes before the buffer is refilled
+[ ok ] BandFlush: a late transfer pauses drawing without blocking, then redraws everything
+[ ok ] BandFlush: a submit error stops drawing for good
+[ ok ] frame stats: summaries give min, average, nearest-rank percentiles and max
+[ ok ] frame stats: the window keeps only the newest values
+[ ok ] frame stats: frames over the budget count as missed; empty renders as idle
+[ ok ] frame stats: a renderer that isn't measuring never reads the clock
+[ ok ] frame stats: the renderer times drawing, flushing and the bands it sends
+[ ok ] frame stats: input latency ends with the first frame that sends something
+[ ok ] frame stats: the app keeps frame timing off unless asked
+[ ok ] frame stats: perf on measures the app's frames, inputs and logs a summary
+[ ok ] frame stats: profile.frame_stats turns timing on from boot
+[ ok ] frame stats: the settings bench scrolls the settings list without opening the menu
+[ ok ] frame stats: the bench draws the same fixed workloads, then gives the screen back
+[ ok ] SharedReply: the answer reaches an asker that is still waiting
+[ ok ] SharedReply: an answer after the asker gave up is dropped, not written into freed memory
+[ ok ] SharedReply: an asker whose question was never queued frees both shares
+[ ok ] TagScanner: finds the tag whatever the chunk boundaries
+[ ok ] TagScanner: a nameless copy of the tag is skipped
+[ ok ] TagScanner: an image without the tag is never found
+[ ok ] TagScanner: a value that never ends is cut at the limit
+[ ok ] battery curve: interpolates between points and clamps at both ends
+[ ok ] battery curve: the 1.75C table falls monotonically from full to empty
+[ ok ] battery curve: replaying the measured night, the shown percent never rises and tracks the charge left
+[ ok ] battery curve: the 2.06 table falls monotonically from full to empty
+[ ok ] battery curve: the StopWatch table falls monotonically from full to empty
+[ ok ] battery curve: the StopWatch charge table rises to 99 and never crosses itself
+[ ok ] battery curve: replaying the 2.06's measured day, it tracks the time left where the gauge read low
+[ ok ] battery curve: a lighter load lifting the voltage doesn't raise the percent
+[ ok ] battery curve: one stray reading doesn't move it; a minute of lower readings does
+[ ok ] battery curve: charging shows the gauge, charged shows 100, unplugging starts afresh
+[ ok ] AXP2101: with a curve, the percent comes from it on battery and from the gauge on charge
+[ ok ] charge curve: replaying the charge from empty, it never falls and tracks the charge added
+[ ok ] charge curve: on a charge it wasn't fitted to, it stays close; the gauge read up to 18 low
+[ ok ] charge curve: plugging in never drops below what battery showed; it holds 99 until done
+[ ok ] charge curve: a top-up after charging is done keeps showing 100; unplugging starts afresh
+[ ok ] charge curve: the 1.75C charge table rises monotonically from empty to 99
+[ ok ] AXP2101: the charge current limit decodes both step sizes, and reserved values are unknown
+[ ok ] mic power: a recording-only codec switches off while nothing records
+[ ok ] mic power: a capture powers it up, drops stale and settling audio, then delivers
+[ ok ] mic power: back-to-back captures don't cycle the codec
+[ ok ] mic power: a codec that fails to start is retried after a pause, not read
+[ ok ] mic power: a read error backs off instead of spinning
+[ ok ] mic power: a codec shared with the speaker stays on and keeps reading, delivering only captures
+[ ok ] keys: a tap whose release lands after a light-sleep gap is a tap
+[ ok ] keys: a real hold is still a hold when the loop keeps sampling
+[ ok ] keys: a press that began before the lock is not a tap
+[ ok ] keys: sleep only counts against a press that is down
+[ ok ] keys: a short tap with steady sampling never reaches the hold
+[ ok ] wifi retry: on battery the wait doubles from 3 s up to 30 s, like Hermes
+[ ok ] wifi retry: plugged in it keeps retrying every 3 s
+[ ok ] wifi retry: a connection resets the wait
+[ ok ] wifi retry: waking the screen or plugging in retries at once
+[ ok ] wifi retry: nothing scheduled, nothing to hurry
+[ ok ] wifi retry: the chip is held awake only while an attempt runs
+[ ok ] wifi retry: an attempt that never answers is abandoned after 20 s
+[ ok ] wifi retry: a start that fails waits 3 s, without holding the chip awake
+[ ok ] wifi power save: modem sleep on the cable too, and full power only during a turn
+[ ok ] wifi power save: a turn wakes the radio at once and lets it sleep again when it ends
+[ ok ] wifi power save: the battery is read every 5 s, and plugging in applies at the next read
+[ ok ] wifi power save: a switch that failed is asked for again
+[ ok ] wifi power save: dozing quietly on battery sleeps deeper, and the screen lighting undoes it at once
+[ ok ] wifi power save: a turn or USB beats dozing
+[ ok ] wifi power save: the quiet time survives the clock wrapping
+[ ok ] wifi pick: a lost link is retried once before scanning
+[ ok ] wifi pick: one saved network never scans
+[ ok ] wifi pick: the first network wins when the scan sees it, else the strongest
+[ ok ] wifi pick: a network that keeps failing is passed over while another is in range
+[ ok ] wifi pick: with no saved network in sight it tries the next one in turn
+[ ok ] wifi pick: a list that changed under it keeps the current network
+[ ok ] wifi fast: a record survives a round trip through storage
+[ ok ] wifi fast: an SSID with spaces and bytes outside ASCII is kept exactly
+[ ok ] wifi fast: a damaged or foreign record is ignored
+[ ok ] wifi fast: with a record, the first attempt on that network aims at its access point
+[ ok ] wifi fast: no record, a damaged one, or another network joins normally
+[ ok ] wifi fast: after the aimed attempt fails, attempts join normally until a join works
+[ ok ] wifi fast: a join on another access point or lease replaces the record
+[ ok ] wifi fast: the first join with no record writes one
+[ ok ] wifi fast: an access point without a usable channel is not recorded
+[ ok ] wifi fast: forgetting the network drops the record
+[ ok ] wifi fast: an aimed attempt that never reports back counts as failed
+[ ok ] wifi networks: the one network from before the list is kept, tested
+[ ok ] wifi networks: nothing saved loads empty and writes nothing
+[ ok ] wifi networks: the first network is mirrored into wifi_ssid and wifi_pass
+[ ok ] wifi networks: set wifi_ssid puts a network first and keeps the others
+[ ok ] wifi networks: erasing wifi_ssid forgets the first network
+[ ok ] wifi networks: a damaged list falls back to the mirrored first network
+[ ok ] wifi networks: at most five, and a sixth is refused
+[ ok ] wifi networks: joining moves a network first once and marks it tested
+[ ok ] wifi networks: a list that can't be saved leaves the mirror alone
+[ ok ] wifi networks: names and passwords follow the setup page's rules
+[ ok ] console args: split like ESP-IDF's console, and quote_arg round-trips
+[ ok ] ws: blocked receive admission owns its frame while a replacement client reuses the buffer
+[ ok ] ws: refused receive admission preserves replacement bytes and binary short frames
+[ ok ] ws: nothing is lost before the first connection
+[ ok ] ws: events from a connection the app has left are ignored
+[ ok ] ws: a lost connection is reported once
+[ ok ] ws: a loss the app already acted on is not reported again
+[ ok ] ws: the old client's loss doesn't end the new connection
+[ ok ] ws: messages leave the reserved slots free
+[ ok ] ws: a queue full of audio still takes the messages that end a recording, and a close
+[ ok ] ws: a message for the current connection is sent with a time limit
+[ ok ] ws: a short send is reported as failed
+[ ok ] ws: messages for a connection the app has left are dropped unsent
+[ ok ] ws: messages for a client that lost its link are dropped unsent
+[ ok ] ws: the old client is closed after its queued messages, and the new one carries on
+[ ok ] ws: closing sends the close frame with a time limit, then destroys the client
+[ ok ] ws: closing a client whose link is gone skips the close frame
+[ ok ] ws: every network wait has a limit of a few seconds at most
+[ ok ] ws: a send rides out a TCP stall of several seconds
+[ ok ] ws: a dead link is still found well before the send task counts as stuck
+[ ok ] ws: an idle send task is never stuck
+[ ok ] ws: a send task within the limit is not stuck
+[ ok ] ws: a send task on one item past the limit is stuck
+[ ok ] ws: finishing the item clears it, and each item gets its own limit
+[ ok ] ws: an item that begins just after the caller read the clock is not stuck
+[ ok ] ws: the stuck limit holds across the millisecond clock wrapping
+[ ok ] ws: no item that ends by itself is taken for stuck
+[ ok ] ws: the uplink meter's first window starts with the turn, not after the last message
+[ ok ] ws: turning metering on again mid-turn doesn't restart the window
+[ ok ] link diag: a lost Wi-Fi names its reason and the signal it went at
+[ ok ] link diag: a close during a send says how long it had been sending, and the signal
+[ ok ] link diag: a close names the client's error, a refused upgrade and the server's close code
+[ ok ] link diag: the upgrade status explains only a failed connect attempt
+[ ok ] link diag: a refused upgrade keeps its HTTP status though the client reports a transport error
+[ ok ] log ring: a restart that kept RAM hands the previous boot's lines to the next
+[ ok ] log ring: after power loss or a torn header the old text is dropped
+[ ok ] log ring: once full it keeps the newest text and drops the cut-off oldest line
+[ ok ] tailnet address: only a 100.64.0.0/10 literal is a tailnet address
+[ ok ] tailnet watch: says what it is waiting for, then up once the Hermes host answers
+[ ok ] tailnet watch: a failed registration is shown with TailTiny's reason
+[ ok ] tailnet watch: a short gap keeps the session, a long one ends it
+[ ok ] tailnet watch: during the grace, handshakes are still asked for at most every kPokeMs
+[ ok ] tailnet watch: replacing the control server's connection keeps the session while WireGuard is up
+[ ok ] tailnet watch: a control reconnect with WireGuard down too gets the grace, then ends it
+[ ok ] tailnet watch: at boot, a session with the Hermes host is up before TailTiny reports Connected
+[ ok ] tailnet watch: a Hermes host off the tailnet still waits for Connected
+[ ok ] tailnet watch: after a network change, a kept session waits for Connected again
+[ ok ] tailnet watch: a network change the watch didn't see go down still ends the tunnel
+[ ok ] tailnet watch: on the same network, a fresh session after the grace is up again
+[ ok ] tailnet watch: up early, a session lost before Connected gets the grace without a handshake
+[ ok ] tailnet watch: a registration refused during a reconnect ends the session at once
+[ ok ] tailnet watch: no Wi-Fi means no tunnel, at once
+[ ok ] i2c scan: lists the addresses that answer, once each
+[ ok ] i2c scan: one timeout no longer hides the rest of the bus
+[ ok ] i2c scan: an address that always times out is named and the scan goes on
+[ ok ] i2c scan: a device busy for every try at its address is reported, not skipped
+[ ok ] i2c scan: a few timeouts in a row are listed, including at the end of the range
+[ ok ] i2c scan: a line held low is reported as a stuck bus and ends the scan
+[ ok ] i2c scan: a bus that sticks partway keeps what answered before
+[ ok ] QMI8658: a chip with the wrong id or a dead bus refuses to start untouched
+[ ok ] QMI8658: a setting the chip does not keep makes start fail
+[ ok ] QMI8658: start writes the datasheet sequence and waits out the reset
+[ ok ] QMI8658: raw little-endian counts become signed milli-g at 8192 LSB/g
+[ ok ] BMI270: start loads Bosch's image, then turns on only the accelerometer at +-4 g
+[ ok ] BMI270: a wrong id, a dead bus or a refused image stops start
+[ ok ] BMI270: samples are little-endian and scale 8192 LSB/g to milli-g
+[ ok ] PCF85063: a written time becomes one BCD burst from 0x04 and reads back
+[ ok ] PCF85063: a stopped oscillator, a dead bus, a time that cannot be and out-of-range years report failure
+[ ok ] days_from_civil: known UTC epochs, leap years included
+[ ok ] RX8130: a written time becomes one BCD burst from 0x10 with the weekday as one bit, and reads back
+[ ok ] RX8130: writing clears VLF alone among the flags, and starts a stopped clock without touching its other control bits
+[ ok ] RX8130: lost power, a stopped clock, a dead bus and a time that cannot be report failure
+[ ok ] camera RGB565 downsample samples pixel centers on the source grid
+[ ok ] camera RGB565 downsample rejects invalid stride and out-of-range dimensions
+[ ok ] camera RGB565 byte swap puts the sensor's high byte into the little-endian slot
+[ ok ] camera RGB565 byte swap is its own inverse
+[ ok ] camera RGB565 byte swap rejects odd and missing payloads
+[ ok ] CoreS3 camera power pulses the AW9523B reset and leaves it released
+[ ok ] CoreS3 camera power preserves the unrelated AW9523B outputs
+[ ok ] CoreS3 camera power off drives the reset low
+[ ok ] CoreS3 camera power turns on the camera's rails and leaves the others
+[ ok ] CoreS3 camera rails off takes down only the camera's own rails
+[ ok ] CoreS3 camera power off leaves the rails alone
+[ ok ] camera countdown counts down in whole seconds and fires once at three seconds
+[ ok ] fake camera serves a capture and a preview of the configured size
+[ ok ] Cardputer: FIFO press/release and Shift follow the printed keyboard
+[ ok ] Cardputer: Fn navigation does not become text, reset clears lost modifiers
+[ ok ] Cardputer: every printed character survives its own press and release
+[ ok ] Cardputer: composing survives core redraw and closing restores the UI
+[ ok ] CoreS3 3-wire read samples SDA low and restores write direction
+[ ok ] CoreS3 known touch firmware keeps its panel without SPI probing
+[ ok ] CoreS3 touch firmware 0x05 uses a positively identified C panel
+[ ok ] CoreS3 LCD E is identified before sending the C unlock key
+[ ok ] CoreS3 unknown or partial LCD signatures remain unavailable
+[ ok ] CoreS3 failed E transactions cannot select E using stale data
+[ ok ] CoreS3 failed C transactions cannot select C using stale data
+[ ok ] CoreS3 all unknown touch firmware values require LCD evidence
+[ ok ] CoreS3 an unrecognized touch firmware is not a panel identity
+[ ok ] CoreS3 identifies C through the complete GPIO probe
+[ ok ] CoreS3 identifies E through GPIO without the C unlock
+[ ok ] CoreS3 an absent LCD stays unknown through GPIO
+[ ok ] CoreS3 known touch hints never drive the GPIO probe
+[ ok ] CoreS3 GPIO failures cannot select a panel despite a matching signature
+
+756 cases, 0 failed
+<end of output>
+Test time =   8.67 sec
+----------------------------------------------------------
+Test Passed.
+"hg_core_tests" end time: Nov 26 07:00 CST
+"hg_core_tests" time elapsed: 00:00:08
+----------------------------------------------------------
+
+2/9 Testing: hg_cores3_board_tests
+2/9 Test: hg_cores3_board_tests
+Command: "/home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host/hg_cores3_board_tests"
+Directory: /home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host
+"hg_cores3_board_tests" start time: Nov 26 07:00 CST
+Output:
+----------------------------------------------------------
+[ ok ] CoreS3 uses the BSP's BGR order with its native landscape geometry
+
+1 cases, 0 failed
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"hg_cores3_board_tests" end time: Nov 26 07:00 CST
+"hg_cores3_board_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/9 Testing: hg_cjk_tests
+3/9 Test: hg_cjk_tests
+Command: "/home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host/hg_cjk_tests"
+Directory: /home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host
+"hg_cjk_tests" start time: Nov 26 07:00 CST
+Output:
+----------------------------------------------------------
+[ ok ] canvas: wide characters take two columns and wrap anywhere
+[ ok ] i18n: folding keeps the CJK the font draws; an emoji it lacks stays one column
+[ ok ] face: with the CJK font, a step of an expression's mark leaves nothing of the last step behind
+[ ok ] widget: with the CJK font a value is drawn whole on a small panel
+
+4 cases, 0 failed
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"hg_cjk_tests" end time: Nov 26 07:00 CST
+"hg_cjk_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/9 Testing: hg_epaper_mode_tests
+4/9 Test: hg_epaper_mode_tests
+Command: "/home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host/hg_epaper_mode_tests"
+Directory: /home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host
+"hg_epaper_mode_tests" start time: Nov 26 07:00 CST
+Output:
+----------------------------------------------------------
+[ ok ] the turn's screens drive the notice-line phase, and the line clears itself
+[ ok ] a connection lost mid-turn claims the line with the close reason
+[ ok ] a loss while idle claims the line once; retries after that stay silent
+[ ok ] a device that never connected claims nothing
+[ ok ] a phase another mode set is left alone
+[ ok ] BOOT held past the threshold taps CANCEL, only for a press that found something to cancel
+[ ok ] the design card's ten states and the pairing ask draw exactly the frames it approved
+[ ok ] the copy fits the grid whatever the device is doing
+[ ok ] a composed frame is ink on paper all the way to the margins
+[ ok ] an unchanged view is not sent to the panel again
+[ ok ] the footer keeps the card's free space and drops the level to do it
+[ ok ] a full-ish card keeps its SD label even beside ON POWER (D9)
+[ ok ] a long note is marked as cut, not silently cut
+[ ok ] the pairing screen is paper like the resting face, and says what the core said
+[ ok ] a newest note without a stamp prints no clock at all
+[ ok ] the resting face always pays for the card's free space, and drops the level first
+[ ok ] a card that never answered prints no free space at all
+[ ok ] with no touch glass the resting face names both keys and draws no targets
+[ ok ] a phone asking to pair is answered on the keys, and the face says which
+[ ok ] the copy fits above the footer, and nothing is drawn below it
+[ ok ] a PWR tap talks and a press on its way to the latch does not
+[ ok ] a BOOT tap toggles the note, and BOOT never talks however long it is held
+[ ok ] a press past the tap limit is neither a note nor a cancel
+[ ok ] the pairing ask answers on the keys: BOOT allows, PWR refuses, a hold does neither
+[ ok ] a press the poller sees mid-hold cannot act twice inside one press
+[ ok ] held BOOT on the home screen opens the menu, which is the only way in
+[ ok ] in the menu a BOOT tap is next and a PWR tap is change
+[ ok ] a held BOOT drops a recording before it does anything else
+[ ok ] a held BOOT with a turn or a card up is the old cancel, not the menu
+[ ok ] the pairing ask outranks every other meaning of a key
+[ ok ] a minute on another screen asks for home once, and not a pass early
+[ ok ] home, dozing and anything in flight suspend the count
+[ ok ] a key press restarts the minute
+[ ok ] the resting faces are home; everything else is not
+[ ok ] home: a BOOT tap records, a hold opens the menu, a PWR tap does nothing
+[ ok ] recording: BOOT stops and keeps, a hold throws it away, PWR touches nothing
+[ ok ] the menu is the one screen where PWR works on a row instead of leaving
+[ ok ] a notes list walks, opens, and goes back one screen at a time
+[ ok ] a note's own screen offers play, delete and back, and delete asks first
+[ ok ] playing stops on a BOOT tap or hold, and a PWR tap stops and leaves for the list
+[ ok ] a pairing ask owns both keys and lands back where it interrupted
+[ ok ] every menu row has a label and Back is reachable from the list
+[ ok ] the Phone screen: PWR closes the window, a hold goes back, a tap does nothing
+
+43 cases, 0 failed
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"hg_epaper_mode_tests" end time: Nov 26 07:00 CST
+"hg_epaper_mode_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/9 Testing: hg_epaper_ble_tests
+5/9 Test: hg_epaper_ble_tests
+Command: "/home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host/hg_epaper_ble_tests"
+Directory: /home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host
+"hg_epaper_ble_tests" start time: Nov 26 07:00 CST
+Output:
+----------------------------------------------------------
+[ ok ] crc32 is the value zlib computes
+[ ok ] list names every pending note with what the header will repeat
+[ ok ] a long list line is split across packets and still arrives whole
+[ ok ] get transfers the note byte for byte, at the link's MTU
+[ ok ] the transfer writes nothing: the note is still pending afterwards
+[ ok ] a window the phone missed is resent from what it really has
+[ ok ] a dropped link resumes at the acknowledged offset
+[ ok ] an empty note is refused, not transferred
+[ ok ] an unknown id, a bad offset and no card each get their own error
+[ ok ] the control link answers nothing until the device key is proved
+[ ok ] done moves the note out of pending and answers
+[ ok ] a phone that stops acknowledging ends the transfer, not the note
+[ ok ] a link that cannot take a packet stalls without losing it
+[ ok ] a small MTU is refused before any bytes move
+[ ok ] get next is the oldest pending note, and an empty queue says so
+[ ok ] a second get replaces the transfer in flight
+[ ok ] unknown commands get the usage line, not silence
+
+17 cases, 0 failed
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"hg_epaper_ble_tests" end time: Nov 26 07:00 CST
+"hg_epaper_ble_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/9 Testing: hg_notes_ui_tests
+6/9 Test: hg_notes_ui_tests
+Command: "/home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host/hg_notes_ui_tests"
+Directory: /home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host
+"hg_notes_ui_tests" start time: Nov 26 07:00 CST
+Output:
+----------------------------------------------------------
+[ ok ] durations keep their real length: hours past 99:59, never a clamp
+[ ok ] home: the hero is the first true statement, in the spec's order
+[ ok ] home: the band and the line never restate the hero
+[ ok ] home: a notice takes the line from LAST, and every more urgent line still wins
+[ ok ] home: the upload bar is determinate and capped
+[ ok ] menu: the right column carries the store's counts and the link
+[ ok ] list: the cursor walks six rows then rotates the window
+[ ok ] list: the window the app asks for is the window it draws
+[ ok ] note: a note past 100 minutes shows its real length, not a clamp
+[ ok ] list: rows carry a date and a mark for the exception only
+[ ok ] list: an all-sent card shows the count where the key would be
+[ ok ] list: an empty card says so, and advertises record rather than next
+[ ok ] the key map reaches every screen, and every screen has a way back
+[ ok ] about: a hold goes back to the menu, a tap does nothing, and a tap is not power
+[ ok ] refresh: a bar move is partial, and eight moves force a full
+[ ok ] refresh: a list rotation is full however few moves it took
+[ ok ] refresh: a Home hero change is full, a quiet publish draws nothing
+[ ok ] refresh: a hand-over that returns to a stale hero is full
+[ ok ] refresh: a hand-over is partial, and the fourth in a row spends the budget
+[ ok ] capture: recording again keeps the note recorded before it
+[ ok ] delete: a hold on the confirm erases the note from the card
+[ ok ] play: the player reads the note's own WAV, header and samples
+[ ok ] play: a missing or foreign file is refused, not played
+[ ok ] render: every screen inks paper only - x 4..196, y <= 186 at 1 bit
+[ ok ] render: nine menu rows end above the one-line footer rule
+[ ok ] render: the confirm has no footer, the list marks the exception
+[ ok ] phone: the menu row opens its own screen, not a flash back to the menu
+[ ok ] phone: the port's answer draws the countdown and the pairing table
+[ ok ] phone: the countdown repaints on the five second beat, not at 1 Hz
+[ ok ] phone: every refusal is a word on the glass, with no clock
+[ ok ] phone: the window closes by itself and the screen says so
+[ ok ] phone: closing the screen ends the window and returns to the menu
+[ ok ] band: the clock is gone; an unset clock is one short warning and never a time
+[ ok ] pairing: a second ask does not trap the screen on the question
+[ ok ] pairing: a completed pair leaves the ask by itself
+[ ok ] pairing: a completed pair lands back where the ask interrupted
+[ ok ] pairing: a second phone's ask survives the first pair completing
+[ ok ] pairing: a bond never closes a screen the person opened
+[ ok ] band: the Wi-Fi box shows the station's three states, and never Bluetooth
+[ ok ] battery: a port that answers only mV gives the console's percentage
+[ ok ] battery: no reading is -1, never a level
+[ ok ] band: a level is drawn from the reading, '?' only without one
+[ ok ] player: a PWR tap stops playback and stays on, it never powers off
+[ ok ] keys: only a PWR hold from Home reaches PowerOff
+[ ok ] keys: two PWR taps in the player leave the device running
+[ ok ] sleep: the frame is the sleeping face, and the panel is cleared
+[ ok ] sleep: the face draws with a full refresh
+[ ok ] menu: the page follows the selection
+[ ok ] menu: rows in order, Back last
+[ ok ] confirm: a BOOT tap cancels wipe and a BOOT hold wipes
+[ ok ] confirm: a BOOT tap cancels format and a BOOT hold formats
+[ ok ] guard: wipe and format are refused while the device is busy
+[ ok ] unpair: the list names every bonded phone, and says so when there are none
+[ ok ] unpair: entering the screen reads the table then, not at boot
+[ ok ] unpair: a store that does not answer leaves the table on the glass
+[ ok ] unpair: a BOOT hold removes the selected phone once, and the list shrinks
+[ ok ] unpair: a tap keeps the phone, and a store that refuses keeps the row
+[ ok ] guard: an unpair is refused while the device is busy
+[ ok ] home: shows 0 NOTES after a wipe
+[ ok ] store: wipe removes every note and leaves the folders
+[ ok ] busy: a wipe draws its face before the work and Home after it
+[ ok ] busy: a format says what it is doing and draws no invented progress
+[ ok ] store: wipe reports (done, total) for every note, and a false stops it
+[ ok ] refresh: a note committed after boot reaches the next frame (QA D1)
+[ ok ] refresh: the boot frame knows the card it booted with (QA D2)
+[ ok ] refresh: a key press reads the card before the screen machine acts (QA D1)
+[ ok ] refresh: the list the press draws has its rows, not just its title (t_8c3e4900)
+[ ok ] refresh: an upload's progress and its failure reach the glass
+[ ok ] refresh: the link, the clock and the card's space are facts, not once-at-boot
+[ ok ] refresh: the list says when it is not the whole card (QA D7)
+[ ok ] capture: a queued tap survives a publish and counts from the capture, not the tap
+[ ok ] facts: a minute rollover is not a frame; the clock's set answer is
+[ ok ] facts: a one percent battery step is the ADC talking, not the glass
+[ ok ] notice: a discarded capture's reason takes Home's line, then the counts return
+[ ok ] notice: a note that lands after the notice takes the line back
+[ ok ] facts: a capture silences the band, and the band catches up after it
+[ ok ] recording: the entry frame is 0:00 and the counter moves every 5 s
+[ ok ] capture: the glass follows the runtime, not its own flag
+[ ok ] capture: a declined recording never leaves RECORDING on the glass
+[ ok ] capture: stopping a capture that never began owes no second frame
+[ ok ] queue: a tap during an upload draws the wait, then counts when it starts
+[ ok ] queue: a tap on the queued face cancels the wait
+[ ok ] queue: a stale counter origin cannot commit a capture the card says is empty
+[ ok ] recording: the face carries the capture's own cap, and stops where the file stops
+
+84 cases, 0 failed
+<end of output>
+Test time =   0.05 sec
+----------------------------------------------------------
+Test Passed.
+"hg_notes_ui_tests" end time: Nov 26 07:00 CST
+"hg_notes_ui_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/9 Testing: hg_ble_gatt_table_tests
+7/9 Test: hg_ble_gatt_table_tests
+Command: "/home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host/hg_ble_gatt_table_tests"
+Directory: /home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host
+"hg_ble_gatt_table_tests" start time: Nov 26 07:00 CST
+Output:
+----------------------------------------------------------
+[ ok ] the GATT tables are recognisable
+[ ok ] every characteristic names an access callback
+[ ok ] the note data characteristic is notify-only behind on_note_access
+
+3 cases, 0 failed
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"hg_ble_gatt_table_tests" end time: Nov 26 07:00 CST
+"hg_ble_gatt_table_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/9 Testing: hg_epaper_notes_tests
+8/9 Test: hg_epaper_notes_tests
+Command: "/home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host/hg_epaper_notes_tests"
+Directory: /home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host
+"hg_epaper_notes_tests" start time: Nov 26 07:00 CST
+Output:
+----------------------------------------------------------
+[ ok ] the note id is device id, UTC stamp and a counter, and it sorts by time
+[ ok ] the WAV header is the RIFF PCM16 mono layout the contract sniffs for
+[ ok ] note.json round-trips every field the uploader resends
+[ ok ] the upload classifies answers the contract's way
+[ ok ] the retry backoff doubles from 5 s and stops at 5 minutes
+[ ok ] the MAC covers the field strings exactly as sent
+[ ok ] the multipart body is audio first, then the wire fields, and its length is exact
+[ ok ] the store keeps a note pending only once note.json is committed
+[ ok ] a note moves pending -> sent or failed, and sent/ is pruned oldest first
+[ ok ] a note recorded before the clock was set is uploaded stamped with the time it is sent
+[ ok ] a plausible stamp is never re-stamped, and an unset clock stamps nothing
+[ ok ] a timestamp counts as a time only when it is really one from 2024 on
+[ ok ] a recording becomes a WAV file plus note.json, and an abort leaves nothing
+[ ok ] a recording stops at its cap, never at a partial sample
+[ ok ] a note past the old 15 minute and 32 MiB caps keeps its real length
+[ ok ] the per-note ceiling and the duration ceiling are the hub's numbers too
+[ ok ] a note's budget is the card's free space less the reserve, capped at the ceiling
+[ ok ] a note started on a nearly full card is capped by the card, and commits what it holds
+[ ok ] a volume that will not answer is not read as a full card
+[ ok ] a card with no room past the reserve starts no note at all
+[ ok ] a card that fills mid-note commits what it holds instead of failing the note
+[ ok ] a note whose recording is missing or empty is quarantined, not retried
+[ ok ] a capture under a quarter second is discarded: no file, no note.json, no pending row
+[ ok ] a capture one sample under the stop line is discarded, never committed
+[ ok ] the shortest note finish() keeps is past the uploader's no-audio line, so its sweep never fires
+[ ok ] delete removes a note's audio, then its note.json, then the folder
+[ ok ] a failed note deletes one at a time, and --failed empties the folder
+[ ok ] notes prune deletes empty pending and failed rows, and keeps every note with audio
+[ ok ] a half-written note folder deletes, and an id outside the tree does not
+[ ok ] the delete answers are the exact strings the console prints
+[ ok ] a read that stops short of the card's size is a read failure, not the end of the file
+[ ok ] retention never prunes a 1.5 GiB note the hub has not got, however tight the card
+[ ok ] an ISO-8601 stamp is a second, and only the shape this firmware writes is
+[ ok ] retention deletes the synced notes older than 14 days, and only those
+[ ok ] retention frees space oldest first, and stops once the card is above 10%
+[ ok ] retention never deletes an unsynced note, and says so when it cannot free space
+[ ok ] retention deletes every synced note and still reports the card as low
+[ ok ] retention leaves the note in use alone
+[ ok ] a synced note with no real id stamp is aged from note.json, and an unknown age is not old
+[ ok ] without a clock the age rule stands down, and the space rule still runs
+[ ok ] retention deletes a note whose audio is already gone, and one with no note.json
+[ ok ] retention on a card that will not report its size runs only the age rule
+[ ok ] retention's thresholds are exact: exactly 14 days and exactly 10% are still inside
+[ ok ] parts: a twelve-minute note is three parts of five, five and two
+[ ok ] parts: a part's read stops at the part, not at the end of the recording
+[ ok ] parts: four fifty-nine and five minutes exactly are one part each
+[ ok ] parts: one second over five minutes is two parts, the second one second
+[ ok ] parts: a part's own header is a complete WAV the hub accepts
+[ ok ] parts: the request carries the note identity, where the part sits and its own key
+[ ok ] parts: a retry after part 1 failed starts at part 1, not at the note again
+[ ok ] parts: a note at or under five minutes sends exactly the v1 request
+[ ok ] parts: the per-part key stays in the contract's idempotency-key charset
+[ ok ] parts: a WAV the contract would refuse makes no plan from its header
+
+53 cases, 0 failed
+<end of output>
+Test time =   0.09 sec
+----------------------------------------------------------
+Test Passed.
+"hg_epaper_notes_tests" end time: Nov 26 07:00 CST
+"hg_epaper_notes_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+9/9 Testing: hg_tailtiny_tests
+9/9 Test: hg_tailtiny_tests
+Command: "/home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host/hg_tailtiny_tests"
+Directory: /home/jake/.hermes/kanban/workspaces/t_b04e3289/build-host
+"hg_tailtiny_tests" start time: Nov 26 07:00 CST
+Output:
+----------------------------------------------------------
+[ ok ] tailtiny aead: wireguard-lwip's ChaCha20-Poly1305 matches RFC 8439 A.5
+[ ok ] tailtiny aead: the Noise wrapper puts Tailscale's counter big-endian into the RFC nonce
+[ ok ] tailtiny aead: the Noise wrapper matches an independent implementation across counters
+[ ok ] tailtiny aead: a changed byte, counter or short message is refused
+
+4 cases, 0 failed
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"hg_tailtiny_tests" end time: Nov 26 07:00 CST
+"hg_tailtiny_tests" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Nov 26 07:00 CST

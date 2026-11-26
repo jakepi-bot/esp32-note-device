@@ -172,8 +172,9 @@ Outcome UiState::set_facts(const Facts& facts, uint32_t now_ms) {
   }
   if (about_dirty) snap_.card_free_bytes = facts.card_free_bytes;
 
-  // The clock is a Home fact: a minute that turns over on any other screen is
-  // adopted but not drawn, and the full frame that returns Home carries it.
+  // The warning is a Home fact: a clock that is set (or lost) on any other
+  // screen is adopted but not drawn, and the full frame that returns Home
+  // carries the band's current answer.
   if ((dirty & DirtyClock) && app_.screen() != Screen::Home) dirty &= ~DirtyClock;
   if (dirty == DirtyNone) return Outcome{};
   return publish(now_ms, dirty, Refresh::Partial);

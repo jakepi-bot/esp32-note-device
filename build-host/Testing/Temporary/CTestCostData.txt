@@ -1,0 +1,10 @@
+hg_core_tests 3 2.88988
+hg_cores3_board_tests 3 0.000561506
+hg_cjk_tests 3 0.000839716
+hg_epaper_mode_tests 3 0.00166728
+hg_epaper_ble_tests 3 0.000704934
+hg_notes_ui_tests 3 0.015932
+hg_ble_gatt_table_tests 3 0.000529482
+hg_epaper_notes_tests 3 0.0299019
+hg_tailtiny_tests 3 0.000476532
+---

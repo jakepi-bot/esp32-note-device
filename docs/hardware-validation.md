@@ -13,7 +13,7 @@ Firmware builds and simulator tests check software behavior. A physical verifica
 | M5Stack Cardputer ADV, K132-Adv / Stamp-S3A | ST7789 240x135; G0 and TCA8418 keyboard; local ASCII editor | ES8311 microphone and speaker, BCLK-derived clock | Calibrated battery voltage and screen timeout; mechanical power switch; no charge-state or percentage | Experimental; [port status](#cardputer-adv-port-status); full physical checklist pending |
 | ESP32-S3-DevKitC-1 N8R8 breadboard | Wired ST7789, TALK and CANCEL buttons | Wired I2S microphone; optional MAX98357A speaker | External power | CI build; physical report not recorded |
 | Waveshare ESP32-S3-LCD-1.54, SKUs 33866/33867, and Touch-LCD-1.54, SKUs 33868/33869 | ST7789 240×240; BOOT, PLUS and PWR (screen on/off, hold to power off); CST816 touch on the touch SKUs | ES7210 microphones and ES8311 speaker | Calibrated voltage, charging signal, battery latch and screen timeout; idle CPU at 80 MHz and light sleep while dozing on battery; USB bypasses shutdown | CI build; physical report not recorded |
-| Waveshare ESP32-S3-ePaper-1.54 (V2) | 200×200 SSD1681-class e-paper (no backlight, so the power key's screen toggle and the screen timeout do not apply); BOOT and PWR (voice-note key, hold to power off) | One ES8311 for the microphone and the speaker | GPIO 6 panel rail and GPIO 42 audio rail (both active low); GPIO 17 battery latch; battery voltage on GPIO 4 (divider of two, read as 4172 mV with USB power); no charging signal read; light sleep while dozing on battery | Experimental; firmware builds and boots on the board: boot log clean, the first full refresh completes without a BUSY timeout, the Wi-Fi setup screen renders legibly (camera), the NVS boot counter persists across resets, and the SD slot detects the inserted card over 1-bit SDIO (that card has no FAT32 volume); microphone, speaker and buttons not yet exercised; full checklist not completed |
+| Waveshare ESP32-S3-ePaper-1.54 (V2) | 200×200 SSD1681-class e-paper (no backlight, so the power key's screen toggle and the screen timeout do not apply); BOOT and PWR (voice-note key, hold to power off) | One ES8311 for the microphone and the speaker | GPIO 6 panel rail and GPIO 42 audio rail (both active low); GPIO 17 battery latch; battery voltage on GPIO 4 (divider of two, read as 4172 mV with USB power); no charging signal read; light sleep while dozing on battery | Experimental; firmware builds and boots on the board: boot log clean, the first full refresh completes without a BUSY timeout, the Wi-Fi setup screen renders legibly (camera), the NVS boot counter persists across resets, and the SD slot detects the inserted card over 1-bit SDIO (that card has no FAT32 volume); microphone, speaker and buttons not yet exercised; the cell's capacity is not recorded, see [note taker battery cell](#note-taker-battery-cell-capacity); full checklist not completed |
 | Waveshare ESP32-S3-Touch-LCD-1.83, SKUs 32790/32791 | ST7789P 240×284; CST816D touch, BOOT and PWR (short press from the AXP2101 turns the screen off and on) | ES7210 microphones (MIC1 and MIC2) and ES8311 speaker; echo reference unused | AXP2101 voltage, charging and external power; ALDO1 at 3.3 V for the microphone; no measured battery curve; IMU, RTC and TF card unused | Experimental; firmware builds; not run on a board; full checklist not completed |
 | Waveshare ESP32-S3-Touch-AMOLED-1.32 | CO5300 466×466; CST820 touch, BOOT, and PWR on GPIO 17 (short press turns the screen off and on, a hold releases the latch) | One ES8311 for the microphone and the speaker | GPIO 18 held high keeps the battery latch on; no battery voltage pin in the sources used here, so no percentage and no measured curve | Experimental; firmware builds; not run on a board; full checklist not completed |
 | Waveshare ESP32-S3-Touch-AMOLED-1.43C | CO5300 466×466; CST820 touch and BOOT. Not the older 1.43 board | ES7210 microphones (MIC1 and MIC2) and ES8311 speaker; MIC3 playback reference unused | GPIO 18 held high enables the codec LDO; GPIO 4 reads the cell through a divider of two; GPIO 7 is low while charging; no latch and no measured curve | Experimental; firmware builds; not run on a board; full checklist not completed |
@@ -76,7 +76,7 @@ The `ws-p4-touch-lcd-7b` profile is built and release-packaged by the dedicated 
 - **Board / revision:** owner-identified Waveshare ESP32-S3-Touch-LCD-1.54, SKU 33869. PCB revision not established. USB discovery reported ESP32-S3 (QFN56) revision v0.2, 16 MB flash and 8 MB embedded PSRAM. This report predates touchscreen support.
 - **Firmware:** local version 0.2.0 with the opt-in battery-estimate patch, built with ESP-IDF 6.1.0 using `esp32s3-lcd-154`; not a published release. The installed application SHA-256 is `38c40ee787633aad3056385ec66ea84839cef4dacbea8a3a72bfc89c556591a1`.
 - **Host / Hermes:** USB installation from Linux. The live Hermes version was not independently recorded; gateway configuration was not changed.
-- **Supply / battery:** USB during installation. The owner confirmed a battery was physically connected and reported its package label verbatim: `SKU 33228 3.7V 1000mA MX1.25 2P 50mm`. Capacity and chemistry were not independently established; the label's `1000mA` is not treated as a measured capacity.
+- **Supply / battery:** USB during installation. The owner confirmed a battery was physically connected and reported its package label verbatim: `SKU 33228 3.7V 1000mA MX1.25 2P 50mm`. Capacity and chemistry were not independently established; the label's `1000mA` is not treated as a measured capacity. That cell belongs to this unit's Touch-LCD-1.54 board. It is not the note taker's cell and nothing from it carries across to that device: see [note taker battery cell capacity](#note-taker-battery-cell-capacity).
 - **USB install / recovery:** Secure Boot and flash encryption were disabled. Two fresh full 16 MiB flash reads matched byte-for-byte and by SHA-256; the installed partition table matched the build before upload. The PlatformIO upload passed write verification, and a separate application readback verification matched. Backup restoration was not attempted.
 - **Identity / settings / pairing:** the original device identity, name, gateway setting and all pre-existing logical NVS values were preserved. NVS was not byte-identical after boot: the firmware added the saved-network migration entry `wifi_nets`. The device reconnected online and paired. `battery_estimate=liion` and `battery_display=percentage` were read back after a hardware reset.
 - **Display / audio:** boot logs reported ST7789, ES7210 and ES8311 initialization. The owner confirmed the physical header percentage was visible and a short real spoken question and spoken reply worked. This is owner-reported physical evidence, not a simulator result or an independent screen/audio measurement.
@@ -86,6 +86,37 @@ The `ws-p4-touch-lcd-7b` profile is built and release-packaged by the dedicated 
 - **Untested checklist items:** exact PCB revision; meter comparison and charging accuracy; controlled battery-versus-USB operation and runtime; full display/color/button checks; individual microphones, audio interruption and distortion measurements; screen timeout, sleep and shutdown; phone setup; hostile/unapproved pairing; OTA/rollback; backup restoration; and a two-hour stability session.
 
 The port stays experimental. This report covers a bounded feature smoke check, not the complete physical checklist or battery calibration.
+
+## Note taker battery cell capacity
+
+The note taker is the Waveshare ESP32-S3-ePaper-1.54 V2 (`waveshare-epaper-154`) in its printed case, with a single-cell Li-ion cell on the board's MX1.25 2-pin header. **The cell's capacity has never been recorded.** This section is where that number goes. It is written to be filled in from a label, not inferred from the device's behaviour.
+
+- **Capacity:** not recorded. No label on this cell has been read.
+- **Nominal voltage, chemistry, part, SKU:** not recorded. Only the board side is known: one single-cell Li-ion at 3.7 V nominal on an MX1.25 2-pin header, charged by an ETA6098 with ISET ≈ 200 mA ([board notes §9](waveshare-epaper-154-v2.md#9-power-and-charging)). None of that states what the cell is.
+- **How the value was obtained:** nothing was obtained. Searched on 2026-11-26: this repository's docs and source comments, the Obsidian vault, the iCloud and Gmail purchase records, and the bench camera. No order confirmation for a cell exists in either mailbox, so there is no order record to quote instead.
+- **Why it is still missing:** the cell went in when the device was built and was never noted down, and it sits inside the closed case. At the time of writing the bench camera on `/dev/video0` returned a black frame (the room was dark) and no `/dev/ttyACM*` port enumerated, so the cell was neither visible nor reachable through the board.
+- **Date / read by:** recorded as missing on 2026-11-26 by the Hermes agent (default profile). The read itself is still owed by the owner.
+
+**Two numbers that are not this cell's capacity.**
+
+- `SKU 33228 3.7V 1000mA MX1.25 2P 50mm` is the label of a different board, the Touch-LCD-1.54 (SKU 33869), in the [LCD-1.54 report](#waveshare-lcd-154-partial-physical-report). It says nothing about the note taker's cell, and its `1000mA` is a current marking, not a capacity. Any figure carried across from it is wrong.
+- "about 250 mAh" is an inference from roughly 6 hours of use at a 40 mA USB-side idle current. Neither input was measured on the cell, so it stays an inference and is not a capacity.
+
+**The exact next step.** Open the case, read the printed label, and replace the fields above with these, in the same shape:
+
+```text
+Capacity:              NNN mAh
+Nominal voltage:       3.7 V
+Chemistry:             Li-ion or Li-po, as printed
+Part or SKU:           as printed
+C-rate, max discharge: as printed, or "not printed"
+How obtained:          label read, photograph <file> attached to the card
+Date / read by:        YYYY-MM-DD, Jake
+```
+
+Then delete the two bullets that say "not recorded" and the "Two numbers" paragraph, and keep the filled fields.
+
+Those fields are what the [idle rail-up decision](decision-idle-rail-tiers.md) needs. Its rule, cut N to 30 s when the daily rail-up cost is more than 5% of battery capacity, and the 24-hour idle target both stop at "capacity unknown" until the read happens.
 
 ## CrowPanel Advanced P4 partial physical test record
 

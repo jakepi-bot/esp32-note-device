@@ -9,16 +9,17 @@
 namespace hgp::notesui {
 namespace {
 
-// The four facts that decide Home's hero (§4.2). A change in any of them is the
+// The five facts that decide Home's hero (§4.2). A change in any of them is the
 // one in-screen transition that must be a full refresh: three slots change at
-// once and a partial leaves the old word under the new one.
+// once and a partial leaves the old word under the new one. The clock is not one
+// of them: its only remaining job is the band's NO TIME warning, which is a
+// partial (Jake, 2026-11-26).
 struct HeroFacts {
   bool card;
   bool low_power;
   bool upload_active;
   bool upload_failed;
   bool offline;
-  bool clock_set;
 };
 
 HeroFacts hero_facts(const Snapshot& s) {
@@ -28,14 +29,13 @@ HeroFacts hero_facts(const Snapshot& s) {
   f.upload_active = s.upload_active;
   f.upload_failed = s.upload_failed;
   f.offline = s.count_pending > 0 && !s.wifi_up;
-  f.clock_set = s.clock_set;
   return f;
 }
 
 bool same(const HeroFacts& a, const HeroFacts& b) {
   return a.card == b.card && a.low_power == b.low_power &&
          a.upload_active == b.upload_active && a.upload_failed == b.upload_failed &&
-         a.offline == b.offline && a.clock_set == b.clock_set;
+         a.offline == b.offline;
 }
 
 // ------------------------------------------------------------------ hand-overs

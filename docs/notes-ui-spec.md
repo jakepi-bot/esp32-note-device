@@ -159,7 +159,7 @@ y=186  └───────────────────────�
 
 | Zone | x | first row | content budget | carries |
 |---|---|---|---|---|
-| A · facts | 12 … 188 | glyph top **y = 8** | band height 15 px, ink to y = 22 | queue state, the clock, the Wi-Fi glyph, battery |
+| A · facts | 12 … 188 | glyph top **y = 8** | band height 15 px, ink to y = 22 | queue state, the clock's unset warning, the Wi-Fi glyph, battery |
 | rule | 12 … 188 | **y = 27** | 1 px | the only rule on a one-rule screen |
 | B · content | 12 … 188 | **y = 32** | to y = 138 (2-line footer) or y = 156 (1-line) | everything the screen is *about* |
 | rule | 12 … 188 | **y = 144** or **y = 162** | 1 px | closes the page |
@@ -176,23 +176,24 @@ The band carries four things, all of them event-driven:
 | Slot | x | Size | Content |
 |---|---|---|---|
 | queue | 12 | text at scale 1, ≤ 21 cols | `3 TO SEND` / `ALL SENT` / `NO CARD` / blank |
-| clock | right of queue | text at scale 1 | `14:02`, blank until the clock has been set once |
+| time warning | right of queue | text at scale 1, 7 cols | `NO TIME` while the clock has never been set; blank once it has |
 | Wi-Fi | 136 | 16 × 15 bitmap | up (uncut) or down (2 px cut — the rune with the cut); blank when the Wi-Fi is off |
 | battery | 160 | 28 × 15 procedural | fill, bolt, or `?` |
 
-**The clock is the one exception, and it is bounded.** The original rule was no
-clock at all: a minute-accurate clock costs 60 panel updates an hour and every
-partial re-drives the rows it changes (§15.2). The device now
-carries a clock anyway, because a notes device with no way to read the time is a
-notes device you cannot date a note with. The cost is bounded by four rules: it
-is drawn on **Home only** (a minute that turns over in a menu or on the
-recording face is adopted into the snapshot and drawn by the next frame that
-returns Home, not by a refresh of its own); it repaints **only when the HH:MM
-text changes**, so the poll that reads the clock costs nothing; that poll runs
-every **10 s**, not every second; and a battery that moves by one percent — the
-ADC's own noise — is not a change. Measured on the board: two minutes on Home
-produced exactly two refreshes, one per minute; two minutes in a menu produced
-none from the poll.
+**There is no clock on the resting face; only its unset warning remains.** A
+minute-accurate clock costs one panel update a minute, and every partial re-drives
+the frame (§15.2): measured on the board, Home at rest moved `frames` by one every
+92 s, and each frame is a CPU wake plus ~589 ms of panel driving. The time is
+therefore not drawn anywhere on Home. What the band keeps is the one fact that
+cannot be seen elsewhere: `NO TIME`, in the time's old slot, while the clock has
+never been set (a note's time cannot be trusted). It is 7 columns and fits beside
+the queue's 10; once the clock is set the slot is blank, so the band is exactly as
+wide as it was without a clock. The set/unset answer is an event, not a tick:
+boot, or the first SNTP sync, is what changes it.
+
+The wall clock itself is untouched. Notes and uploads still stamp
+`std::time(nullptr)`, and the `clock` console command still reads and sets it;
+those consumers never needed the band to draw the minute.
 
 **The 16 × 15 box is the Wi-Fi glyph's, and nothing else's.** The band reports the
 station, not the Bluetooth radio: a phone's window is the Phone screen's own page
@@ -201,9 +202,9 @@ no state in which the box changes owner. When the Wi-Fi is off the box is paper,
 not a placeholder mark.
 
 This is the single most useful rule in the document: **nothing redraws unless
-something changed.** The only timers in the whole UI are the recording counter,
-the playback position and the minute of the clock, and the first two run only
-while the user is holding a session open.
+something changed.** The only timers in the whole UI are the recording counter
+and the playback position, and they run only while the user is holding a session
+open.
 
 ### 3.3 The footer is one label
 
@@ -327,16 +328,22 @@ them in this order and the face is always true.
 | 3 | `UPLOADING` | an upload is in flight |
 | 4 | `NO SYNC` | the last upload batch failed and retrying will not help |
 | 5 | `OFFLINE` | there is at least one note to send and Wi-Fi is down |
-| 6 | `NO TIME` | the clock has never been set (a note's time cannot be trusted) |
-| 7 | `READY` | no id. **`READY` is the fallback, never an empty face.** |
+| 6 | `READY` | no id. **`READY` is the fallback, never an empty face.** |
 
-**Band queue count:**
+**Band queue count and time warning:**
 
 | Condition | Text |
 |---|---|
 | card missing | *blank* (the hero already says it) |
 | `pending > 0` | `%u TO SEND`, capped at 99 |
 | `pending == 0` | `ALL SENT` |
+| clock never set | `NO TIME` in the time's old slot, right of the queue (7 columns) |
+
+The clock warning is independent of the queue slot: it is drawn whether the queue
+says `3 TO SEND`, `ALL SENT` or nothing, and it disappears the moment the clock is
+set. It is not a hero word (an earlier design put `NO TIME` at hero scale; Jake's
+2026-11-26 compromise moved the same signal into the band so the hero can keep
+answering what the device is doing).
 
 **The line under the hero — context, most urgent first. One line only:**
 
@@ -379,7 +386,7 @@ Every combination above is rendered in `01`–`07` of the wireframe set.
 | battery fill | PARTIAL | fill is **growth-only in one direction per charge cycle**; see §15.3 |
 | Wi-Fi icon up ↔ down | PARTIAL | 16 × 15 region |
 | upload progress bar | PARTIAL | **growth-only, so it leaves no residue at all** |
-| *the clock* | minutes *n* × 1, Home only | the HH:MM text changed; a minute that turns over elsewhere is drawn by the next Home frame |
+| clock set/unset answer (`NO TIME`) | PARTIAL | the warning appearing or clearing, Home only; a minute rollover is not a change |
 
 The one transition on this screen that must be full is `UPLOADING → READY`,
 because it changes three slots at once and a partial leaves the hero's word
@@ -1608,9 +1615,9 @@ string that slot can hold, or one past it — is marked **←**.
 | `home.hero.no_card` | `NO CARD` | 3 | 7 | 123 | 160 | Home | new |
 | `home.hero.low_power` | `LOW POWER` | 3 | 9 | 159 | 160 **←** | Home | new |
 | `home.hero.no_sync` | `NO SYNC` | 3 | 7 | 123 | 160 | Home | new |
-| `home.hero.no_time` | `NO TIME` | 3 | 7 | 123 | 160 | Home | new |
 | `home.band.to_send` | `%u TO SEND` | 2 | 10 | 118 | 118 **←** | Home | new |
 | `home.band.all_sent` | `ALL SENT` | 2 | 8 | 94 | 118 | Home | new |
+| `home.band.no_time` | `NO TIME` | 1 | 7 | 42 | 58 | Home | new |
 | `home.sub.of_n` | `%u OF %u SENT` | 2 | 11 | 130 | 168 | Home | new |
 | `home.sub.last` | `LAST %02u:%02u` | 2 | 10 | 118 | 168 | Home | new |
 | `home.sub.boot_to_record` | `BOOT TO RECORD` | 2 | 14 | 166 | 168 **←** | Home | new |
@@ -1977,7 +1984,7 @@ that wrong once.
 |---|---|---|
 | 1 | Black ink on white paper; `convert()` untouched | inverted 1-px strokes bloom; a black field makes every partial artefact conspicuous |
 | 2 | Scale 2 is the floor, scale 3 the only display size | 1.94 mm is the smallest that resolves at 25–30 cm; two sizes is already a lot |
-| 3 | **No clock on the resting face** | a minute tick costs 60 whole-panel refreshes an hour against a 1 mA idle target; time appears where it is a timestamp |
+| 3 | **No clock on the resting face; only `NO TIME` while it is unset** | a minute tick costs 60 whole-panel refreshes an hour against a 1 mA idle target; time appears where it is a timestamp, and the unset warning is an event, not a tick |
 | 4 | Home is centred, everything else is left-aligned | the alignment *is* the mode signal: centred = nothing to navigate |
 | 5 | One key legend per footer, two only where both keys are load-bearing | two side-by-side labels need 18 columns; the budget is 14 |
 | 6 | The footer yields to a warning | an undiscovered key is cheaper than an unseen fault |

@@ -223,9 +223,13 @@ TEST("home: the hero is the first true statement, in the spec's order") {
   CHECK(std::string(build_home(snap).hero) == "OFFLINE");
   snap.wifi_up = true;
   snap.clock_set = false;
-  CHECK(std::string(build_home(snap).hero) == "NO TIME");
+  // The clock is no longer a hero word: READY is the hero, and the band carries
+  // the one-line warning (Jake, 2026-11-26).
+  CHECK(std::string(build_home(snap).hero) == "READY");
+  CHECK(std::string(build_home(snap).clock_msg) == "NO TIME");
   snap.clock_set = true;
   CHECK(std::string(build_home(snap).hero) == "READY");  // READY is the fallback
+  CHECK(build_home(snap).clock_msg[0] == '\0');
 }
 
 TEST("home: the band and the line never restate the hero") {
@@ -1171,38 +1175,59 @@ Snapshot band_seed() {
 
 }  // namespace
 
-TEST("band: the clock takes its own slot and the glyphs keep theirs") {
+TEST("band: the clock is gone; an unset clock is one short warning and never a time") {
   Snapshot with_clock = band_seed();
   with_clock.clock_set = true;
-  std::snprintf(with_clock.clock_text, sizeof with_clock.clock_text, "14:02");
   Snapshot without = band_seed();
   without.clock_set = false;
 
-  // The Wi-Fi box and the battery are byte-identical with and without a clock:
-  // this is the \"the band does not shift\" rule, as ink.
+  // A perfectly good clock raises no text at all: the band has no time left to
+  // draw, so no minute can ask the panel for a frame.
+  CHECK(build_home(with_clock).clock_msg[0] == '\0');
+
+  // The one time fact that remains is the warning, in the time's old slot.
+  CHECK(std::string(build_home(without).clock_msg) == "NO TIME");
+
+  // The Wi-Fi box and the battery are byte-identical with and without the
+  // warning: this is "the band does not shift" rule, as ink.
   CHECK(home_band_hash(with_clock, 136, 8, 189, 24) == home_band_hash(without, 136, 8, 189, 24));
-  // And the left slot changed: the time is drawn.
+  // And the left slot changed: the warning is drawn.
   CHECK(home_band_hash(with_clock, 12, 8, 133, 24) != home_band_hash(without, 12, 8, 133, 24));
 
-  // The time is left of the glyph box, not under it: no ink in the 2 px gutter
-  // at 134..135, and ink in the clock's own columns.
+  // The warning is left of the glyph box, not under it: no ink in the 2 px
+  // gutter at 134..135, and ink in the warning's own columns.
   static uint16_t fb[200 * 200];
   std::memset(fb, 0xFF, sizeof fb);
   hg::Canvas canvas(fb, 200, 200, false);
   ScreenDraw frame;
   frame.screen = Screen::Home;
-  frame.home = build_home(with_clock);
+  frame.home = build_home(without);
   draw(canvas, frame);
   for (int y = 8; y < 24; ++y) {
     for (int x = 132; x < 136; ++x) CHECK(fb[y * 200 + x] != 0x0000);
   }
-  CHECK(ink_hash(fb, 96, 8, 132, 24) != home_band_hash(without, 96, 8, 132, 24));
+  CHECK(ink_hash(fb, 88, 8, 132, 24) != 0);
+
+  // A full queue still leaves a gutter between the two strings: "99 TO SEND"
+  // (10 columns) + "NO TIME" (7) is 17 columns of the 19 the slot holds.
+  Snapshot full = without;
+  full.count_pending = 99;
+  CHECK(hg::Canvas::text_width("99 TO SEND", 1) + hg::Canvas::text_width(band::kNoTime, 1) <=
+        grid::kGlyphX - 6 - grid::kLeft);
+  std::memset(fb, 0xFF, sizeof fb);
+  frame.home = build_home(full);
+  draw(canvas, frame);
+  const int queue_end = grid::kLeft + hg::Canvas::text_width("99 TO SEND", 1);
+  const int warning_start = grid::kGlyphX - 6 - hg::Canvas::text_width(band::kNoTime, 1);
+  for (int y = 8; y < 24; ++y) {
+    for (int x = queue_end; x < warning_start; ++x) CHECK(fb[y * 200 + x] != 0x0000);
+  }
 
   // A snapshot from a first frame that never got the clock says nothing rather
-  // than 00:00.
+  // than 00:00; the default is "set", because the boot seed carries the port's
+  // answer before the first frame.
   Snapshot fresh;
-  CHECK(build_home(fresh).clock[0] == '\0');
-  CHECK(std::string(build_home(with_clock).clock) == "14:02");
+  CHECK(build_home(fresh).clock_msg[0] == '\0');
 }
 
 TEST("pairing: a second ask does not trap the screen on the question") {

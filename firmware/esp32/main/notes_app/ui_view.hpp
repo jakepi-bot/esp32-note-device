@@ -68,10 +68,10 @@ struct Snapshot {
   // network (Jake, 2026-11-22).
   bool wifi_on = false;
   bool wifi_up = false;
-  bool clock_set = true;        // the clock has been set at least once
-  // "14:02", the minute the clock reads (t_3beb371a §4). Empty when the clock
-  // has never been set: the band's slot is then blank, not a stale time.
-  char clock_text[6] = {};
+  // The clock has been set at least once. Home's band says NO TIME until it
+  // has: the time itself is never drawn, so a minute rollover is not a repaint
+  // (Jake, 2026-11-26 - a clock cost a panel refresh every minute).
+  bool clock_set = true;
   BtState bt = BtState::Off;    // the radio's window, from the port
   int8_t battery_pct = -1;      // -1 unknown
   bool external = false;        // on external power (the bolt)
@@ -207,7 +207,9 @@ struct HomeView {
   const char* hero = nullptr;    // a strings.hpp constant
   char band[14] = {};            // "3 TO SEND" / "ALL SENT"; empty = none
   char sub[18] = {};             // "LAST 14:02"; empty = none
-  char clock[6] = {};            // "14:02"; empty when the clock is not set
+  // "NO TIME" when the clock has never been set; empty otherwise. The band no
+  // longer carries the time itself, only this warning in the time's old slot.
+  char clock_msg[9] = {};
   BtState bt = BtState::Off;     // the Bluetooth window: the Phone screen only
   bool wifi_on = false;          // the station is up, associated or not
   bool wifi_up = false;

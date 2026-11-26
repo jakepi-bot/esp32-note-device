@@ -222,6 +222,8 @@ class Runtime {
   enum class Net : uint8_t { Closed, Boot, Note, Manual, Clock, Retry, Stay };
 
   bool load_identity();
+  int64_t key_press_us_ = 0;
+  int64_t first_frame_us_ = 0;
   void start_note(uint32_t now);
   void finish_note(uint32_t now, const char* why);
   void abort_note(const char* why);

@@ -212,6 +212,21 @@ esp_pm_lock_handle_t g_key_awake = nullptr;  // held while a key is down
 uint32_t g_keys_ready_ms = 0;  // no press counts before this (boot, power change)
 bool g_keys_locked = false;    // a key is being ignored until it is released
 
+// The codec is released while the device rests (see the idle branch of the main
+// loop), and a capture started on disabled I2S channels stores nothing for about
+// two seconds: measured on the unit with the latency line, `key boot` from the
+// released state reached its first frame in 2,219 and 2,229 ms against 189 and
+// 216 ms awake. A finger is safe - the loop restores before poll_keys() runs -
+// but the console's `key` and `key virtual` verbs press synchronously inside
+// their own dispatch, which is before that block, so they restore here first.
+// A bench measuring the first-press latency must measure what a finger does.
+void restore_codec_for_press() {
+  if (g_codec.idle_released()) {
+    g_codec.restore_idle();
+    g_codec_mic.set_suspended(false);
+  }
+}
+
 // PWR + BOOT: whatever is down now is not a press. Called at boot and when the
 // power source changes under a finger that is not there.
 void lock_keys(uint32_t now) {
@@ -610,6 +625,7 @@ std::string console_line(std::string_view line) {
     const bool up = arg.size() > 3 && arg.substr(arg.size() - 3) == " up";
     if (!down && !up) return "@error usage: key virtual boot|pwr down|up";
     const bool value = down;
+    if (down) restore_codec_for_press();
     if (arg.rfind("boot", 0) == 0) g_virtual_boot = value;
     else if (arg.rfind("pwr", 0) == 0) g_virtual_pwr = value;
     else return "@error usage: key virtual boot|pwr down|up";
@@ -619,6 +635,7 @@ std::string console_line(std::string_view line) {
     // A scripted press counts as a finger, so it also ends an idle the console
     // put the device into (otherwise the state moves and the glass stays dark).
     g_key_while_idle = true;
+    restore_codec_for_press();
     // The same press the keys make, for a bench with no finger on the board.
     // `press()` runs the screen machine and the effect synchronously, so the
     // screen this prints is the one the glass was handed, not a guess.

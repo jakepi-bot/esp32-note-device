@@ -523,8 +523,15 @@ void Runtime::notify_upload() {
 
 void Runtime::on_mic(const int16_t* samples, size_t count) {
   if (mode_ != Mode::Recording || samples == nullptr || count == 0) return;
-  // The writer's task does the card work; without it (no memory for the ring)
-  // the app task writes, which is what the file did before the writer existed.
+  // Record first frame timestamp for latency measurement, once per recording
+  if (first_frame_us_ == 0) {
+    first_frame_us_ = esp_timer_get_time();
+    if (key_press_us_ > 0) {
+      const int64_t delta_ms = (first_frame_us_ - key_press_us_) / 1000;
+      ESP_LOGI(TAG, "latency: key press %lld us, first frame %lld us, delta %lld ms",
+               (long long)key_press_us_, (long long)first_frame_us_, (long long)delta_ms);
+    }
+  }
   if (writer_ready_) writer_.push(samples, count);
   else capture_.feed(samples, count);
 }
@@ -696,6 +703,7 @@ std::string Runtime::on_action(int action) {
   const uint32_t now = now_ms();
   switch (a) {
     case hgp::notesui::Action::StartRecording:
+      key_press_us_ = esp_timer_get_time();
       start_note(now);
       if (mode_ == Mode::Recording) return "recording " + meta_.note_id;
       return pending_record_ ? std::string("recording queued") : std::string();
@@ -835,6 +843,9 @@ void Runtime::start_note(uint32_t now) {
   writer_.reset_dropped();
   mode_ = Mode::Recording;
   error_.clear();
+  // Latency window: key press -> first frame. Reset the first-frame marker so
+  // each recording in a run measures its own delta.
+  first_frame_us_ = 0;
   io_.mic->start(notes::kSampleRate);
   // The screens moved to the recording face on the key; the runtime says so too,
   // so a console-started recording (`notes record`) reaches the glass.

@@ -375,6 +375,6 @@ AboutView build_about(const Snapshot& snap);
 
 // "62.9G" for About's card line: gigabytes, one decimal, clamped so the
 // string always fits its slot.
-void format_capacity(uint64_t bytes, char out[12]);
+void format_capacity(uint64_t bytes, char out[10]);
 
 }  // namespace hgp::notesui

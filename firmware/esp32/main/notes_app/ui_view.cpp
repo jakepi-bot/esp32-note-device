@@ -115,11 +115,7 @@ void format_cap(uint32_t seconds, uint64_t bytes, char out[24]) {
     copy_out(time_left, out, 24);
     return;
   }
-  // format_capacity()'s contract is 12 bytes ("999.9G" is the widest it
-  // writes). This buffer was 10, and Release builds abort on the fortify
-  // check before a single test runs - `hg_notes_ui_tests` had been failing
-  // that way on every CI run, which is not something the clock change caused.
-  char size[12];
+  char size[10];
   if (bytes >= 1024ull * 1024ull * 1024ull) {
     format_capacity(bytes, size);  // "2.0G"
   } else {
@@ -154,15 +150,22 @@ bool stamp_from_iso(std::string_view iso8601, Stamp& out) {
   return out.valid;
 }
 
-void format_capacity(uint64_t bytes, char out[12]) {
+void format_capacity(uint64_t bytes, char out[10]) {
   // 62.9G: one decimal of a gigabyte. Above 999.9 it reads "999G" so the
   // string never outgrows About's value column.
+  //
+  // The bound is 10 because that is what the widest caller has: the recording
+  // face passes `char size[10]` and this used to say 12, which Release builds
+  // (_FORTIFY_SOURCE) abort on - `hg_notes_ui_tests` died at startup on every
+  // CI run, and the firmware's -Werror=format-truncation caught the same
+  // disagreement once the caller was widened instead. "999.9G" is 6 bytes, so
+  // 10 is the contract with room to spare.
   const double gb = static_cast<double>(bytes) / 1e9;
   if (gb >= 999.5) {
-    copy_out("999G", out, 12);
+    copy_out("999G", out, 10);
     return;
   }
-  std::snprintf(out, 12, "%.1fG", gb);
+  std::snprintf(out, 10, "%.1fG", gb);
 }
 
 HomeView build_home(const Snapshot& snap) {

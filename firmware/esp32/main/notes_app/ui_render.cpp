@@ -106,7 +106,7 @@ void row(hg::Canvas& c, int y, const char* label, const char* value, bool select
 
 void home_face(hg::Canvas& c, const ScreenDraw& d) {
   const HomeView& v = d.home;
-  draw_band(c, v.band, v.clock, v.wifi_on, v.wifi_up, v.battery_pct, v.external);
+  draw_band(c, v.band, v.clock_msg, v.wifi_on, v.wifi_up, v.battery_pct, v.external);
   rule(c, grid::kRuleY);
   // Home is a two-line footer now: the key legend at the body size, both keys,
   // where a person reads them. The 6 px hint that used to sit above the rule was
@@ -128,7 +128,7 @@ void home_face(hg::Canvas& c, const ScreenDraw& d) {
 
 void recording_face(hg::Canvas& c, const ScreenDraw& d) {
   const HomeView& band = d.home;  // the queue count of the previous notes
-  draw_band(c, band.band, band.clock, band.wifi_on, band.wifi_up, band.battery_pct, band.external);
+  draw_band(c, band.band, band.clock_msg, band.wifi_on, band.wifi_up, band.battery_pct, band.external);
   rule(c, grid::kRuleY);
   text_at(c, grid::kLeft, 38, recording::kLabel, grid::kScale, kInk);
   if (d.recording.queued) {
@@ -293,7 +293,7 @@ void unpair_face(hg::Canvas& c, const ScreenDraw& d) {
 
 void playing_face(hg::Canvas& c, const ScreenDraw& d) {
   const HomeView& band = d.home;
-  draw_band(c, band.band, band.clock, band.wifi_on, band.wifi_up, band.battery_pct, band.external);
+  draw_band(c, band.band, band.clock_msg, band.wifi_on, band.wifi_up, band.battery_pct, band.external);
   rule(c, grid::kRuleY);
   text_at(c, grid::kLeft, 40, d.playing.when, grid::kScale, kInk);
   char elapsed[10], total[13];
@@ -370,16 +370,18 @@ void SleepFace(hg::Canvas& c) {
 
 }  // namespace
 
-void draw_band(hg::Canvas& c, const char* queue, const char* clock, bool wifi_on, bool wifi_up,
+void draw_band(hg::Canvas& c, const char* queue, const char* time_msg, bool wifi_on, bool wifi_up,
                int8_t battery_pct, bool external) {
-  // The band is full at scale 2: the queue slot runs to 130 px, then a 16 px
-  // glyph and a 28 px battery to the right margin. Adding a clock meant choosing
-  // between a second line and smaller type, and §3.2's band is one line, so the
-  // text drops to scale 1 - 6 px a column, which fits "3 TO SEND" and "14:02"
-  // together with the glyph and battery exactly where they were.
+  // The band is one line. The queue slot runs to 130 px; the right of it holds
+  // the only time fact the band still draws: NO TIME while the clock has never
+  // been set, and nothing at all once it has. The time itself is gone (Jake,
+  // 2026-11-26): a minute-accurate clock meant one panel refresh a minute, and
+  // an e-paper panel holding a picture costs nothing. "NO TIME" is 7 columns at
+  // scale 1, which fits beside the 10-column queue slot; the longer wording
+  // would collide with "99 TO SEND".
   text_at(c, grid::kLeft, grid::kBandY + 3, queue, 1, kInk);
-  if (clock != nullptr && clock[0] != '\0') {
-    c.text(grid::kGlyphX - 6 - text_width(clock, 1), grid::kBandY + 3, clock, 1, kInk);
+  if (time_msg != nullptr && time_msg[0] != '\0') {
+    c.text(grid::kGlyphX - 6 - text_width(time_msg, 1), grid::kBandY + 3, time_msg, 1, kInk);
   }
   // Wi-Fi owns this slot, in its three states: associated, up but not
   // associated (the rune with the cut), and off (no rune at all - the slot is

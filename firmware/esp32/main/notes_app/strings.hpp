@@ -27,13 +27,17 @@ inline constexpr const char* kOffline = "OFFLINE";
 inline constexpr const char* kNoCard = "NO CARD";
 inline constexpr const char* kLowPower = "LOW POWER";
 inline constexpr const char* kNoSync = "NO SYNC";
-inline constexpr const char* kNoTime = "NO TIME";
 }  // namespace home
 
 // Home, zone A - the queue slot, 10 columns (§4.2).
 namespace band {
 inline constexpr const char* kToSend = "%u TO SEND";
 inline constexpr const char* kAllSent = "ALL SENT";
+// The band's one time fact: the clock has never been set, so a note's time
+// cannot be trusted. Seven columns is what the slot beside a ten-column queue
+// count leaves at scale 1, and it is the only thing the slot ever draws now
+// that the minute-accurate clock is gone.
+inline constexpr const char* kNoTime = "NO TIME";
 }  // namespace band
 
 // Home, the one line under the hero (§4.2).

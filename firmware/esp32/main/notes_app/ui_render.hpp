@@ -82,11 +82,13 @@ struct ScreenDraw {
 void draw(hg::Canvas& canvas, const ScreenDraw& draw);
 
 // The pieces, exposed for the host test's per-screen checks.
-// Zone A. `queue` and `clock` share the left slot at scale 1; the glyphs keep
-// the slots §3.2 gives them, so a band with a clock looks like a band without
-// one. The glyph box is Wi-Fi in its three states (up, on, off), never
-// Bluetooth: the phone's window has its own screen (Jake, 2026-11-22).
-void draw_band(hg::Canvas& canvas, const char* queue, const char* clock, bool wifi_on, bool wifi_up,
+// Zone A. `queue` and `time_msg` share the left slot at scale 1; the glyphs keep
+// the slots §3.2 gives them, so a band with the warning looks like a band without
+// one. `time_msg` is only ever "NO TIME" (the clock was never set); the clock
+// itself is not drawn any more. The glyph box is Wi-Fi in its three states (up,
+// on, off), never Bluetooth: the phone's window has its own screen (Jake,
+// 2026-11-22).
+void draw_band(hg::Canvas& canvas, const char* queue, const char* time_msg, bool wifi_on, bool wifi_up,
                int8_t battery_pct, bool external);
 void draw_selection(hg::Canvas& canvas, int row_y);
 void draw_panel_text_on(hg::Canvas& canvas, int x, int y, const char* text, bool on_bar);

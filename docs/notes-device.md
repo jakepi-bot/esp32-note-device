@@ -36,7 +36,7 @@ The resting face, and what it returns to when a screen is left.
 
 ```
 ┌───────────────────────┐
-│ ▂▄▆█        12:04  ▮  │   the queue band, the last synced minute, battery
+│ ▂▄▆█               ▮  │   the queue band, Wi-Fi, battery
 │                       │
 │        ALL SENT       │   hero: the single most important fact
 │     LAST 14:02        │   one line of context
@@ -45,10 +45,11 @@ The resting face, and what it returns to when a screen is left.
 └───────────────────────┘
 ```
 
-- **Band** - `N TO SEND` or `ALL SENT`, blank when the hero already said it.
+- **Band** - `N TO SEND` or `ALL SENT`, blank when the hero already said it. If
+  the clock has never been set, `NO TIME` sits in the band's right-hand slot; it
+  disappears once the clock has been set. No time is displayed.
 - **Hero**, highest priority first: `NO CARD`, `LOW POWER`, `UPLOADING`,
-  `NO SYNC` (a batch failed), `OFFLINE` (notes waiting and no station), `NO TIME`
-  (clock unset), `READY`.
+  `NO SYNC` (a batch failed), `OFFLINE` (notes waiting and no station), `READY`.
 - **The line under the hero** never repeats the band: `PLUG IN SOON`,
   `NOTHING LOST` (no card, so nothing can be deleted), `3 OF 7 SENT` during an
   upload (with a progress bar), `LAST 14:02` (the newest note's minute), or
@@ -59,12 +60,11 @@ The resting face, and what it returns to when a screen is left.
   the band does not move, so this one line is the whole account of why nothing
   was kept; when it lapses the counts line returns. A recording started or a
   note committed in the meantime takes the line back at once.
-- **The clock** sits in the band, `HH:MM`, blank until the device has had the
-  time once (SNTP, or `clock set` from the console). It is the one fact allowed to
-  repaint a resting face: it draws when the minute changes and only on Home, so
-  a minute costs one partial refresh (sixty an hour, which is why it is drawn at
-  scale 1 and only here). A minute that turns over in a menu is drawn by the
-  frame that returns Home.
+- **No clock on the resting face.** The time is not drawn anywhere on Home: a
+  minute-accurate clock repainted the panel every minute, and each refresh is a
+  CPU wake plus a panel drive. The band only warns `NO TIME` while the clock has
+  never been set (SNTP, or `clock set` from the console). The wall clock still
+  stamps notes and uploads, and `clock` still reads and sets it.
 - **Bluetooth** takes the Wi-Fi glyph's box in the band while the radio has a
   window open: a thin stem-and-lobes rune while it advertises, a 2 px stem while
   a phone is connected. With the radio off the box is the Wi-Fi glyph again, so

@@ -1,7 +1,6 @@
 #include "board.hpp"
 
 #include "sdkconfig.h"
-#include "driver/gpio.h"
 
 namespace hgp {
 namespace {
@@ -1837,24 +1836,6 @@ BoardConfig make() {
 const BoardConfig& board_config() {
   static const BoardConfig config = make();
   return config;
-}
-
-void keep_pins_through_sleep(const BoardConfig& b) {
-  // A latch-powered board must also keep its battery latch high, or light sleep cuts the supply.
-  const int pins[] = {b.amoled.cs, b.amoled.sclk, b.amoled.d0, b.amoled.d1, b.amoled.d2, b.amoled.d3,
-                      b.amoled.rst, b.lcd.cs, b.lcd.dc, b.lcd.rst, b.lcd.backlight, b.touch.rst,
-                      b.touch.bus.sda, b.touch.bus.scl, b.codec.pa, b.i2c.sda, b.i2c.scl,
-                      b.latch_power.enabled ? b.latch_power.enable : -1};
-  for (int pin : pins)
-    if (pin >= 0) gpio_sleep_sel_dis(static_cast<gpio_num_t>(pin));
-#if CONFIG_HG_BOARD_WS_EPAPER_154
-  // The e-paper's rail and SPI lines keep their level too: the image needs no
-  // power, but the next refresh finds the panel as it left it.
-  for (int pin : {b.epd.sclk, b.epd.mosi, b.epd.cs, b.epd.dc, b.epd.rst, b.epd.pwr})
-    if (pin >= 0) gpio_sleep_sel_dis(static_cast<gpio_num_t>(pin));
-#endif
-  for (const hgp::PowerRail& rail : b.power_rails)
-    if (rail.gpio >= 0) gpio_sleep_sel_dis(static_cast<gpio_num_t>(rail.gpio));
 }
 
 int lcd_power_pin(const BoardConfig& b) {

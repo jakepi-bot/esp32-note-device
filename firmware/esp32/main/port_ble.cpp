@@ -225,12 +225,21 @@ void advertise() {
   if (!g_synced || g_conn.load() != kNone) return;
   ble_gap_adv_stop();
   const bool pairing = g_pairing.load();
-  // Advertise while there is a reason to be found: a pairing ask, or the Phone
-  // window a person opened. Advertising forever because a phone was ever paired
-  // is a radio on for nothing - about a milliamp, all day, on a device that is
-  // meant to last weeks (2026-11-23). A phone that wants the gadget opens the
-  // window from the menu, which is the documented flow.
-  const bool window_open = g_window.phone_left_ms(now_ms()) != 0;
+  // Advertise while there is a reason to be found: a pairing ask, or any window
+  // that brought the controller up. Advertising forever because a phone was ever
+  // paired is a radio on for nothing - about a milliamp, all day, on a device
+  // meant to last weeks (2026-11-23) - so this is every live reason, not only
+  // the Phone screen's: `warm()` covers boot, a saved note, the pending retry
+  // and `phone wake` as well.
+  //
+  // It used to read phone_left_ms(), the Phone screen's own clock, and that
+  // narrower test meant a note-saved or `phone wake` window brought the radio up
+  // and then advertised nothing: the device logged "wake window open for 60000
+  // ms, radio up" and "stop advertising" over and over while no scan anywhere
+  // could see it (measured 2026-11-26; 45 neighbours found, this one absent, and
+  // a direct connect to its address failed). That is also why the iPhone could
+  // never find it.
+  const bool window_open = g_window.warm(now_ms());
   if (!pairing && !window_open) return;
 
   std::string name;

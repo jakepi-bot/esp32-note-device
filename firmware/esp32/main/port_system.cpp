@@ -4,6 +4,7 @@
 #include <string>
 #include <ctime>
 
+#include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -67,6 +68,24 @@ esp_err_t count_sleep(int64_t slept_us, void*) {
 // Count light sleep without taking the "may not sleep" lock `enable_doze()` takes:
 // an app that sleeps whenever it is idle still needs to know how much it slept,
 // because the key timing subtracts exactly that (2026-11-24).
+void keep_pins_through_sleep(const BoardConfig& b) {
+  // A latch-powered board must also keep its battery latch high, or light sleep cuts the supply.
+  const int pins[] = {b.amoled.cs, b.amoled.sclk, b.amoled.d0, b.amoled.d1, b.amoled.d2, b.amoled.d3,
+                      b.amoled.rst, b.lcd.cs, b.lcd.dc, b.lcd.rst, b.lcd.backlight, b.touch.rst,
+                      b.touch.bus.sda, b.touch.bus.scl, b.codec.pa, b.i2c.sda, b.i2c.scl,
+                      b.latch_power.enabled ? b.latch_power.enable : -1};
+  for (int pin : pins)
+    if (pin >= 0) gpio_sleep_sel_dis(static_cast<gpio_num_t>(pin));
+#if CONFIG_HG_BOARD_WS_EPAPER_154
+  // The e-paper's rail and SPI lines keep their level too: the image needs no
+  // power, but the next refresh finds the panel as it left it.
+  for (int pin : {b.epd.sclk, b.epd.mosi, b.epd.cs, b.epd.dc, b.epd.rst, b.epd.pwr})
+    if (pin >= 0) gpio_sleep_sel_dis(static_cast<gpio_num_t>(pin));
+#endif
+  for (const hgp::PowerRail& rail : b.power_rails)
+    if (rail.gpio >= 0) gpio_sleep_sel_dis(static_cast<gpio_num_t>(rail.gpio));
+}
+
 void EspSystem::enable_sleep_accounting() {
 #if CONFIG_PM_ENABLE && CONFIG_PM_LIGHT_SLEEP_CALLBACKS
   static bool registered = false;

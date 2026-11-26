@@ -631,8 +631,9 @@ over 8 attempts, then `failed/` with `.error`), never device retries.
 | Panel energy | ~8 mAs per update (≈22 µA·h) — negligible next to Wi-Fi; **doze cost is Wi-Fi**, so keep the core's doze rules and let the RTC alarm drive clock refreshes | datasheet §2.4 |
 | Battery percentage | No fuel gauge: report millivolts only; percentage needs `set battery_estimate liion` (Vbatt curve, opt-in) and is then an estimate | `docs/hardware.md` battery section |
 
-Practical budget (target, **[verify]**): ~45–60 min continuous voice, ~8 h doze with
-an hourly clock refresh, weeks on the shelf in deep sleep. The firmware must never
+Practical budget (target, **[verify]**): ~45–60 min continuous voice, a rest state
+that clears 24 hours idle ([low power](low-power.md#the-24-hour-idle-budget-verdict)),
+weeks on the shelf in deep sleep. The firmware must never
 assume a stable rail: gate EPD/audio power around use, and latch VBAT before anything
 else at boot.
 

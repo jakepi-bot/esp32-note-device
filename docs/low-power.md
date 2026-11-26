@@ -87,6 +87,122 @@ Host tests: 8/8 suites pass, including a new case that drives the bistable
 doze ("a resting bistable panel lets the chip sleep with no backlight and no
 timeout": dozing on battery, USB ends it).
 
+## The 24-hour idle budget: verdict
+
+The requirement for this device is **at least 24 hours idle on one charge**: the
+screen resting, the radio quiet, nothing queued. That is a single division,
+`hours = capacity / average current`, and it needs three numbers. Two of them have
+never been measured, so this section keeps what is recorded apart from what is
+inferred, and states the verdict both ways instead of borrowing confidence from the
+cable.
+
+### The three inputs
+
+| Input | Value | Source | Status |
+|---|---|---|---|
+| Battery runtime on the cell | **~6 h** at ~40 mA | the owner's own use; neither the build nor the date is recorded | observed |
+| Rest current on the cell | **never metered** | every reading on record is USB-side (see below) | unknown |
+| Cell capacity | **not recorded** | the only cell label in [hardware verification](hardware-validation.md) (`SKU 33228 3.7V 1000mA`) belongs to the Touch-LCD-1.54, a different board | unknown |
+
+6 h at 40 mA is 240 mAh, so the cell is the ~250 mAh class. That is an inference
+from a runtime, not a label read. Nothing below depends on it being exact: the
+requirement fixes the current, `I = capacity / 24`, and every figure scales with
+the measured capacity when the label is read.
+
+### The arithmetic
+
+| Average current | 240 mAh | 500 mAh | 1000 mAh |
+|---|---|---|---|
+| 40 mA (the observation) | 6.0 h | 12.5 h | 25.0 h |
+| 22 mA (datasheet modem sleep, 80 MHz) | 10.9 h | 22.7 h | 45.5 h |
+| 10 mA (the threshold at 240 mAh) | 24.0 h | 50.0 h | 100.0 h |
+| 3 mA | 80 h | 167 h | 333 h |
+| 1 mA (the target in the [UI spec](notes-ui-spec.md)) | 240 h | 500 h | 1000 h |
+| 0.38 mA (light-sleep floor, below) | 632 h | 1316 h | 2632 h |
+
+Clearing 24 hours takes an average of **10.0 mA at 240 mAh** (10.4 mA at 250 mAh,
+20.8 mA at 500, 41.7 mA at 1000). At the observed 40 mA the device runs about 6 h
+on the inferred cell: four times over budget.
+
+### Peaks do not decide this; the rest state does
+
+A realistic day — three recordings of 30, 45 and 75 s, three uploads of 20, 25 and
+35 s, eleven key presses, 15.8 h on and the rest with the latch cut — comes to about
+8 mAh of charge at generous currents (recordings 50 mA, uploads 150 mA, an awake
+screen 25 mA). The other ~230 mAh of a 240 mAh cell is spent resting. The
+requirement is therefore a statement about the resting current, and the day's peaks
+are noise against it. With the cell off for 8 h of the 24, the awake budget is
+looser (14.6 mA); the requirement is 24 hours idle, so **10 mA is the number the
+verdict uses**.
+
+### Why the USB figures cannot be used
+
+The meter readings on record are 39 mA with the radio off (the power-management
+comment in `firmware/esp32/notes_app/main.cpp`, meter 2026-11-23), 35 mA with the
+panel rail down, and 41 mA associated under `MIN_MODEM`. None of them is a battery
+number: light sleep never runs while a USB host is attached
+(`CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION`, or the console and JTAG would stop), the USB
+PHY alone is worth tens of milliamps, and the notes app refuses to enter the idle
+state on the cable at all (`!power_cable`). A cable reading is a different state,
+not a pessimistic version of the battery one — derive battery life from it and the
+error lands in whichever direction the particular state happens to differ, which is
+why the numbers are quoted here only to be excluded.
+
+### The verdict
+
+| | |
+|---|---|
+| As last observed on the cell | **fails**: ~6 h against a 24 h requirement |
+| The current firmware | **undetermined**, on one missing number: the rest current on the cell. The idle state and the doze path landed on 25 November (`c73a12a`, `d9d7c79`) and no runtime has been recorded since, so the ~6 h figure may predate them |
+| What has to be true | an average of at most `capacity / 24` — 10.0 mA on the inferred cell |
+| Is that reachable | on paper, yes (below); as a measurement, not yet |
+
+### The light-sleep dependency
+
+The verdict does not hold with the firmware that produced the 6 hours. It becomes
+true only once the doze path and the idle state are both live at rest on the cell:
+light sleep between a 10 s wake (`kIdleWaitMs`), the panel rail down, the station
+stopped, and no periodic refresh on the resting face — which is why that face has
+no clock ([UI spec](notes-ui-spec.md), decision 3).
+
+Projected at that rest state: the chip's light sleep is 240 µA and the 8 MB
+8-line PSRAM adds 140 µA at 3.3 V or 200 µA at 1.8 V (ESP32-S3 datasheet v2.2,
+Table 5-10 and its PSRAM note), so **0.38-0.44 mA**, plus a negligible cost for one
+wake per 10 s. On the inferred 240 mAh cell that is **540-630 h**; even a pessimistic
+1 mA gives 240 h and 3 mA gives 80 h. Every one of those clears 24 h by at least 3x,
+projected.
+
+The projection fails in exactly one way, and it is the case to measure: an
+associated station. Modem sleep is 13-19 mA at 40 MHz and 22-36 mA at 80 MHz
+(datasheet Table 5-9), so 240 mAh at 22 mA is 10.9 h — under 24 h even at the good
+end of the range. The notes design stops the station at rest and reopens a two
+minute window every 15 minutes only while notes are queued; a queue that is empty
+but still holds a window, or a window that never closes after an upload, breaks the
+verdict without breaking the sleep. That is what the meter run has to catch, and it
+is the whole difference between "light sleep landed" and "the device meets 24 hours".
+
+### What is still open
+
+1. **Read the cell label** (mAh, nominal voltage, part). Every figure here scales by
+   it, and [hardware verification](hardware-validation.md) carries the fill-in block
+   for it. One minute with the case open.
+2. **One rest reading on the cell**, radio off and rail down, taken on a VBUS-cut
+   cable so the console survives the power cut and `power` answers `supply battery`.
+   Predicted 0.38-0.44 mA; anything over 10 mA fails the requirement outright.
+3. **One reading with the station associated**, taken right after an upload and held
+   for 20 minutes. Predicted 15-40 mA while up; the question is whether it comes
+   down. This is the only reading that separates a stopped station from a reopened
+   window.
+4. **A 24 h discharge log** — `battery` every 30 s overnight — so the verdict rests
+   on an observed runtime rather than an integral of assumptions. At the projected
+   rest current the whole day costs under 11 mAh of a 240 mAh cell, so the cell
+   should end the day barely below where it started; a fall of more than a few
+   hundred millivolts means the rest state is not the one this section assumes.
+5. **Pin the 6 h observation to a build and a date** (`git rev-parse HEAD` of the
+   image that ran it), so the one runtime on record is a commit rather than a memory.
+   The stale ~8 h doze budget that used to sit in the integration spec's §9 has been
+   replaced with this requirement in the same change.
+
 ## Hardware checks the QA pass still owes
 
 These are behaviour changes on a real board and are **not** provable on a host:

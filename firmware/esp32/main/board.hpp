@@ -424,6 +424,13 @@ struct BoardConfig {
 int lcd_power_pin(const BoardConfig& b);
 
 const BoardConfig& board_config();
+
+// Light sleep disconnects every GPIO it was not told to keep. A latch-powered
+// board must hold its latch through a doze or the supply opens and the chip is
+// gone - the note taker vanished from USB the first time light sleep engaged,
+// because only the gadget app called this. Both apps call it before sleeping
+// can happen.
+void keep_pins_through_sleep(const BoardConfig& b);
 // "HGBOARD=<board name>", the tag every image carries.
 const char* board_tag();
 

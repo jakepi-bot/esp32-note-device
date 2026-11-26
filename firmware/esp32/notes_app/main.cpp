@@ -567,9 +567,13 @@ std::string console_line(std::string_view line) {
   if (line == "pmsleep") {
     // Force one light sleep with a one-second timer: if this works, the hardware
     // and the clocks are fine and something is keeping the idle task off the CPU.
+    // The codec is powered down first so the i2s APB_FREQ_MAX lock is released
+    // (that is the whole point of the codec power-down work).
+    g_codec_speaker.power_down();
     esp_sleep_enable_timer_wakeup(1000000);
     const int64_t before = static_cast<int64_t>(g_system.now_us());
     const esp_err_t err = esp_light_sleep_start();
+    g_codec_speaker.power_up();
     char out[160];
     std::snprintf(out, sizeof out, "@ok light sleep: %s, awake after %lld ms, slept total %u ms",
                   esp_err_to_name(err), (static_cast<int64_t>(g_system.now_us()) - before) / 1000,
@@ -662,6 +666,15 @@ std::string console_line(std::string_view line) {
       const bool on = rest != "idle off";
       g_ui.idle(on);
       g_runtime.set_idle(on);
+      if (on) {
+        if (!g_codec_speaker.busy()) {
+          g_codec_mic.set_suspended(true);
+          if (!g_codec.release_idle()) g_codec_mic.set_suspended(false);
+        }
+      } else {
+        g_codec.restore_idle();
+        g_codec_mic.set_suspended(false);
+      }
       return on ? "@ok idle: panel rail down, a key wakes it (epd idle off)"
                 : "@ok awake: rail up, full redraw";
     }
@@ -763,6 +776,7 @@ extern "C" void app_main(void) {
     const bool mic = g_codec_mic.begin(g_codec.in(), board.codec.rmnm_mics, g_codec.mic_link());
     g_codec_speaker.es8311_fade_ramp = board.codec.dac_fade_ramp && board.codec.speaker == hgp::SpeakerCodec::Es8311;
     const bool speaker = g_codec_speaker.begin(g_codec.out(), board.codec.stereo32, board.codec.pa);
+    if (speaker) g_codec_speaker.allow_power_down(g_codec.out_format());
     ESP_LOGI(TAG, "codec %s: mic %s, speaker %s", g_codec.mic_name(), mic ? "up" : "none", speaker ? "up" : "none");
   } else {
     ESP_LOGW(TAG, "no codec: recording and playback stay off");
@@ -807,6 +821,11 @@ extern "C" void app_main(void) {
       ESP_LOGI(TAG, "power management: %d-%d MHz, light sleep %s", static_cast<int>(pm.min_freq_mhz),
                static_cast<int>(pm.max_freq_mhz), pm.light_sleep_enable ? "on" : "off");
     }
+    // Light sleep disconnects every GPIO it was not told to keep, and this board
+    // is latch-powered: without this the battery latch drops mid-sleep, the
+    // supply opens and the chip is gone - it vanished from USB the first time
+    // light sleep engaged (2026-11-26). The gadget app has always called it.
+    hgp::keep_pins_through_sleep(board);
     // The keys are polled, and a chip in light sleep cannot poll: without a wake
     // source a press waits for the next timer (up to 2 s) and a short tap is lost
     // entirely - "I cannot start a recording" (Jake, 2026-11-24). Both keys are
@@ -825,6 +844,14 @@ extern "C" void app_main(void) {
     // counter has to be running even though this app never takes the doze lock.
     hgp::EspSystem::enable_sleep_accounting();
     arm_key_edges();
+    // Enable automatic power management: allow the codec to power down while the
+    // chip light-sleeps, so the i2s APB_FREQ_MAX lock is released and the chip can
+    // actually enter light sleep. Only taken when the board allows it.
+    g_system.on_doze_start = [] { g_codec_speaker.power_down(); };
+    g_system.on_doze_end = [] {
+        g_codec_speaker.power_up();
+        g_net.retry_now();
+    };
   }
   // The clock wants network time: this board has no RTC, so every note recorded
   // before the first sync is stamped 1970 (the uploader restamps it later).
@@ -837,7 +864,8 @@ extern "C" void app_main(void) {
   g_net.on_battery = [] { return g_latch.external_power() == std::optional<bool>(false); };
   g_net.on_console = [](std::string_view line) { return console_line(line); };
   g_net.in_turn = [] { return false; };  // nothing here makes a live turn
-  g_net.dozing = [] { return false; };
+  g_net.dozing = [] { return g_ui.idle(); };
+  g_net.deep_sleep_ok = [] { return true; };
   g_net.radio_off();
 
   if (board.bluetooth && g_radio.begin(device_name())) {
@@ -957,6 +985,13 @@ extern "C" void app_main(void) {
         }
       } while (hgp::events::receive(ev, 0));
     }
+    // A finger arriving while the I2S channels are released for sleep: sound
+    // first, then the wake. poll_keys() below can start a recording on this very
+    // pass, and the microphone reads a channel that is disabled until this runs.
+    if (g_key_while_idle && g_codec.idle_released()) {
+      g_codec.restore_idle();
+      g_codec_mic.set_suspended(false);
+    }
     const uint32_t now = g_system.now_ms();
     // The supply changed: plugging or unplugging the cable moves the PWR sense
     // line, and that edge is not a finger. Lock the keys and say so.
@@ -987,8 +1022,22 @@ extern "C" void app_main(void) {
                  static_cast<unsigned>((now - last_touch_ms) / 1000));
         g_ui.idle(true);
         g_runtime.set_idle(true);
+        // The two enabled I2S channels are the only locks left at rest, and one
+        // held lock is enough to keep ESP-IDF out of light sleep. Audio in flight
+        // (a beep, a recording) keeps them: the next pass tries again. The mic
+        // is suspended first: a shared codec reads while idle by design, and that
+        // read holds the receive channel's lock and spins at the error path once
+        // the channel is released.
+        if (!g_codec_speaker.busy()) {
+          g_codec_mic.set_suspended(true);
+          if (!g_codec.release_idle()) g_codec_mic.set_suspended(false);
+        }
       }
     } else if (g_runtime.working() || g_key_while_idle) {
+      if (g_codec.idle_released()) {
+        g_codec.restore_idle();
+        g_codec_mic.set_suspended(false);
+      }
       // The trigger is the finger itself, not "a key in the last minute": a
       // timestamp window undid `epd idle on` for a minute after every boot, and
       // a console poll must never wake the glass.

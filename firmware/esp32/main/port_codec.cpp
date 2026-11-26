@@ -63,6 +63,29 @@ i2c_master_bus_handle_t touch_bus(const I2cBusConfig& cfg) {
 // --------------------------------------------------------------------------
 // Codecs
 
+bool CodecAudio::release_idle() {
+  if (!tx_ || !rx_) return false;
+  if (released_) return true;
+  // Disable, don't delete: the channels keep their configuration, so restoring
+  // is an enable and the codec chip itself is left alone (the ES8311 is shared
+  // with the microphone, so closing the codec device would take the mic with it).
+  if (i2s_channel_disable(tx_) != ESP_OK) return false;
+  i2s_channel_disable(rx_);
+  released_ = true;
+  ESP_LOGI(TAG, "I2S released: both channels disabled, light sleep can engage");
+  return true;
+}
+
+void CodecAudio::restore_idle() {
+  if (!released_) return;
+  released_ = false;
+  // Idempotent, not diagnostic: the sleep callbacks and the codec device touch
+  // these channels behind us, so "already enabled" and "was never disabled" are
+  // both fine states to land in - the caller wants sound, not a report.
+  (void)i2s_channel_enable(tx_);
+  (void)i2s_channel_enable(rx_);
+}
+
 bool CodecAudio::begin(const CodecAudioConfig& cfg, i2c_master_bus_handle_t bus) {
   if (!bus) return false;
   if (cfg.speaker_pa && cfg.pa >= 0) {
@@ -282,7 +305,16 @@ void CodecMic::task(void* arg) {
     void pause() { vTaskDelay(pdMS_TO_TICKS(10)); }
   } ops{self};
   hg::MicPower power(self->link_.switchable);
-  for (;;) power.turn(self->capturing_.load(), ops, pcm);
+  for (;;) {
+    // Idle: the channels are released for light sleep, so reading them would
+    // fail every 10 ms and keep a task ready for ever (the CPU never sleeps
+    // with a runnable task). Wait for a press instead.
+    if (self->suspended_.load()) {
+      ops.wait();
+      continue;
+    }
+    power.turn(self->capturing_.load(), ops, pcm);
+  }
 }
 
 // --------------------------------------------------------------------------

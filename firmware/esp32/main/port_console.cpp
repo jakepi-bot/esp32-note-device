@@ -99,7 +99,10 @@ void begin() {
   // page does, so a device whose NVS was wiped can be put back on the network
   // from a host (2026-11-22). Without the registration esp_console answers
   // "Unrecognized command" and the handler is never reached.
-  for (const char* name : {"about", "battery", "clock", "power", "pm", "radio", "sd", "keys", "ui", "wifi-set", "epd"}) {
+  // `pmsleep` lives in the notes handler (notes_app/main.cpp) and was never
+  // listed here, so esp_console answered "Unrecognized command" and the one
+  // diagnostic that proves whether light sleep works was unreachable.
+  for (const char* name : {"about", "battery", "clock", "power", "pm", "pmsleep", "radio", "sd", "keys", "ui", "wifi-set", "epd"}) {
     esp_console_cmd_t cmd = {};
     cmd.command = name;
     cmd.help = "Notes app status (see: notes status)";

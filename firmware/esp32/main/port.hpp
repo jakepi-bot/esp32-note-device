@@ -519,6 +519,18 @@ class CodecAudio {
     float gain_db = 0;
   };
   MicLink mic_link() const { return mic_link_; }
+  // Idle release. Both I2S channels are enabled at begin() and never disabled,
+  // and each enabled channel holds an ESP_PM_APB_FREQ_MAX lock named "i2s_driver"
+  // - ESP-IDF's get_lowest_allowed_mode() then never returns PM_MODE_LIGHT_SLEEP
+  // and should_skip_light_sleep() refuses every attempt, so a resting device
+  // burns ~40 mA forever (meter, 2026-11-23). Measured on the note taker:
+  // "light sleep on" at boot, slept total 0 ms over 31 s, these two locks the
+  // only ones left at rest.
+  // false when audio is in flight: the caller leaves the channels alone and
+  // tries again later. restore_idle() is what makes a press sound again.
+  bool release_idle();
+  void restore_idle();
+  bool idle_released() const { return released_; }
   // How the speaker was opened, for CodecSpeaker::allow_power_down. The microphone's
   // format can differ (CodecAudioConfig::mic_right_slot).
   esp_codec_dev_sample_info_t out_format() const { return out_format_; }
@@ -530,6 +542,7 @@ class CodecAudio {
   MicLink mic_link_;
   esp_codec_dev_sample_info_t out_format_ = {};
   bool es7243_fitted_ = false;  // an ES7243 answered in place of the configured ES7243E
+  bool released_ = false;
   const char* mic_name_ = "none";
 };
 
@@ -538,6 +551,12 @@ class CodecMic final : public hg::AudioIn {
   bool begin(esp_codec_dev_handle_t dev, bool rmnm, const CodecAudio::MicLink& link);
   bool start(uint32_t sample_rate) override;
   void stop() override { capturing_ = false; }
+  // A shared codec keeps reading while idle so a capture starts with fresh
+  // samples (MicPower), and that read is what holds the receive channel's power
+  // lock - so an idle device cannot sleep with it running, and it spins at the
+  // error path once the channel is released. Suspend stops the reads without
+  // closing the codec; the codec stays configured, so a press is not slower.
+  void set_suspended(bool on) { suspended_ = on; }
 
  private:
   static void task(void* arg);
@@ -547,6 +566,7 @@ class CodecMic final : public hg::AudioIn {
   bool rmnm_ = false;
   int16_t* raw_ = nullptr;
   std::atomic<bool> capturing_{false};
+  std::atomic<bool> suspended_{false};
 };
 
 class CodecSpeaker final : public hg::AudioOut {

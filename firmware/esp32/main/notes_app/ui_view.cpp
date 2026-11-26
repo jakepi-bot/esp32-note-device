@@ -115,7 +115,11 @@ void format_cap(uint32_t seconds, uint64_t bytes, char out[24]) {
     copy_out(time_left, out, 24);
     return;
   }
-  char size[10];
+  // format_capacity()'s contract is 12 bytes ("999.9G" is the widest it
+  // writes). This buffer was 10, and Release builds abort on the fortify
+  // check before a single test runs - `hg_notes_ui_tests` had been failing
+  // that way on every CI run, which is not something the clock change caused.
+  char size[12];
   if (bytes >= 1024ull * 1024ull * 1024ull) {
     format_capacity(bytes, size);  // "2.0G"
   } else {

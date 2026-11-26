@@ -128,7 +128,8 @@ are deletable too (that is what retention does automatically today).
 
 Targets to agree before measuring: idle average under 1 mA with no notes waiting
 (to be checked with a USB-C meter or INA219; the firmware will also report its own
-duty cycle).
+duty cycle). The arithmetic that turns this into the 24-hour requirement, and what
+is still unmeasured, is in [low power](low-power.md#the-24-hour-idle-budget-verdict).
 
 ## 5. What happens to Hermes
 

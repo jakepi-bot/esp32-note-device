@@ -242,7 +242,7 @@ docker compose up -d --build
 
 | What you see | What it is |
 |---|---|
-| `NO TIME` | the clock is unset: it needs one Wi-Fi window with SNTP |
+| `NO TIME` | the clock is unset: it needs one Wi-Fi window with SNTP (the band says so until it is set) |
 | `OFFLINE` | no window is open, or nothing answers at the notes endpoint |
 | `NO SYNC` | uploads are failing: check `notes status` and the server's log |
 | `NO CARD` | the microSD card is missing or did not mount |

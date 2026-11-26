@@ -308,44 +308,47 @@ Snapshot battery_seed(int8_t pct) {
   return seed;
 }
 
-Facts facts_at(int8_t pct, unsigned hour, unsigned minute, bool clock = true) {
+Facts facts_at(int8_t pct, bool clock = true) {
   Facts f;
   f.wifi_up = true;
   f.clock_set = clock;
-  f.clock.valid = clock;
-  f.clock.hour = static_cast<uint8_t>(hour);
-  f.clock.minute = static_cast<uint8_t>(minute);
   f.battery_pct = pct;
   return f;
 }
 
 }  // namespace
 
-TEST("facts: the clock repaints on the minute, and only on Home") {
+TEST("facts: a minute rollover is not a frame; the clock's set answer is") {
   TempDir dir;
   Store store(dir.path);
   UiState ui;
   ui.begin(battery_seed(84), &store);
 
-  // The first minute drawn is a change: the boot frame had no clock.
-  CHECK(ui.set_facts(facts_at(84, 14, 2), 1000).draw);
-  CHECK(std::string(build_home(ui.snapshot()).clock) == "14:02");
+  // The seed says the clock is set, and the minute is no longer drawn: however
+  // many polls pass, and whatever the wall clock reads, nothing moves.
+  for (uint32_t t = 1000; t <= 61000; t += 10000) CHECK(!ui.set_facts(facts_at(84), t).draw);
+  CHECK(build_home(ui.snapshot()).clock_msg[0] == '\0');
 
-  // The same minute, however many polls, costs no frame.
-  for (uint32_t t = 2000; t <= 50000; t += 10000) CHECK(!ui.set_facts(facts_at(84, 14, 2), t).draw);
+  // The one clock fact the band still draws is its set/unset answer: the
+  // warning appears when the clock goes away, and clears when it is back. It is
+  // a band-slot change, so partial - never the hero's full flash.
+  const Outcome shown = ui.set_facts(facts_at(84, false), 71000);
+  CHECK(shown.draw);
+  CHECK(shown.refresh == Refresh::Partial);
+  CHECK(std::string(build_home(ui.snapshot()).clock_msg) == "NO TIME");
+  CHECK(!ui.set_facts(facts_at(84, false), 81000).draw);
+  const Outcome cleared = ui.set_facts(facts_at(84, true), 91000);
+  CHECK(cleared.draw);
+  CHECK(cleared.refresh == Refresh::Partial);
+  CHECK(build_home(ui.snapshot()).clock_msg[0] == '\0');
 
-  // The next minute draws once.
-  CHECK(ui.set_facts(facts_at(84, 14, 3), 51000).draw);
-  CHECK(std::string(build_home(ui.snapshot()).clock) == "14:03");
-  CHECK(!ui.set_facts(facts_at(84, 14, 3), 61000).draw);
-
-  // Away from Home the minute is adopted but not drawn; the full frame that
-  // comes back carries it (a press to the menu is Full).
-  CHECK(ui.press(Key::BootHold, 62000).draw);
+  // Away from Home the answer is adopted but not drawn; the full frame that
+  // comes back Home carries it (a press to the menu is Full).
+  CHECK(ui.press(Key::BootHold, 92000).draw);
   CHECK(ui.screen() == Screen::Menu);
-  const Outcome away = ui.set_facts(facts_at(84, 14, 4), 71000);
+  const Outcome away = ui.set_facts(facts_at(84, false), 101000);
   CHECK(!away.draw);
-  CHECK(std::string(ui.snapshot().clock_text) == "14:04");
+  CHECK(!ui.snapshot().clock_set);
 }
 
 TEST("facts: a one percent battery step is the ADC talking, not the glass") {
@@ -353,29 +356,28 @@ TEST("facts: a one percent battery step is the ADC talking, not the glass") {
   Store store(dir.path);
   UiState ui;
   ui.begin(battery_seed(84), &store);
-  // The clock's first minute is a change of its own (the case above), so settle
-  // it before the battery is the only thing moving.
-  CHECK(ui.set_facts(facts_at(84, 14, 2), 5000).draw);
-  CHECK(!ui.set_facts(facts_at(84, 14, 2), 9000).draw);
+  // Nothing has moved yet: the clock no longer opens with a minute of its own.
+  CHECK(!ui.set_facts(facts_at(84), 5000).draw);
+  CHECK(!ui.set_facts(facts_at(84), 9000).draw);
 
   // Nothing but the battery moved, and it moved by the ADC's own noise.
-  CHECK(!ui.set_facts(facts_at(83, 14, 2), 10000).draw);
+  CHECK(!ui.set_facts(facts_at(83), 10000).draw);
   CHECK(ui.snapshot().battery_pct == 84);  // the glass keeps what it drew
 
   // Two percent is a real step, and it draws.
-  CHECK(ui.set_facts(facts_at(82, 14, 2), 20000).draw);
+  CHECK(ui.set_facts(facts_at(82), 20000).draw);
   CHECK(ui.snapshot().battery_pct == 82);
-  CHECK(!ui.set_facts(facts_at(82, 14, 2), 30000).draw);
+  CHECK(!ui.set_facts(facts_at(82), 30000).draw);
 
   // One more percent waits, then draws once five minutes have passed since the
   // last power publish - the level cannot drift far from the glass silently.
-  CHECK(!ui.set_facts(facts_at(81, 14, 2), 120000).draw);
+  CHECK(!ui.set_facts(facts_at(81), 120000).draw);
   CHECK(ui.snapshot().battery_pct == 82);
-  CHECK(ui.set_facts(facts_at(81, 14, 2), 320000).draw);
+  CHECK(ui.set_facts(facts_at(81), 320000).draw);
   CHECK(ui.snapshot().battery_pct == 81);
 
   // Plugging in is not a percentage: it always draws.
-  Facts cable = facts_at(81, 14, 2);
+  Facts cable = facts_at(81);
   cable.external = true;
   CHECK(ui.set_facts(cable, 330000).draw);
   CHECK(ui.snapshot().external);
@@ -448,12 +450,12 @@ TEST("facts: a capture silences the band, and the band catches up after it") {
   Store store(dir.path);
   UiState ui;
   ui.begin(battery_seed(84), &store);
-  CHECK(ui.set_facts(facts_at(84, 14, 2), 1000).draw);  // the clock, before recording
+  CHECK(!ui.set_facts(facts_at(84), 1000).draw);  // nothing moved; no clock minute
 
   // Recording: every fact is dropped, so the 5 s counter stays the only thing
   // that repaints the panel.
   CHECK(ui.set_capture(true, 0, false, 2000).draw);  // the screen hand-over is full
-  Facts noisy = facts_at(40, 15, 30);
+  Facts noisy = facts_at(40, false);
   noisy.bt = BtState::Advertising;
   noisy.card_free_bytes = 12345678;
   CHECK(!ui.set_facts(noisy, 3000).draw);
@@ -468,5 +470,6 @@ TEST("facts: a capture silences the band, and the band catches up after it") {
   CHECK(ui.set_facts(noisy, 16000).draw);
   CHECK(ui.snapshot().battery_pct == 40);
   CHECK(ui.snapshot().bt == BtState::Advertising);
-  CHECK(std::string(ui.snapshot().clock_text) == "15:30");
+  CHECK(!ui.snapshot().clock_set);
+  CHECK(std::string(build_home(ui.snapshot()).clock_msg) == "NO TIME");
 }

@@ -186,9 +186,10 @@ HomeView build_home(const Snapshot& snap) {
     view.hero = home::kNoSync;
   } else if (snap.count_pending > 0 && !snap.wifi_up) {
     view.hero = home::kOffline;
-  } else if (!snap.clock_set) {
-    view.hero = home::kNoTime;
   } else {
+    // An unset clock is no longer a hero word: it is the band's short warning
+    // below, so the hero keeps answering what is happening now (Jake,
+    // 2026-11-26 - "maybe only post a message on the menu bar if time not set").
     view.hero = home::kReady;
   }
 
@@ -202,10 +203,12 @@ HomeView build_home(const Snapshot& snap) {
     copy_out(band::kAllSent, view.band, sizeof view.band);
   }
 
-  // The clock and the radio's mark ride the same band (t_3beb371a §4): the time
-  // in its own slot left of the battery, the mark in the Wi-Fi glyph's box. Both
-  // are copies, so the frame stays self-contained like the rest of the snapshot.
-  if (snap.clock_set && snap.clock_text[0] != '\0') copy_out(snap.clock_text, view.clock, sizeof view.clock);
+  // The band's time slot now carries one warning and nothing else: NO TIME when
+  // the clock has never been set. The minute itself is not drawn anywhere on
+  // Home, so no minute rollover can ask for a frame. The Bluetooth mark rides
+  // the Wi-Fi glyph's box on the Phone screen only; it is copied here so a
+  // frame stays self-contained like the rest of the snapshot.
+  if (!snap.clock_set) copy_out(band::kNoTime, view.clock_msg, sizeof view.clock_msg);
   view.bt = snap.bt;
   view.wifi_on = snap.wifi_on;
 

@@ -59,14 +59,14 @@ residue: the fourth is the full refresh that clears the glass.
 
 ## The band, and the flicker budget
 
-Zone A draws four facts and owns the only polling the screens do
+Zone A draws the band's facts and owns the only polling the screens do
 (`ui_state.cpp`, `ui_render.cpp` `draw_band`, `notes_app/ui_device.cpp`
 `read_facts`). The spec's §3.2 is the rule; the measured behaviour is:
 
 | Fact | Where it comes from | What it takes to repaint |
 |---|---|---|
 | queue count | `Runtime::refresh_counts()`, on a count that moved | a count that actually changed |
-| clock `HH:MM` | `ports_.system->wall_time()` → `Facts::clock` → `Snapshot::clock_text[6]` | the text changing, on Home, while idle |
+| clock warning `NO TIME` | `ports_.system->wall_time()` → `Facts::clock_set` → `Snapshot::clock_set` | the set/unset answer changing (boot or the first SNTP sync), on Home; a minute rollover never repaints |
 | Wi-Fi | `Wifi::current()` | the association coming or going |
 | Bluetooth | `PhoneLink::radio_up()` / `phone_window()` → `Facts::bt` → `Snapshot::bt` | the radio's window coming or going |
 | battery | `hgp::battery_percent` over the port's `PowerStatus` and `board.battery_curve`, every 60 s — the same call `Runtime` prints in `notes status` | a ≥ 2 % step, or any step once 5 minutes have passed |
@@ -78,6 +78,9 @@ than a timer:
 * `UiState::set_facts` compares instead of publishing. A one-percent battery move
   is the ADC's own noise on this board, so it is neither drawn nor adopted; the
   glass keeps the level it drew until a 2 % step or the five-minute window.
+* The clock's minute is not a fact the band compares any more: the band draws no
+  time, and only the `clock_set` boolean can move it, so minute rollover costs no
+  frame and no wake (Jake, 2026-11-26).
 * `kFactsMs` is 10 s (it was 1 s). The card's free space and the battery keep
   their own 60 s path, and `Snapshot::bt` rides the 10 s one.
 * `set_facts` returns before anything is adopted while `capture_recording_` or
@@ -88,9 +91,10 @@ than a timer:
 `ui` answers `..., clock set, ble off|advertising|connected, frames N`: the mark
 is the radio's answer in the same spelling `radio` prints, and `frames N` counts
 every panel refresh since boot, which is how "nothing repainted" is measured over
-the console without a log line per refresh. On the board: two minutes on Home
-moved it by exactly two (the clock's minutes), two minutes in a menu by none, and
-a 95 s capture by three, 29.4 s apart.
+the console without a log line per refresh. On the board, before the clock was
+removed, two minutes on Home moved it by exactly two (the clock's minutes); with
+the band drawing no time an idle Home moves it by zero. Two minutes in a menu by
+none, and a 95 s capture by three, 29.4 s apart.
 
 ## The recording face follows the runtime
 

@@ -131,18 +131,14 @@ Outcome UiState::set_facts(const Facts& facts, uint32_t now_ms) {
   // a repaint in the middle of the note.
   if (capture_recording_ || snap_.recording) return Outcome{};
 
-  char clock_text[6] = {};
-  if (facts.clock.valid) format_clock(facts.clock, clock_text);
-
   uint16_t dirty = DirtyNone;
   if (facts.wifi_up != snap_.wifi_up) dirty |= DirtyLink;
   if (facts.bt != snap_.bt) dirty |= DirtyLink;  // both live in the band
-  const bool had_clock = snap_.clock_text[0] != '\0';
-  const bool has_clock = clock_text[0] != '\0';
-  if (facts.clock_set != snap_.clock_set || had_clock != has_clock ||
-      (has_clock && std::strcmp(clock_text, snap_.clock_text) != 0)) {
-    dirty |= DirtyClock;
-  }
+  // The minute-accurate clock is gone, so a minute rollover is no longer a fact
+  // that reaches the glass. The one clock fact left is the answer Home's band
+  // draws: NO TIME until the clock has been set. That answer changes at boot or
+  // on the first SNTP sync, not sixty times an hour (Jake, 2026-11-26).
+  if (facts.clock_set != snap_.clock_set) dirty |= DirtyClock;
 
   // The battery: a step of one percent is the ADC talking, not the cell. A step
   // of two or more draws, and so does a smaller one once five minutes have
@@ -167,7 +163,6 @@ Outcome UiState::set_facts(const Facts& facts, uint32_t now_ms) {
   snap_.wifi_up = facts.wifi_up;
   snap_.wifi_on = facts.wifi_on;
   snap_.clock_set = facts.clock_set;
-  std::snprintf(snap_.clock_text, sizeof snap_.clock_text, "%s", clock_text);
   snap_.bt = facts.bt;
   if (power_dirty) {
     snap_.battery_pct = facts.battery_pct;
@@ -177,8 +172,9 @@ Outcome UiState::set_facts(const Facts& facts, uint32_t now_ms) {
   }
   if (about_dirty) snap_.card_free_bytes = facts.card_free_bytes;
 
-  // The clock is a Home fact: a minute that turns over on any other screen is
-  // adopted but not drawn, and the full frame that returns Home carries it.
+  // The warning is a Home fact: a clock that is set (or lost) on any other
+  // screen is adopted but not drawn, and the full frame that returns Home
+  // carries the band's current answer.
   if ((dirty & DirtyClock) && app_.screen() != Screen::Home) dirty &= ~DirtyClock;
   if (dirty == DirtyNone) return Outcome{};
   return publish(now_ms, dirty, Refresh::Partial);

@@ -29,7 +29,9 @@ struct Facts {
   bool wifi_on = false;        // the station's radio is up (associated or not)
   bool wifi_up = false;        // the station holds an association
   bool clock_set = true;       // the clock has been set at least once
-  Stamp clock;                 // the wall clock's local fields; `valid` is the answer
+  // No wall-clock fields here: the band only needs the answer above now that the
+  // time is no longer drawn (Jake, 2026-11-26). Notes and uploads still read the
+  // system clock themselves; this cache is not their source.
   BtState bt = BtState::Off;   // the radio's window, off outside the Phone screen
   uint64_t card_free_bytes = 0;
   int8_t battery_pct = -1;     // -1 unknown

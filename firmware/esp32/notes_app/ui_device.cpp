@@ -32,7 +32,7 @@ const char* TAG = "hg.ui";
 constexpr size_t kPlayFrames = 2400;
 // While a note plays, the reader keeps one buffer in the speaker and waits.
 constexpr uint32_t kPlayPaceMs = 20;
-// The band's facts are a string compare and a clock read: ten seconds is the
+// The band's facts are a string compare and a liveness read: ten seconds is the
 // policy (t_3beb371a §5) - a link that came up lands on the glass within a poll,
 // and nothing repaints in between. At 1 s the poll itself was half the flicker.
 constexpr uint32_t kFactsMs = 10000;
@@ -195,7 +195,6 @@ void NotesUi::begin(const Ports& ports) {
   seed.wifi_up = facts_.wifi_up;
   seed.wifi_on = facts_.wifi_on;
   seed.clock_set = facts_.clock_set;
-  if (facts_.clock.valid) notesui::format_clock(facts_.clock, seed.clock_text);
   seed.bt = facts_.bt;
   seed.card_free_bytes = facts_.card_free_bytes;
   seed.battery_pct = facts_.battery_pct;
@@ -221,15 +220,10 @@ notesui::Facts NotesUi::read_facts() const {
   f.wifi_on = ports_.wifi != nullptr && ports_.wifi->radio_running();
   hg::WallTime wall;
   const bool have_time = ports_.system != nullptr && ports_.system->wall_time(wall);
+  // Only the answer reaches the band: the clock has been set, or it has not.
+  // The minute itself is not cached or drawn, which is what keeps a minute
+  // rollover from scheduling a frame (Jake, 2026-11-26).
   f.clock_set = have_time;
-  f.clock.valid = have_time;
-  if (have_time) {
-    f.clock.year = wall.year;
-    f.clock.month = wall.month;
-    f.clock.day = wall.day;
-    f.clock.hour = wall.hour;
-    f.clock.minute = wall.minute;
-  }
   // Bluetooth is the radio's answer, not a guess from the Phone screen: `radio`
   // prints the same three states, so the mark and the console cannot disagree.
   // The window is not only the Phone screen's - the boot window and `phone wake`
@@ -381,8 +375,8 @@ void NotesUi::render(notesui::Refresh refresh) {
 // Idle: nobody has touched the device for a while, on the cell, with nothing
 // running. The panel holds its picture with the rail down, so the screen costs
 // nothing to keep - and every render is refused until a key brings it back, which
-// also means the 10 s facts poll and the band's clock cannot spend the battery
-// refreshing a page no one is reading (Jake, 2026-11-24: 6 hours idle).
+// also means the 10 s facts poll cannot spend the battery refreshing a page no
+// one is reading (Jake, 2026-11-24: 6 hours idle).
 void NotesUi::idle(bool on) {
   if (!begun_) return;
   if (on) {

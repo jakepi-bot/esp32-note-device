@@ -91,117 +91,133 @@ timeout": dozing on battery, USB ends it).
 
 The requirement for this device is **at least 24 hours idle on one charge**: the
 screen resting, the radio quiet, nothing queued. That is a single division,
-`hours = capacity / average current`, and it needs three numbers. Two of them have
-never been measured, so this section keeps what is recorded apart from what is
-inferred, and states the verdict both ways instead of borrowing confidence from the
-cable.
+`hours = capacity / average current`, and all three numbers now exist, each with the
+status of its source attached.
 
-### The three inputs
+### The inputs
 
 | Input | Value | Source | Status |
 |---|---|---|---|
-| Battery runtime on the cell | **~6 h** at ~40 mA | the owner's own use; neither the build nor the date is recorded | observed |
-| Rest current on the cell | **never metered** | every reading on record is USB-side (see below) | unknown |
-| Cell capacity | **not recorded** | the only cell label in [hardware verification](hardware-validation.md) (`SKU 33228 3.7V 1000mA`) belongs to the Touch-LCD-1.54, a different board | unknown |
-
-6 h at 40 mA is 240 mAh, so the cell is the ~250 mAh class. That is an inference
-from a runtime, not a label read. Nothing below depends on it being exact: the
-requirement fixes the current, `I = capacity / 24`, and every figure scales with
-the measured capacity when the label is read.
+| Cell capacity | **320 mAh**, 3.7 V Li-po, EEMB LP402535 | the owner identified it against the purchase listing (ASIN B08215N9R8), 2026-11-26, see [hardware verification](hardware-validation.md#note-taker-battery-cell-capacity) | recorded, but from a listing and not the printed label |
+| Idle current, on the cable | **6 mA at 5.15 V**: panel rail down, radio off, microphone suspended, light sleep engaged | inline USB meter, 2026-11-26; the firmware accounted 157 s of light sleep in a 160 s window (98%) | measured |
+| Awake current, on the cable | **37 mA at 5.14 V**, BLE advertising | the same run | measured |
+| Idle current, on the cell | **never metered**, and not obtainable on this bench | there is no DMM, so there is no shunt in series with the cell (owner, 2026-11-26) | unavailable |
+| Runtime on the cell before the power work | **~6 h** | the owner's own use; neither the build nor the date is recorded | observed |
 
 ### The arithmetic
 
-| Average current | 240 mAh | 500 mAh | 1000 mAh |
-|---|---|---|---|
-| 40 mA (the observation) | 6.0 h | 12.5 h | 25.0 h |
-| 22 mA (datasheet modem sleep, 80 MHz) | 10.9 h | 22.7 h | 45.5 h |
-| 10 mA (the threshold at 240 mAh) | 24.0 h | 50.0 h | 100.0 h |
-| 3 mA | 80 h | 167 h | 333 h |
-| 1 mA (the target in the [UI spec](notes-ui-spec.md)) | 240 h | 500 h | 1000 h |
-| 0.38 mA (light-sleep floor, below) | 632 h | 1316 h | 2632 h |
+320 mAh at 3.7 V is **1.18 Wh**, and hours are watt-hours divided by watts. The
+current form is `hours = capacity / average`:
 
-Clearing 24 hours takes an average of **10.0 mA at 240 mAh** (10.4 mA at 250 mAh,
-20.8 mA at 500, 41.7 mA at 1000). At the observed 40 mA the device runs about 6 h
-on the inferred cell: four times over budget.
+| Average current, at the cell | Hours on 320 mAh |
+|---|---|
+| 53 mA (what the ~6 h observation implies) | 6.0 h |
+| 40 mA (the pre-work estimate) | 8.0 h |
+| 22 mA (datasheet modem sleep, 80 MHz) | 14.5 h |
+| 13.3 mA (the threshold, `C / 24`) | 24.0 h |
+| 8.4 mA (the 6 mA cable reading, converted below) | 38 h |
+| 3 mA | 107 h |
+| 1 mA (the target in the [UI spec](notes-ui-spec.md)) | 320 h |
+| 0.38 mA (the datasheet light-sleep floor) | 842 h |
+
+Clearing 24 hours takes an average of **13.3 mA** on this cell.
+
+### Converting the cable reading to the cell
+
+The meter sits on VBUS, so its numbers are watts, not cell amps: 6 mA at 5.15 V is
+30.9 mW and 37 mA at 5.14 V is 190 mW. The check that the conversion is sound is the
+runtime it reproduces. 190 mW against a 1.18 Wh cell is **6.2 h**, which is the ~6 h
+the owner saw before any of this work, from an observation that predates the meter.
+
+At the idle figure, 1.18 Wh / 30.9 mW is **38 h** with a perfect converter and about
+**34 h** at the 89% an LDO from a 3.7 V cell gives. The verdict survives a converter
+as poor as 62%. On the cell there is also no USB PHY and no charger in the path, so
+the same work costs less power than the VBUS wattage says: the converted hours are
+on the conservative side, not the optimistic one.
+
+The 24-hour card's own figure of **53 h** (`320 mAh / 6 mA`) treated a VBUS current
+as a cell current. It is 38 h, not 53 h. Both clear the requirement, and the corrected
+one is what this section uses.
 
 ### Peaks do not decide this; the rest state does
 
 A realistic day — three recordings of 30, 45 and 75 s, three uploads of 20, 25 and
-35 s, eleven key presses, 15.8 h on and the rest with the latch cut — comes to about
-8 mAh of charge at generous currents (recordings 50 mA, uploads 150 mA, an awake
-screen 25 mA). The other ~230 mAh of a 240 mAh cell is spent resting. The
-requirement is therefore a statement about the resting current, and the day's peaks
-are noise against it. With the cell off for 8 h of the 24, the awake budget is
-looser (14.6 mA); the requirement is 24 hours idle, so **10 mA is the number the
-verdict uses**.
+35 s, eleven key presses, on for 15.8 h of the 24 — costs about 8 mAh at generous
+currents (recordings 50 mA, uploads 150 mA, an awake screen 25 mA). That is 2.5% of
+the cell; the other 97.5% is spent at rest. The requirement is therefore a statement
+about the resting current, and the day's peaks are noise against it.
 
-### Why the USB figures cannot be used
+### Why the older cable figures are not the ones quoted
 
-The meter readings on record are 39 mA with the radio off (the power-management
-comment in `firmware/esp32/notes_app/main.cpp`, meter 2026-11-23), 35 mA with the
-panel rail down, and 41 mA associated under `MIN_MODEM`. None of them is a battery
-number: light sleep never runs while a USB host is attached
-(`CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION`, or the console and JTAG would stop), the USB
-PHY alone is worth tens of milliamps, and the notes app refuses to enter the idle
-state on the cable at all (`!power_cable`). A cable reading is a different state,
-not a pessimistic version of the battery one — derive battery life from it and the
-error lands in whichever direction the particular state happens to differ, which is
-why the numbers are quoted here only to be excluded.
+The numbers on record from the 2026-11-23 run are 39 mA with the radio off (the
+power-management comment in `firmware/esp32/notes_app/main.cpp`), 35 mA with the panel
+rail down, and 41 mA associated under `MIN_MODEM`. They describe a device that was not
+sleeping: light sleep does not run by default with a USB host attached
+(`CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION`, or the console and JTAG would stop) and the
+notes app refuses to enter its idle state on the cable at all (`!power_cable`). The
+2026-11-26 reading is a different measurement of a different state, taken with light
+sleep actually engaged and against the firmware that holds the latch through sleep.
+Quoting the older figures for runtime is what made the 53 h figure above wrong: the
+state, not the instrument, is what changed.
 
 ### The verdict
 
 | | |
 |---|---|
 | As last observed on the cell | **fails**: ~6 h against a 24 h requirement |
-| The current firmware | **undetermined**, on one missing number: the rest current on the cell. The idle state and the doze path landed on 25 November (`c73a12a`, `d9d7c79`) and no runtime has been recorded since, so the ~6 h figure may predate them |
-| What has to be true | an average of at most `capacity / 24` — 10.0 mA on the inferred cell |
-| Is that reachable | on paper, yes (below); as a measurement, not yet |
+| On the best evidence available | **passes**: 34-38 h against 24 h, from a converted cable reading, with light sleep observed at 98% duty |
+| On the cell, unmetered | **not obtainable**: there is no DMM on this bench, so a cell-side number cannot be produced at all |
+| What has to be true | an average of at most 13.3 mA at the cell |
+| The one case that still fails | a station left associated: modem sleep at 13-19 mA is 17-24 h on this cell |
 
 ### The light-sleep dependency
 
-The verdict does not hold with the firmware that produced the 6 hours. It becomes
-true only once the doze path and the idle state are both live at rest on the cell:
-light sleep between a 10 s wake (`kIdleWaitMs`), the panel rail down, the station
-stopped, and no periodic refresh on the resting face — which is why that face has
-no clock ([UI spec](notes-ui-spec.md), decision 3).
+Light sleep is no longer a projection for this firmware. The run that took the 6 mA
+reading accounted **157 s of sleep in a 160 s idle window**, so what this section
+needs is live on the board, not on paper.
 
-Projected at that rest state: the chip's light sleep is 240 µA and the 8 MB
-8-line PSRAM adds 140 µA at 3.3 V or 200 µA at 1.8 V (ESP32-S3 datasheet v2.2,
-Table 5-10 and its PSRAM note), so **0.38-0.44 mA**, plus a negligible cost for one
-wake per 10 s. On the inferred 240 mAh cell that is **540-630 h**; even a pessimistic
-1 mA gives 240 h and 3 mA gives 80 h. Every one of those clears 24 h by at least 3x,
-projected.
+The datasheet floor is still worth stating as what a device with no station and no
+wake windows could reach: 240 µA for the chip plus 140 µA at 3.3 V or 200 µA at 1.8 V
+for the 8 MB octal PSRAM (ESP32-S3 datasheet v2.2, Table 5-10 and its PSRAM note), so
+0.38-0.44 mA, which is 727-842 h on this cell. The measured 6 mA is fourteen times
+that, and the difference is the USB PHY, the wake windows and the 10 s timer
+(`kIdleWaitMs`). The verdict uses the measured number, not the floor.
 
-The projection fails in exactly one way, and it is the case to measure: an
+The verdict still fails in exactly one way, and it is the reading left to take: an
 associated station. Modem sleep is 13-19 mA at 40 MHz and 22-36 mA at 80 MHz
-(datasheet Table 5-9), so 240 mAh at 22 mA is 10.9 h — under 24 h even at the good
-end of the range. The notes design stops the station at rest and reopens a two
-minute window every 15 minutes only while notes are queued; a queue that is empty
-but still holds a window, or a window that never closes after an upload, breaks the
-verdict without breaking the sleep. That is what the meter run has to catch, and it
-is the whole difference between "light sleep landed" and "the device meets 24 hours".
+(datasheet Table 5-9), so 320 mAh at 13 mA is only 24.6 h and at 19 mA it is 16.8 h.
+The notes design stops the station at rest and reopens a two minute window every
+15 minutes only while notes are queued; a queue that is empty but still holds a
+window, or a window that never closes after an upload, breaks the verdict without
+breaking the sleep. That is the whole difference between "light sleep landed" and
+"the device meets 24 hours".
 
 ### What is still open
 
-1. **Read the cell label** (mAh, nominal voltage, part). Every figure here scales by
-   it, and [hardware verification](hardware-validation.md) carries the fill-in block
-   for it. One minute with the case open.
-2. **One rest reading on the cell**, radio off and rail down, taken on a VBUS-cut
-   cable so the console survives the power cut and `power` answers `supply battery`.
-   Predicted 0.38-0.44 mA; anything over 10 mA fails the requirement outright.
+1. **Read the printed cell label** (mAh, nominal voltage, part). Capacity is from the
+   purchase listing, and a label that disagrees wins: [hardware verification](hardware-validation.md#note-taker-battery-cell-capacity)
+   says so in its own words. One minute with the case open.
+2. **A cell-side rest reading** needs a DMM in series with the cell, on a VBUS-cut so
+   the console survives and `power` answers `supply battery`. The bench has no DMM, so
+   this is filed as unavailable rather than pending; the converted VBUS figure above
+   stands in until one exists.
 3. **One reading with the station associated**, taken right after an upload and held
-   for 20 minutes. Predicted 15-40 mA while up; the question is whether it comes
-   down. This is the only reading that separates a stopped station from a reopened
-   window.
-4. **A 24 h discharge log** — `battery` every 30 s overnight — so the verdict rests
-   on an observed runtime rather than an integral of assumptions. At the projected
-   rest current the whole day costs under 11 mAh of a 240 mAh cell, so the cell
-   should end the day barely below where it started; a fall of more than a few
-   hundred millivolts means the rest state is not the one this section assumes.
-5. **Pin the 6 h observation to a build and a date** (`git rev-parse HEAD` of the
-   image that ran it), so the one runtime on record is a commit rather than a memory.
-   The stale ~8 h doze budget that used to sit in the integration spec's §9 has been
-   replaced with this requirement in the same change.
+   for 20 minutes. Predicted 13-36 mA while up; the question is whether it comes down.
+   This is the only reading that separates a stopped station from a reopened window,
+   and it is the one that can still fail the requirement.
+4. **A 24 h discharge log** — `battery` every 30 s overnight — so the verdict rests on
+   an observed runtime rather than on a converted wattage. At the projected rest
+   current the whole day costs about 12 mAh of a 320 mAh cell, so the cell should end
+   the day barely below where it started; a fall of more than a few hundred millivolts
+   means the rest state is not the one this section assumes.
+5. **Pin the ~6 h observation to a build and a date** (`git rev-parse HEAD` of the
+   image that ran it), so the one cell runtime on record is a commit rather than a
+   memory. The stale ~8 h doze budget that used to sit in the integration spec's §9
+   has been replaced with this requirement in the same change.
+
+The bench procedure and capture scripts for items 2 to 4 are preserved at
+`~/share/notes-bench/` (`idle-current/`, `day-profile/`), so they run unchanged the
+moment a meter exists.
 
 ## Hardware checks the QA pass still owes
 

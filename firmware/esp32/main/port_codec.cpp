@@ -302,6 +302,11 @@ void CodecMic::task(void* arg) {
     }
     void deliver(const int16_t* chunk) { events::post(EventType::Mic, chunk, kMicChunk * sizeof(int16_t)); }
     void wait() { ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000)); }
+    // No timeout while the channels are released: nothing can be read, so a
+    // one-second poll only costs the sleep the release exists to buy - and it
+    // made the device wake every second at rest, which is audible as a tick
+    // through the shared codec (2026-11-26). set_suspended(false) notifies.
+    void wait_wake() { ulTaskNotifyTake(pdTRUE, portMAX_DELAY); }
     void pause() { vTaskDelay(pdMS_TO_TICKS(10)); }
   } ops{self};
   hg::MicPower power(self->link_.switchable);
@@ -310,7 +315,7 @@ void CodecMic::task(void* arg) {
     // fail every 10 ms and keep a task ready for ever (the CPU never sleeps
     // with a runnable task). Wait for a press instead.
     if (self->suspended_.load()) {
-      ops.wait();
+      ops.wait_wake();
       continue;
     }
     power.turn(self->capturing_.load(), ops, pcm);
@@ -345,6 +350,11 @@ bool CodecSpeaker::begin(esp_codec_dev_handle_t dev, bool stereo32, int pa) {
   }
   xTaskCreate(&CodecSpeaker::task, "hg-spk", 4096, this, 7, &task_);
   return true;
+}
+
+void CodecSpeaker::mute_for_idle() {
+  if (!dev_) return;
+  esp_codec_dev_set_out_mute(dev_, true);
 }
 
 void CodecSpeaker::power_down() {

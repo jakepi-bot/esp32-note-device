@@ -556,7 +556,16 @@ class CodecMic final : public hg::AudioIn {
   // lock - so an idle device cannot sleep with it running, and it spins at the
   // error path once the channel is released. Suspend stops the reads without
   // closing the codec; the codec stays configured, so a press is not slower.
-  void set_suspended(bool on) { suspended_ = on; }
+  void set_suspended(bool on) {
+    suspended_ = on;
+    // A press restores the codec and the microphone has to be reading before
+    // the capture's first chunk, so wake the task now: while suspended it waits
+    // without a timeout (a 1 s poll kept the chip out of a long light sleep and
+    // was audible as a tick every second at rest, 2026-11-26).
+    if (!on) {
+      if (TaskHandle_t t = task_) xTaskNotifyGive(t);
+    }
+  }
 
  private:
   static void task(void* arg);
@@ -588,6 +597,10 @@ class CodecSpeaker final : public hg::AudioOut {
   }
   void power_down();
   void power_up();
+  // Silence the DAC while the device rests. The codec is shared with the
+  // microphones and stays open, so a mute is the only thing that keeps a
+  // light-sleep transient off the speaker. Playback unmutes when it has audio.
+  void mute_for_idle();
   // An amplifier enable that isn't an ESP32 pin (StickS3: behind the M5PM1).
   // Used when begin() gets no PA pin; set it before begin().
   std::function<void(bool)> board_pa;

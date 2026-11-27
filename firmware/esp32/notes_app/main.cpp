@@ -685,6 +685,10 @@ std::string console_line(std::string_view line) {
       g_runtime.set_idle(on);
       if (on) {
         if (!g_codec_speaker.busy()) {
+          // Same three steps as the automatic idle below, so the bench hears
+          // what a resting device does: silence the DAC, suspend the shared
+          // microphone, release the two I2S channels.
+          g_codec_speaker.mute_for_idle();
           g_codec_mic.set_suspended(true);
           if (!g_codec.release_idle()) g_codec_mic.set_suspended(false);
         }
@@ -1044,8 +1048,11 @@ extern "C" void app_main(void) {
         // (a beep, a recording) keeps them: the next pass tries again. The mic
         // is suspended first: a shared codec reads while idle by design, and that
         // read holds the receive channel's lock and spins at the error path once
-        // the channel is released.
+        // the channel is released. The DAC is muted for the same reason: the
+        // codec keeps running for the microphones, and a light-sleep transient
+        // through it is audible on the speaker.
         if (!g_codec_speaker.busy()) {
+          g_codec_speaker.mute_for_idle();
           g_codec_mic.set_suspended(true);
           if (!g_codec.release_idle()) g_codec_mic.set_suspended(false);
         }

@@ -220,6 +220,26 @@ bool g_keys_locked = false;    // a key is being ignored until it is released
 // but the console's `key` and `key virtual` verbs press synchronously inside
 // their own dispatch, which is before that block, so they restore here first.
 // A bench measuring the first-press latency must measure what a finger does.
+// Light sleep drops the USB CDC port: the host sees the device go away and only
+// gets it back when it re-enumerates, so every flash was a coin toss against the
+// sleep timer (and `pio` really does fail with "device reports readiness to read
+// but returned no data"). A cable means a desk or a bench - somewhere a person
+// wants the port - so while one is plugged in the chip stays awake and the port
+// stays put. On the cell nothing changes: light sleep is the whole point there.
+void apply_power_management(bool on_cable) {
+  esp_pm_config_t pm = {};
+  pm.max_freq_mhz = 240;
+  pm.min_freq_mhz = 80;
+  pm.light_sleep_enable = hgp::board_config().light_sleep && !on_cable;
+  if (esp_pm_configure(&pm) != ESP_OK) {
+    ESP_LOGW(TAG, "power management unavailable; the CPU stays at full speed");
+    return;
+  }
+  ESP_LOGI(TAG, "power management: %d-%d MHz, light sleep %s (%s)", static_cast<int>(pm.min_freq_mhz),
+           static_cast<int>(pm.max_freq_mhz), pm.light_sleep_enable ? "on" : "off",
+           on_cable ? "cable: the USB port stays up" : "on the cell");
+}
+
 void restore_codec_for_press() {
   if (g_codec.idle_released()) {
     g_codec.restore_idle();
@@ -832,16 +852,7 @@ extern "C" void app_main(void) {
   // sleep never engaged. With the radio off this app idled at 39 mA (meter,
   // 2026-11-23), which is a processor awake for nothing.
   {
-    esp_pm_config_t pm = {};
-    pm.max_freq_mhz = 240;
-    pm.min_freq_mhz = 80;
-    pm.light_sleep_enable = hgp::board_config().light_sleep;
-    if (esp_pm_configure(&pm) != ESP_OK) {
-      ESP_LOGW(TAG, "power management unavailable; the CPU stays at full speed");
-    } else {
-      ESP_LOGI(TAG, "power management: %d-%d MHz, light sleep %s", static_cast<int>(pm.min_freq_mhz),
-               static_cast<int>(pm.max_freq_mhz), pm.light_sleep_enable ? "on" : "off");
-    }
+    apply_power_management(g_latch.external_power().value_or(false));
     // Light sleep disconnects every GPIO it was not told to keep, and this board
     // is latch-powered: without this the battery latch drops mid-sleep, the
     // supply opens and the chip is gone - it vanished from USB the first time
@@ -1021,6 +1032,9 @@ extern "C" void app_main(void) {
         ESP_LOGW(TAG, "power source: %s; keys locked for %u ms", *cable ? "cable" : "battery",
                  static_cast<unsigned>(kKeyLockMs));
         lock_keys(now);
+        // Light sleep follows the supply, now and at boot: plugged in keeps the
+        // USB port enumerated so a flash is not a race with the sleep timer.
+        apply_power_management(*cable);
       }
       power_known = true;
       power_cable = *cable;

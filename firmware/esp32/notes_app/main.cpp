@@ -889,10 +889,19 @@ extern "C" void app_main(void) {
     // Enable automatic power management: allow the codec to power down while the
     // chip light-sleeps, so the i2s APB_FREQ_MAX lock is released and the chip can
     // actually enter light sleep. Only taken when the board allows it.
-    g_system.on_doze_start = [] { g_codec_speaker.power_down(); };
+    // While the device is idle the codec is already closed and the I2S released,
+    // so these have nothing to free - and reopening it on every wake is exactly
+    // the pop a person hears: a light-sleep cycle closed and reopened the codec
+    // each time, and the network retry on every wake made it worse. Idle stays
+    // shut until a key, which is when the idle path reopens it itself.
+    g_system.on_doze_start = [] {
+      if (g_ui.idle()) return;
+      g_codec_speaker.power_down();
+    };
     g_system.on_doze_end = [] {
-        g_codec_speaker.power_up();
-        g_net.retry_now();
+      if (g_ui.idle()) return;
+      g_codec_speaker.power_up();
+      g_net.retry_now();
     };
   }
   // The clock wants network time: this board has no RTC, so every note recorded

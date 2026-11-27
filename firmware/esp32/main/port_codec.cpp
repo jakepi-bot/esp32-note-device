@@ -316,7 +316,12 @@ void CodecMic::task(void* arg) {
       return true;
     }
     void deliver(const int16_t* chunk) { events::post(EventType::Mic, chunk, kMicChunk * sizeof(int16_t)); }
-    void wait() { ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000)); }
+    // No timeout here either: the only thing this task is waiting for is a
+    // capture, and `CodecMic::start()` and `set_suspended(false)` both notify it.
+    // It used to time out every second, which on a powered-but-idle codec is a
+    // CPU wake per second for as long as the codec stays on - the same bug the
+    // microphone task had at rest and the speaker task had in its turn.
+    void wait() { ulTaskNotifyTake(pdTRUE, portMAX_DELAY); }
     // No timeout while the channels are released: nothing can be read, so a
     // one-second poll only costs the sleep the release exists to buy - and it
     // made the device wake every second at rest, which is audible as a tick

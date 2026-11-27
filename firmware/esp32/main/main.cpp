@@ -855,6 +855,9 @@ extern "C" void app_main(void) {
         hgp::events::release(ev);
       } while (hgp::events::receive(ev, 0));
     }
+    // A cable plugged in after boot: the console starts here, on the pass that
+    // already ran, instead of from a 500 ms poll of its own (port_console.cpp).
+    hgp::console::start_if_host();
     // A loss whose WsClosed event was dropped; harmless if it was delivered too.
     if (g_transport.take_lost()) {
       app.on_transport_closed("disconnected");

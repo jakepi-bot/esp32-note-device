@@ -16,6 +16,7 @@
 #include "port.hpp"  // first: pulls in FreeRTOS.h ahead of task.h/queue.h
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -27,6 +28,8 @@
 #include "esp_log.h"
 #include "esp_pm.h"
 #include "esp_sleep.h"
+#include "esp_timer.h"
+#include "lwip/timeouts.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "notes/sd_mount.hpp"
@@ -684,14 +687,90 @@ std::string console_line(std::string_view line) {
     }
     const uint32_t uptime = g_system.now_ms() / 1000;
     const auto mix = hgp::EspSystem::light_sleep_wakes();
-    char out[240];
+    char out[320];
     std::snprintf(out, sizeof out,
-                  "@wakes %u light-sleep exits (%u timer, %u gpio, %u other), %u speaker idle waits, %u s since boot, %u ms asleep",
+                  "@wakes %u light-sleep exits (%u timer, %u gpio, %u other), %u speaker idle waits, %u s since boot, "
+                  "%u ms asleep, cycles %u-%u ms",
                   static_cast<unsigned>(hgp::EspSystem::light_sleep_exits()), static_cast<unsigned>(mix.timer),
                   static_cast<unsigned>(mix.gpio), static_cast<unsigned>(mix.other),
                   static_cast<unsigned>(hgp::CodecSpeaker::idle_waits()), static_cast<unsigned>(uptime),
-                  static_cast<unsigned>(hgp::EspSystem::slept_ms_total()));
+                  static_cast<unsigned>(mix.asleep_ms), static_cast<unsigned>(mix.shortest_ms),
+                  static_cast<unsigned>(mix.longest_ms));
     return out;
+  }
+  if (line == "tasks") {
+    // Which task is waiting on a clock. `wakes` says how often the chip leaves
+    // light sleep; this says who is still holding a deadline, because the idle
+    // task sleeps only until the next one is due. A task waiting with a timeout
+    // reads state `B` (it is on the delayed list, counting down); one waiting on
+    // an event for ever reads `S`. So a resting device should show no `B` but the
+    // ones the product means to have, and an extra `B` is a poll.
+    char* buf = static_cast<char*>(std::malloc(2048));
+    if (!buf) return "@error no memory for the task list";
+    std::printf("name state prio stack\n");
+    vTaskList(buf);
+    std::printf("%s", buf);
+    std::free(buf);
+    return "@ok tasks listed above";
+  }
+  if (line.rfind("amp", 0) == 0) {
+#if defined(HG_BENCH_LIGHT_SLEEP)
+    // Bench only: force the amplifier's enable, which the resting path drives
+    // low. With the enable high and the DAC muted - the state every board was in
+    // before the idle path took the enable over - a light-sleep exit is a load
+    // step the speaker can pass. That is the click, and the only way to hear the
+    // difference on a cable is to be able to put the enable back.
+    const int pin = hgp::board_config().codec.pa;
+    if (pin < 0) return "@error this board has no amplifier enable";
+    const std::string_view arg(line.size() > 3 ? line.substr(4) : std::string_view());
+    if (arg != "on" && arg != "off") return "@error usage: amp [on | off]";
+    gpio_set_level(static_cast<gpio_num_t>(pin), arg == "on" ? 1 : 0);
+    char out[80];
+    std::snprintf(out, sizeof out, "@ok amplifier %s (GPIO %d) - the resting path may take it back",
+                  arg == "on" ? "enabled" : "disabled", pin);
+    return out;
+#else
+    return "@error bench builds only";
+#endif
+  }
+  if (line == "lwip") {
+    // How long until lwIP's own next timer. lwIP re-arms its cyclic timers from
+    // *now* on every fire, so a 1000 ms answer here is a 1 s deadline that the
+    // idle task must respect for ever - one light-sleep exit per second, with no
+    // esp_timer anywhere in sight (its ARP timer is exactly that). -1 means lwIP
+    // is holding no deadline at all.
+    const int32_t sleep_ms = sys_timeouts_sleeptime();
+    char out[96];
+    std::snprintf(out, sizeof out, "@lwip next timeout in %ld ms", static_cast<long>(sleep_ms));
+    return out;
+  }
+  if (line == "hold") {
+#if defined(HG_BENCH_LIGHT_SLEEP)
+    // Bench only: hold the chip awake with a power-management lock so a console
+    // can be read past the point where the device would otherwise go under.
+    // Without it, `timers`/`tasks`/`pm` can only be read in the first few
+    // seconds of a boot, while the radio window is still open - which is exactly
+    // the wrong moment to ask what a *resting* device is waiting on.
+    static esp_pm_lock_handle_t hold = nullptr;
+    if (!hold && esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "hg-bench-hold", &hold) != ESP_OK) hold = nullptr;
+    if (!hold) return "@error no power-management lock";
+    esp_pm_lock_acquire(hold);
+    return "@ok awake: light sleep held off until reset";
+#else
+    return "@error bench builds only";
+#endif
+  }
+  if (line == "timers") {
+    // What alarm is next, by name. A resting device that wakes once a second is
+    // waiting on something; a count says how often, never who - and the answer
+    // decides whether the fix is a task's timeout or a timer a subsystem left
+    // armed. Registered esp_timers print with their own name, period and next
+    // fire; a FreeRTOS task's wait is not a timer and shows up as none of these.
+    const int64_t next = esp_timer_get_next_alarm();
+    std::printf("next alarm in %lld ms\n",
+                next > 0 ? static_cast<long long>((next - esp_timer_get_time()) / 1000) : -1LL);
+    esp_timer_dump(stdout);
+    return "@ok timers dumped above";
   }
   if (line == "power") {
     // The three lines that decide whether a board on battery stays up: the
@@ -1070,6 +1149,9 @@ extern "C" void app_main(void) {
   bool power_known = false, power_cable = false;
   uint32_t last_touch_ms = g_system.now_ms();
   for (;;) {
+    // A cable plugged in after boot: the console starts here rather than from a
+    // poll of its own (port_console.cpp). One branch, no new wake.
+    hgp::console::start_if_host();
     hgp::Event ev;
     // A resting notes device has nothing to animate: the panel is bistable and
     // the work arrives as an event (a key, a console line, a phone, the clock).

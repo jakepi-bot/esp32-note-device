@@ -70,6 +70,11 @@ RTC_NOINIT_ATTR uint32_t g_wakes_magic;
 RTC_NOINIT_ATTR uint32_t g_wake_timer_rtc;
 RTC_NOINIT_ATTR uint32_t g_wake_gpio_rtc;
 RTC_NOINIT_ATTR uint32_t g_wake_other_rtc;
+// How long each sleep lasted, so the read after a rest says whether the cycles
+// were 1 s each (a timer armed by somebody) or attempts in which nothing slept.
+RTC_NOINIT_ATTR uint32_t g_slept_ms_rtc;
+RTC_NOINIT_ATTR uint32_t g_sleep_shortest_ms_rtc;
+RTC_NOINIT_ATTR uint32_t g_sleep_longest_ms_rtc;
 constexpr uint32_t kWakesMagic = 0x57414B45u;  // 'WAKE'
 
 #if CONFIG_PM_LIGHT_SLEEP_CALLBACKS
@@ -78,6 +83,15 @@ esp_err_t count_sleep(int64_t slept_us, void*) {
   g_slept_total_us.fetch_add(slept_us, std::memory_order_relaxed);
   g_sleeps.fetch_add(1, std::memory_order_relaxed);
   ++g_wakes_rtc;
+  const uint32_t slept_ms = static_cast<uint32_t>(slept_us / 1000);
+  g_slept_ms_rtc += slept_ms;
+  if (g_wake_timer_rtc + g_wake_gpio_rtc + g_wake_other_rtc == 0) {
+    g_sleep_shortest_ms_rtc = slept_ms;
+    g_sleep_longest_ms_rtc = slept_ms;
+  } else {
+    if (slept_ms < g_sleep_shortest_ms_rtc) g_sleep_shortest_ms_rtc = slept_ms;
+    if (slept_ms > g_sleep_longest_ms_rtc) g_sleep_longest_ms_rtc = slept_ms;
+  }
   switch (esp_sleep_get_wakeup_cause()) {
     case ESP_SLEEP_WAKEUP_TIMER: ++g_wake_timer_rtc; break;
     case ESP_SLEEP_WAKEUP_GPIO: ++g_wake_gpio_rtc; break;
@@ -116,6 +130,8 @@ void EspSystem::enable_sleep_accounting() {
     // magic says a reset from here on may keep them.
     g_wakes_magic = kWakesMagic;
     g_wakes_rtc = 0;
+    g_wake_timer_rtc = g_wake_gpio_rtc = g_wake_other_rtc = 0;
+    g_slept_ms_rtc = g_sleep_shortest_ms_rtc = g_sleep_longest_ms_rtc = 0;
   }
   static bool registered = false;
   if (registered) return;
@@ -159,6 +175,9 @@ EspSystem::WakeMix EspSystem::light_sleep_wakes() {
   mix.timer = g_wake_timer_rtc;
   mix.gpio = g_wake_gpio_rtc;
   mix.other = g_wake_other_rtc;
+  mix.asleep_ms = g_slept_ms_rtc;
+  mix.shortest_ms = g_sleep_shortest_ms_rtc;
+  mix.longest_ms = g_sleep_longest_ms_rtc;
   return mix;
 }
 
@@ -168,6 +187,9 @@ void EspSystem::reset_light_sleep_exits() {
   g_wake_timer_rtc = 0;
   g_wake_gpio_rtc = 0;
   g_wake_other_rtc = 0;
+  g_slept_ms_rtc = 0;
+  g_sleep_shortest_ms_rtc = 0;
+  g_sleep_longest_ms_rtc = 0;
 }
 
 namespace {

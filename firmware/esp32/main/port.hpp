@@ -178,6 +178,13 @@ class EspSystem final : public hg::System {
     uint32_t timer = 0;
     uint32_t gpio = 0;
     uint32_t other = 0;
+    // How long each sleep actually lasted. A wake rate of 1/s is only half an
+    // answer: 1 s cycles are one bug (something armed a 1 s timer), 200 attempts
+    // in which nothing slept are another (the sleep was refused every time), and
+    // the two look identical in a count alone.
+    uint32_t asleep_ms = 0;
+    uint32_t shortest_ms = 0;
+    uint32_t longest_ms = 0;
   };
   static WakeMix light_sleep_wakes();
   static void reset_light_sleep_exits();
@@ -1084,6 +1091,10 @@ class Wifi {
 namespace console {
 // Starts the serial console REPL; lines are executed by hg::App::console on the app task.
 void begin();
+// Starts it once a USB host is attached (the app loop calls this every pass).
+// Returns true when the console is running. On a board whose console is not the
+// USB-Serial-JTAG port this is always true: begin() already started it.
+bool start_if_host();
 }
 
 // Why the Phone screen's window did not open, as the port answers it. The

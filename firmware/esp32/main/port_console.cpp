@@ -22,6 +22,14 @@ namespace {
 
 const char* TAG = "hg.console";
 
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+// The REPL handle and whether it is running. A light-sleeping board on a cell has
+// no host, so this lives here and the app loop asks; see begin() for why the wait
+// is not a task of its own.
+esp_console_repl_t* g_repl = nullptr;
+bool g_repl_started = false;
+#endif
+
 int run(int argc, char** argv) {
   const bool is_diag = argc && std::strcmp(argv[0], "diag") == 0;
   // The log copy needs no app task: it answers even while that task is stuck.
@@ -69,7 +77,21 @@ int run(int argc, char** argv) {
   return 0;
 }
 
+bool console_start_if_host() {
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+  if (g_repl_started) return true;
+  if (g_repl == nullptr || !usb_serial_jtag_is_connected()) return false;
+  if (esp_console_start_repl(g_repl) != ESP_OK) return false;
+  g_repl_started = true;
+  ESP_LOGI(TAG, "console ready (type: help)");
+  return true;
+#else
+  return true;
+#endif
+}
 }  // namespace
+
+bool start_if_host() { return console_start_if_host(); }
 
 void begin() {
   static const char* const kCommands[] = {"help",      "status", "diag",   "get",         "set",       "say",       "camera",
@@ -102,7 +124,7 @@ void begin() {
   // `pmsleep` lives in the notes handler (notes_app/main.cpp) and was never
   // listed here, so esp_console answered "Unrecognized command" and the one
   // diagnostic that proves whether light sleep works was unreachable.
-  for (const char* name : {"about", "battery", "clock", "power", "pm", "pmsleep", "wakes", "radio", "sd", "keys", "ui", "wifi-set", "epd"}) {
+  for (const char* name : {"about", "battery", "clock", "power", "pm", "pmsleep", "wakes", "tasks", "timers", "hold", "lwip", "amp", "radio", "sd", "keys", "ui", "wifi-set", "epd"}) {
     esp_console_cmd_t cmd = {};
     cmd.command = name;
     cmd.help = "Notes app status (see: notes status)";
@@ -160,23 +182,17 @@ void begin() {
   // idle wants, so a board started on battery never took light sleep while dozing: an M5Stack
   // StopWatch logged 0 s of it in 45 minutes of doze, and its usual share from the first plug-in
   // on, when the read blocks and stays blocked after the cable is gone. So the console starts
-  // once a host is there. The wait looks twice a second, which light sleep fits between.
-  const BaseType_t waiting = xTaskCreate(
-      [](void* arg) {
-        do vTaskDelay(pdMS_TO_TICKS(500));
-        while (!usb_serial_jtag_is_connected());
-        if (esp_console_start_repl(static_cast<esp_console_repl_t*>(arg)) == ESP_OK)
-          ESP_LOGI(TAG, "console ready (type: help)");
-        vTaskDelete(nullptr);
-      },
-      "hg-console-wait", 3072, repl, 1, nullptr);
-  if (waiting != pdPASS) {
-    // No memory for the wait: start as before, and say so. Without a host the console then asks
-    // every 10 ms, which is the lesser loss beside having no console.
-    ESP_LOGW(TAG, "no task to wait for a USB host; the console starts now");
-    ESP_ERROR_CHECK(esp_console_start_repl(repl));
-    ESP_LOGI(TAG, "console ready (type: help)");
-  }
+  // once a host is there.
+  //
+  // It used to wait for that host in its own task, on a 500 ms delay - and a task with any finite
+  // wait is a deadline the idle task may not sleep past (IDF's vApplicationSleep sleeps for
+  // MIN(next task unblock, next esp_timer alarm), esp_pm/pm_impl.c). So a device on a cell, where
+  // no host ever appears, left light sleep twice a second for the whole life of the battery, and
+  // every exit is a load step on the rails. The check now rides on the app loop, which already
+  // runs to notice a cable: it costs no wake of its own, and at boot the cable (a bench) is
+  // already there, so the prompt still comes up at once.
+  g_repl = repl;
+  if (!console_start_if_host()) ESP_LOGI(TAG, "console waits for a USB host (the app loop starts it)");
 #else
   ESP_ERROR_CHECK(esp_console_start_repl(repl));
   ESP_LOGI(TAG, "console ready (type: help)");

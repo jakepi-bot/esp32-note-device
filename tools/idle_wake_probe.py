@@ -124,13 +124,23 @@ class Console:
 
 
 def read_counters(c, tries=3):
+    """`wakes` as (exits, speaker waits, say) - say being the rest of the line.
+
+    The rest matters: a wake rate on its own cannot be acted on. The cause (timer
+    or GPIO), how long each sleep lasted and what lwIP holds as its next timer are
+    what turn "it wakes once a second" into "lwIP's cyclic ARP timer is a 1 s
+    deadline the idle task may not sleep past".
+    """
     for _ in range(tries):
         answer = c.cmd("wakes")
         if answer:
-            m = re.search(r"@wakes (\d+) light-sleep exits(?: \([^)]*\))?, (\d+) speaker idle waits, (\d+) s since boot",
-                          answer)
+            m = re.search(r"@wakes (\d+) light-sleep exits(?: \(([^)]*)\))?, (\d+) speaker idle waits, "
+                          r"(\d+) s since boot, (\d+) ms asleep, cycles (\d+)-(\d+) ms", answer)
             if m:
-                return int(m.group(1)), int(m.group(2))
+                cause = m.group(2) or "?"
+                say = (f"{m.group(4)} s since boot, {m.group(5)} ms asleep, cycles {m.group(6)}-{m.group(7)} ms,"
+                       f" cause {cause}")
+                return int(m.group(1)), int(m.group(3)), say
         time.sleep(2)
     return None
 
@@ -202,16 +212,19 @@ def main():
         print("no answer after the reboot", file=sys.stderr)
         return 2
 
-    exits, waits = count
+    exits, waits, say = count
     elapsed = t_read - t_sleep
     rate = exits / elapsed if elapsed > 0 else 0.0
     print(f"@wakes {exits} light-sleep exits, {waits} speaker idle waits over {elapsed:.0f}s")
+    print(f"  {say}")
     print(f"-> {rate:.2f} wakes/second at rest")
     if exits == 0:
         print("the counters did not survive the reset (power cycle, or RTC memory cleared)")
         return 2
     verdict = "PASS" if rate <= args.gate else "FAIL"
-    print(f"{verdict}: a resting device must wake about once per 10 s idle wait, not once a second")
+    print(f"{verdict}: at rest the chip should sleep for its whole idle wait, not wake every second;")
+    print("a FAIL with cause timer and no esp_timer armed means a task holds a sub-second deadline")
+    print("(ask `lwip` - its cyclic ARP timer re-arms every 1000 ms - and `timers` for the rest)")
     return 0 if verdict == "PASS" else 1
 
 

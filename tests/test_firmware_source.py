@@ -195,3 +195,39 @@ def test_every_console_command_the_core_answers_is_registered_on_the_esp32():
     assert unregistered.isdisjoint(registered), "registered now: take them off the list above"
     assert core - registered == unregistered
     assert registered <= core, f"registered but not answered by the core: {sorted(registered - core)}"
+
+
+def test_no_task_polls_the_cpu_awake_to_notice_a_usb_host():
+    """A finite wait in any task caps light sleep for as long as that task lives.
+
+    IDF's vApplicationSleep sleeps for MIN(next task unblock, next esp_timer alarm)
+    (esp_pm/pm_impl.c), so a task that waits 500 ms to see whether a host appeared
+    is two light-sleep exits a second - and on a cell, where a host never appears,
+    for the whole life of the battery. The console is started from the app loop
+    now (console::start_if_host), on a pass the device was going to take anyway.
+    """
+    path = FIRMWARE / "esp32" / "main" / "port_console.cpp"
+    text = path.read_text(encoding="utf-8")
+    assert "bool start_if_host()" in text, "the app loop's console start is gone"
+    assert "hg-console-wait" not in text, (
+        "the 500 ms USB-host wait task is back: it wakes a resting chip twice a second")
+    for number, code in _code_lines(path):
+        assert not ("usb_serial_jtag_is_connected" in code and "vTaskDelay" in code), (
+            f"{path.relative_to(REPO)}:{number}: polling for a USB host in a delay loop")
+
+
+def test_the_codec_tasks_never_wait_on_a_clock():
+    """The microphone and speaker tasks are notified; they never time out.
+
+    A one-second timeout in either task is a CPU wake per second for as long as
+    the codec is powered, and each wake is a load step on the rails that feed the
+    amplifier. Three clicks at rest came out of exactly that in a single day
+    (2026-11-26/27); the resting waits are portMAX_DELAY and the capture paths
+    notify them.
+    """
+    path = FIRMWARE / "esp32" / "main" / "port_codec.cpp"
+    found = []
+    for number, code in _code_lines(path):
+        if "ulTaskNotifyTake" in code and "portMAX_DELAY" not in code:
+            found.append(f"{path.relative_to(REPO)}:{number}: {code.strip()}")
+    assert not found, "a codec task waits on a clock rather than a notification:\n" + "\n".join(found)

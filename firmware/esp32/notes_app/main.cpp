@@ -243,6 +243,7 @@ void apply_power_management(bool on_cable) {
 void restore_codec_for_press() {
   if (g_codec.idle_released()) {
     g_codec.restore_idle();
+    g_codec_speaker.power_up();  // idle closes it; a capture needs it open
     g_codec_mic.set_suspended(false);
   }
 }
@@ -710,10 +711,19 @@ std::string console_line(std::string_view line) {
           // microphone, release the two I2S channels.
           g_codec_speaker.mute_for_idle();
           g_codec_mic.set_suspended(true);
-          if (!g_codec.release_idle()) g_codec_mic.set_suspended(false);
+          // I2S first, then the codec: closing the device disables its channel
+          // too, and a channel that is already down fails the release.
+          if (g_codec.release_idle()) {
+            // The ES8311 left running with no MCLK is a click on the speaker,
+            // and the microphones are suspended, so the shared device can close.
+            g_codec_speaker.power_down();
+          } else {
+            g_codec_mic.set_suspended(false);
+          }
         }
       } else {
         g_codec.restore_idle();
+        g_codec_speaker.power_up();
         g_codec_mic.set_suspended(false);
       }
       return on ? "@ok idle: panel rail down, a key wakes it (epd idle off)"
@@ -1068,12 +1078,18 @@ extern "C" void app_main(void) {
         if (!g_codec_speaker.busy()) {
           g_codec_speaker.mute_for_idle();
           g_codec_mic.set_suspended(true);
-          if (!g_codec.release_idle()) g_codec_mic.set_suspended(false);
+          if (g_codec.release_idle()) {
+            g_codec_speaker.power_down();
+          } else {
+            g_codec_mic.set_suspended(false);
+          }
         }
       }
     } else if (g_runtime.working() || g_key_while_idle) {
+      ESP_LOGI(TAG, "idle left: %s", g_key_while_idle ? "a key" : "work");
       if (g_codec.idle_released()) {
         g_codec.restore_idle();
+        g_codec_speaker.power_up();
         g_codec_mic.set_suspended(false);
       }
       // The trigger is the finger itself, not "a key in the last minute": a

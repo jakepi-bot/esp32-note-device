@@ -4,6 +4,7 @@
 #if CONFIG_HG_BOARD_WS_EPAPER_154
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 
 #include "driver/gpio.h"
@@ -98,6 +99,9 @@ void EpdDisplay::panel_power(bool on) {
   const int level = on ? (pwr_on_level_ ? 1 : 0) : (pwr_on_level_ ? 0 : 1);
   gpio_set_level(static_cast<gpio_num_t>(pwr_pin_), level);
   powered_ = on;
+  // The rail is a boost converter: every edge is a click a person can hear, so
+  // transitions are logged rather than only implied by a frame.
+  ESP_LOGI(TAG, "panel rail %s", on ? "up" : "down");
   if (on) vTaskDelay(pdMS_TO_TICKS(kRailSettleMs));
 }
 
@@ -311,6 +315,27 @@ void EpdDisplay::update_once() {
   // Nothing moved: the panel is bistable and an update that changes no pixel is
   // charge spent on holding the same picture.
   if (band0 < 0) return;
+
+  // Temporary energy instrumentation (build flag CONFIG_HG_EPD_ENERGY_LOG):
+  // stamp this refresh so the partial and full paths can be told apart and
+  // counted for the mAh measurement. Strictly additive; no refresh behaviour
+  // changes. The marker carries the driving time and the rail state the bench
+  // meter will be put on, and the running totals the report consumes.
+  const bool is_full = force_full_.load(std::memory_order_relaxed) || !partial_ || partials_ >= full_every_;
+  #if CONFIG_HG_EPD_ENERGY_LOG
+  {
+    const int rows = band1 - band0 + 1;
+    epd_refresh_count_.fetch_add(1, std::memory_order_relaxed);
+    epd_rows_driven_total_.fetch_add(static_cast<uint32_t>(rows), std::memory_order_relaxed);
+    epd_drive_ms_total_.fetch_add(static_cast<uint32_t>(now_ms()), std::memory_order_relaxed);
+    epd_last_refresh_rows_ = rows;
+    epd_last_refresh_ms_ = now_ms();
+    epd_last_refresh_full_ = is_full;
+    ESP_LOGI(TAG, "[EPD] refresh seq=%lu full=%d rows=%d ts=%ld ms rail_up=%d",
+             static_cast<unsigned>(epd_refresh_count_.load(std::memory_order_relaxed)), is_full ? 1 : 0,
+             rows, static_cast<long>(now_ms()), powered_ ? 1 : 0);
+  }
+  #endif
 
   // Full on the first frame, every kFullEvery partial ones, and whenever the
   // UI asked for a repaint after a failed transfer. The sequence mirrors the

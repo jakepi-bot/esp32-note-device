@@ -1,5 +1,6 @@
 // See notes_app/ui_state.hpp.
 #include "notes_app/ui_state.hpp"
+#include "notes_app/strings.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -14,6 +15,9 @@ namespace {
 // a fact has to earn its frame.
 constexpr int kBatteryStepPct = 2;                          // ignore the 1 % noise
 constexpr uint32_t kBatteryRateMs = 5u * 60u * 1000u;       // and no more than this often
+// How long "BATTERY LOW" stays on Home's line. Long enough to read on a device
+// whose screen is off most of the day, short enough not to hide the counts.
+constexpr uint32_t kLowBatteryNoticeMs = 15u * 1000u;
 constexpr uint64_t kCardFreeSlackBytes = 1ull << 20;        // 1 MiB: a write moves free space
 
 }  // namespace
@@ -150,6 +154,15 @@ Outcome UiState::set_facts(const Facts& facts, uint32_t now_ms) {
                        : 100;
   const bool rate_due = last_power_ms_ == 0 || now_ms - last_power_ms_ >= kBatteryRateMs;
   const bool low = facts.battery_pct >= 0 && facts.battery_pct <= 10 && !facts.external;
+  // A low cell says so once per discharge: the crossing of the threshold is the
+  // event, not the level. Charging back up (or a fresh cell) re-arms it, so the
+  // next fall gets its own warning rather than silence.
+  if (low && !low_warned_) {
+    low_warned_ = true;
+    set_notice(band::kLowBattery, now_ms, kLowBatteryNoticeMs);
+  } else if (!low && low_warned_) {
+    low_warned_ = false;
+  }
   const bool power_dirty = external_changed || low != snap_.low_power ||
                            (pct_changed && (step >= kBatteryStepPct || rate_due));
 

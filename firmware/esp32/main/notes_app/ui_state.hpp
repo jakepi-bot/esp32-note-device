@@ -167,6 +167,7 @@ class UiState {
   // Home's notice: the ms it lapses at (0: none) and the card's total when it
   // was set, so a note that lands after it takes the line back (a saved note is
   // not a discarded one).
+  bool low_warned_ = false;   // the low-battery notice has been said this discharge
   uint32_t notice_until_ms_ = 0;
   uint32_t notice_notes_ = 0;
 };

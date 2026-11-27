@@ -383,6 +383,35 @@ TEST("facts: a one percent battery step is the ADC talking, not the glass") {
   CHECK(ui.snapshot().external);
 }
 
+TEST("battery: a low cell says so once, and a charge re-arms the warning") {
+  TempDir dir;
+  Store store(dir.path);
+  UiState ui;
+  ui.begin(battery_seed(12), &store);
+  // Above the line: nothing to say.
+  CHECK(!ui.set_facts(facts_at(12), 5000).draw);
+  CHECK(std::string(ui.snapshot().notice).empty());
+
+  // Crossing it draws, and Home says why - once.
+  CHECK(ui.set_facts(facts_at(9), 20000).draw);
+  CHECK(std::string(ui.snapshot().notice) == "BATTERY LOW");
+
+  // The line lapses on its own - tick() is the clock that watches for it - and
+  // is not said again while the cell stays low.
+  ui.tick(60000);
+  CHECK(std::string(ui.snapshot().notice).empty());
+  ui.set_facts(facts_at(8), 400000);
+  CHECK(std::string(ui.snapshot().notice).empty());
+
+  // A charge re-arms it, so the next fall earns its own warning.
+  Facts cable = facts_at(8);
+  cable.external = true;
+  ui.set_facts(cable, 500000);
+  ui.set_facts(facts_at(40), 600000);
+  CHECK(ui.set_facts(facts_at(9), 700000).draw);
+  CHECK(std::string(ui.snapshot().notice) == "BATTERY LOW");
+}
+
 TEST("notice: a discarded capture's reason takes Home's line, then the counts return") {
   TempDir dir;
   Store store(dir.path);

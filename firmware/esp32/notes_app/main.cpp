@@ -711,15 +711,10 @@ std::string console_line(std::string_view line) {
           // microphone, release the two I2S channels.
           g_codec_speaker.mute_for_idle();
           g_codec_mic.set_suspended(true);
-          // I2S first, then the codec: closing the device disables its channel
-          // too, and a channel that is already down fails the release.
-          if (g_codec.release_idle()) {
-            // The ES8311 left running with no MCLK is a click on the speaker,
-            // and the microphones are suspended, so the shared device can close.
-            g_codec_speaker.power_down();
-          } else {
-            g_codec_mic.set_suspended(false);
-          }
+          // Muted, not closed: the ES8311 is shared with the microphone, and
+          // closing this handle resets the chip under it - a capture taken
+          // afterwards stored nothing (2026-11-27). Mute is enough for silence.
+          if (!g_codec.release_idle()) g_codec_mic.set_suspended(false);
         }
       } else {
         g_codec.restore_idle();
@@ -1087,11 +1082,7 @@ extern "C" void app_main(void) {
         if (!g_codec_speaker.busy()) {
           g_codec_speaker.mute_for_idle();
           g_codec_mic.set_suspended(true);
-          if (g_codec.release_idle()) {
-            g_codec_speaker.power_down();
-          } else {
-            g_codec_mic.set_suspended(false);
-          }
+          if (!g_codec.release_idle()) g_codec_mic.set_suspended(false);
         }
       }
     } else if (g_runtime.working() || g_key_while_idle) {

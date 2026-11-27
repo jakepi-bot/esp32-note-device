@@ -38,6 +38,8 @@ inline constexpr const char* kAllSent = "ALL SENT";
 // count leaves at scale 1, and it is the only thing the slot ever draws now
 // that the minute-accurate clock is gone.
 inline constexpr const char* kNoTime = "NO TIME";
+// Home's notice when the cell is low: said once per discharge, not every frame.
+inline constexpr const char* kLowBattery = "BATTERY LOW";
 }  // namespace band
 
 // Home, the one line under the hero (§4.2).

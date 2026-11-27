@@ -95,7 +95,7 @@ if(HG_BUILD_TESTS)
   # case the QA pass on t_5baa6311 found missing (defect D1).
   if(NOT MSVC)
     add_executable(hg_notes_ui_tests tests/main.cpp tests/test_notes_screens.cpp tests/test_notes_refresh.cpp
-                   tests/test_notes_recording.cpp)
+                   tests/test_notes_recording.cpp tests/test_idle_audio.cpp)
     target_include_directories(hg_notes_ui_tests PRIVATE esp32/main drivers)
     target_link_libraries(hg_notes_ui_tests PRIVATE hg_core)
     target_sources(hg_notes_ui_tests PRIVATE esp32/main/notes_app/ui_keys.cpp
@@ -104,6 +104,7 @@ if(HG_BUILD_TESTS)
                                             esp32/main/notes_app/ui_app.cpp
                                             esp32/main/notes_app/ui_cache.cpp
                                             esp32/main/notes_app/ui_state.cpp
+                                            esp32/main/notes_app/audio_path.cpp
                                             esp32/main/notes_app/wav_player.cpp
                                             esp32/main/notes/notes_store.cpp
                                             esp32/main/notes/notes_queue.cpp

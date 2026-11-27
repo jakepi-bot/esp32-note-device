@@ -9,6 +9,7 @@
 #include "es7243_adc.h"
 #include "es7243e_adc.h"
 #include "driver/gpio.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -25,7 +26,21 @@ constexpr size_t kMicChunk = 320;             // about 13 ms at 24 kHz
 constexpr size_t kSpeakerBuffer = 192 * 1024;  // absorbs WiFi-burst backlog without dropping; PSRAM, 8 MB free
 constexpr size_t kSpeakerChunk = 512;         // samples per codec write
 
+// Resting waits entered by the speaker task, in RTC memory so a bench can zero
+// them, let the device rest, reset the chip to get its console back, and still
+// read the count (see EspSystem::light_sleep_exits for why).
+RTC_NOINIT_ATTR uint32_t g_idle_waits_rtc;
+RTC_NOINIT_ATTR uint32_t g_idle_waits_magic;
+constexpr uint32_t kIdleWaitsMagic = 0x49444157u;  // 'IDAW'
+
 }  // namespace
+
+uint32_t CodecSpeaker::idle_waits() { return g_idle_waits_magic == kIdleWaitsMagic ? g_idle_waits_rtc : 0; }
+
+void CodecSpeaker::reset_idle_waits() {
+  g_idle_waits_magic = kIdleWaitsMagic;
+  g_idle_waits_rtc = 0;
+}
 
 // --------------------------------------------------------------------------
 // I2C
@@ -326,6 +341,13 @@ void CodecMic::task(void* arg) {
 // Speaker
 
 bool CodecSpeaker::begin(esp_codec_dev_handle_t dev, bool stereo32, int pa) {
+  if (!dev_) {
+    if (g_idle_waits_magic != kIdleWaitsMagic) {
+      // A cold start clears the resting-wait count; a software reset keeps it.
+      g_idle_waits_magic = kIdleWaitsMagic;
+      g_idle_waits_rtc = 0;
+    }
+  }
   if (!dev) return false;
   dev_ = dev;
   uint8_t* storage = static_cast<uint8_t*>(heap_caps_malloc(kSpeakerBuffer + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -355,6 +377,10 @@ bool CodecSpeaker::begin(esp_codec_dev_handle_t dev, bool stereo32, int pa) {
 void CodecSpeaker::mute_for_idle() {
   if (!dev_) return;
   esp_codec_dev_set_out_mute(dev_, true);
+}
+
+void CodecSpeaker::amp_off() {
+  if (pa_) pa_->disable();  // the port-driven enable (GPIO 46 on this board)
 }
 
 void CodecSpeaker::power_down() {
@@ -393,6 +419,10 @@ bool CodecSpeaker::begin(uint32_t sample_rate) {
   power_up();  // a reply can start before the doze that powered it down ends
   open_ = true;
   draining_ = false;
+  // The resting speaker task waits with no timeout (see its idle branch), so a
+  // stream that starts with no samples yet still has to wake it: `open_` is what
+  // it re-reads, and `begin()` is the transition that set it.
+  if (task_) xTaskNotifyGive(task_);
   return true;
 }
 
@@ -522,12 +552,22 @@ void CodecSpeaker::task(void* arg) {
         // is left to drain, so busy() must not stay true until the next stream.
         self->draining_ = false;
       }
-      // Idle on a light-sleep board: wait for write()/abort() instead of waking
-      // every 20 ms, so a doze can light-sleep. Draining, and other boards, keep
-      // the short poll.
+      // Idle on a light-sleep board: wait for write()/abort()/begin() instead of
+      // waking on a clock. This wait used to time out every second
+      // (`pdMS_TO_TICKS(1000)`), and on this board that was a CPU wake per second
+      // for the whole life of the device: the chip left light sleep, the codec's
+      // supply stepped with the load, and the amplifier — still enabled — passed
+      // the step to the speaker as a click once a second. Nothing this task can
+      // see changes while it waits, so the timeout bought nothing; the three
+      // callers that make it work now notify it. Draining, and boards without an
+      // amplifier enable, keep the short poll.
       if (pa) {
-        if (self->can_power_down_ && !playing) ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
-        else vTaskDelay(pdMS_TO_TICKS(20));
+        if (self->can_power_down_ && !playing) {
+          ++g_idle_waits_rtc;
+          ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        } else {
+          vTaskDelay(pdMS_TO_TICKS(20));
+        }
       }
       continue;
     }

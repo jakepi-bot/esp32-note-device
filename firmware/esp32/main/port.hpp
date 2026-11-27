@@ -166,6 +166,21 @@ class EspSystem final : public hg::System {
   // Light sleep since boot, in ms. The key timing subtracts this from a press so
   // that only time the chip was actually asleep is forgiven, not a slow loop.
   static uint32_t slept_ms_total();
+  // Light-sleep exits since boot, or since reset_light_sleep_exits(). A resting
+  // device should exit about once per idle wait (10 s); anything near 1 a second
+  // is a task polling the CPU awake, and every exit is a load step on the
+  // codec's supply. Kept in RTC memory, so it survives the reset that reading it
+  // after a rest requires.
+  static uint32_t light_sleep_exits();
+  // What woke it, split by cause: a timer is a task's timeout (a poll); a GPIO is
+  // a pin asserting. Two different bugs, two different fixes.
+  struct WakeMix {
+    uint32_t timer = 0;
+    uint32_t gpio = 0;
+    uint32_t other = 0;
+  };
+  static WakeMix light_sleep_wakes();
+  static void reset_light_sleep_exits();
   // Register the light-sleep counter without the doze lock.
   static void enable_sleep_accounting();
   // A lock holds the chip out of light sleep even while dozing (a Wi-Fi join attempt).
@@ -601,6 +616,17 @@ class CodecSpeaker final : public hg::AudioOut {
   // microphones and stays open, so a mute is the only thing that keeps a
   // light-sleep transient off the speaker. Playback unmutes when it has audio.
   void mute_for_idle();
+  // The amplifier's enable, driven low. `mute_for_idle` only writes a DAC
+  // register, and on this board the amplifier's enable is held high by
+  // esp_codec_dev from the moment the codec opens, so a muted DAC still sits on
+  // a live amplifier: a light-sleep load step on the supply comes out of the
+  // speaker. Resting drives it low; playback enables it again per stream.
+  void amp_off();
+  // How many times the speaker task has entered its resting wait. Each one that
+  // times out is a CPU wake and a load step on the codec's supply; a resting
+  // device must sit here instead of returning every second. Read by `wakes`.
+  static uint32_t idle_waits();
+  static void reset_idle_waits();  // with the light-sleep counter: one bench window
   // An amplifier enable that isn't an ESP32 pin (StickS3: behind the M5PM1).
   // Used when begin() gets no PA pin; set it before begin().
   std::function<void(bool)> board_pa;

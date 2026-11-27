@@ -31,6 +31,7 @@
 #include "nvs_flash.h"
 #include "notes/sd_mount.hpp"
 #include "runtime.hpp"
+#include "notes_app/audio_path.hpp"
 #include "notes_app/ui_keys.hpp"
 #include "port_display_epd.hpp"
 #include "ui_device.hpp"
@@ -66,6 +67,11 @@ hgp::notes::Store g_store;
 // note player. The runtime keeps what the screens cannot see - the upload, the
 // radio's windows, the retention rule, the shutdown.
 hgp::NotesUi g_ui;
+// What the audio path is doing: the one owner of the codec, the microphone, the
+// amplifier and the panel rail, and the one place a transition is computed
+// (notes_app/audio_path.hpp). The flags that used to be spread over this file,
+// port_codec.cpp and ui_state cost three regressions in a day.
+hgn::AudioPath g_audio;
 
 // BOOT's two jobs and PWR's. A PWR hold hands over before the latch's own
 // hardware cutoff (2.5 s): the flush needs the time, and the release is
@@ -230,7 +236,15 @@ void apply_power_management(bool on_cable) {
   esp_pm_config_t pm = {};
   pm.max_freq_mhz = 240;
   pm.min_freq_mhz = 80;
-  pm.light_sleep_enable = hgp::board_config().light_sleep && !on_cable;
+  // A cable is a desk or a bench, so the port stays up and the chip does not
+  // sleep. HG_BENCH_LIGHT_SLEEP lifts that rule for a bench build: the sleeping
+  // path can then be measured and heard on the cable, which is the only way to
+  // reach it without a cell and a person to unplug one.
+  bool may_sleep = hgp::board_config().light_sleep && !on_cable;
+#if defined(HG_BENCH_LIGHT_SLEEP)
+  may_sleep = hgp::board_config().light_sleep;
+#endif
+  pm.light_sleep_enable = may_sleep;
   if (esp_pm_configure(&pm) != ESP_OK) {
     ESP_LOGW(TAG, "power management unavailable; the CPU stays at full speed");
     return;
@@ -240,13 +254,41 @@ void apply_power_management(bool on_cable) {
            on_cable ? "cable: the USB port stays up" : "on the cell");
 }
 
-void restore_codec_for_press() {
-  if (g_codec.idle_released()) {
-    g_codec.restore_idle();
-    g_codec_speaker.power_up();  // idle closes it; a capture needs it open
-    g_codec_mic.set_suspended(false);
+// The one place a PathActions is turned into port calls. The machine
+// (notes_app/audio_path.*) decides; this applies the decision in the order that
+// keeps it inaudible - mute, amplifier, microphone, then the I2S channels - and
+// moves the two views that follow the rail (the glass and the runtime's idle
+// flag) with it, so no caller has to remember them.
+void apply_actions(const hgn::PathActions& act) {
+  if (!act.any()) return;
+  if (act.mute_dac) g_codec_speaker.mute_for_idle();
+  if (act.pa_off) g_codec_speaker.amp_off();
+  if (act.suspend_mic) g_codec_mic.set_suspended(true);
+  if (act.release_i2s) {
+    // A release that fails leaves the microphone reading disabled channels: give
+    // it back rather than let it spin on the error path.
+    if (!g_codec.release_idle()) g_codec_mic.set_suspended(false);
+  }
+  if (act.power_down_codec) g_codec_speaker.power_down();
+  if (act.restore_i2s) g_codec.restore_idle();
+  if (act.resume_mic) g_codec_mic.set_suspended(false);
+  if (act.power_up_codec) g_codec_speaker.power_up();
+  if (act.rail_down) {
+    g_ui.idle(true);
+    g_runtime.set_idle(true);
+  }
+  if (act.rail_up) {
+    g_ui.idle(false);
+    g_runtime.set_idle(false);
   }
 }
+
+// A press arrived with the screen dark - from a GPIO, or from the console's `key`
+// verb, which is a press for a bench with no finger on the board. The sound comes
+// back before anything can read a microphone: the capture that follows starts on
+// live channels (measured: 2,219 ms to the first frame without this, 189-216 ms
+// with it).
+void restore_codec_for_press() { apply_actions(g_audio.press()); }
 
 // PWR + BOOT: whatever is down now is not a press. Called at boot and when the
 // power source changes under a finger that is not there.
@@ -622,6 +664,35 @@ std::string console_line(std::string_view line) {
     esp_pm_dump_locks(stdout);
     return "@ok power-management locks dumped above";
   }
+  if (line.rfind("wakes", 0) == 0) {
+    // The rest measured, not guessed: how often the chip left light sleep, how
+    // often the speaker task's resting wait returned, and how much of the time
+    // since boot was actually spent asleep. A resting device should show one
+    // light-sleep exit per idle wait (10 s) and no speaker waits at all; a rate
+    // near one a second is a task polling the CPU awake, and every exit is a
+    // current step through the codec's supply.
+    //
+    // `wakes reset` zeroes the two counters and leaves them where a reset cannot
+    // reach (RTC memory): a device that is genuinely resting cannot answer this
+    // console at all, so the reading has to survive the USB reset that brings
+    // it back.
+    const std::string_view arg(line.size() > 6 ? line.substr(6) : std::string_view());
+    if (arg == "reset") {
+      hgp::EspSystem::reset_light_sleep_exits();
+      hgp::CodecSpeaker::reset_idle_waits();
+      return "@ok counters zeroed; read them after the rest with `wakes`";
+    }
+    const uint32_t uptime = g_system.now_ms() / 1000;
+    const auto mix = hgp::EspSystem::light_sleep_wakes();
+    char out[240];
+    std::snprintf(out, sizeof out,
+                  "@wakes %u light-sleep exits (%u timer, %u gpio, %u other), %u speaker idle waits, %u s since boot, %u ms asleep",
+                  static_cast<unsigned>(hgp::EspSystem::light_sleep_exits()), static_cast<unsigned>(mix.timer),
+                  static_cast<unsigned>(mix.gpio), static_cast<unsigned>(mix.other),
+                  static_cast<unsigned>(hgp::CodecSpeaker::idle_waits()), static_cast<unsigned>(uptime),
+                  static_cast<unsigned>(hgp::EspSystem::slept_ms_total()));
+    return out;
+  }
   if (line == "power") {
     // The three lines that decide whether a board on battery stays up: the
     // latch's pad level, the PWR key's own level, and what the port thinks the
@@ -700,27 +771,12 @@ std::string console_line(std::string_view line) {
     const std::string_view rest(line.substr(4));
     if (rest.rfind("idle", 0) == 0) {
       // The bench has to see the idle state without unplugging: on the cable the
-      // device never idles by design (somebody is at the desk with a meter).
+      // device never idles by design (somebody is at the desk with a meter). It
+      // takes the machine's own transition, so what is measured here is what a
+      // resting device does - two copies of this sequence is how the bench and
+      // the device came to differ.
       const bool on = rest != "idle off";
-      g_ui.idle(on);
-      g_runtime.set_idle(on);
-      if (on) {
-        if (!g_codec_speaker.busy()) {
-          // Same three steps as the automatic idle below, so the bench hears
-          // what a resting device does: silence the DAC, suspend the shared
-          // microphone, release the two I2S channels.
-          g_codec_speaker.mute_for_idle();
-          g_codec_mic.set_suspended(true);
-          // Muted, not closed: the ES8311 is shared with the microphone, and
-          // closing this handle resets the chip under it - a capture taken
-          // afterwards stored nothing (2026-11-27). Mute is enough for silence.
-          if (!g_codec.release_idle()) g_codec_mic.set_suspended(false);
-        }
-      } else {
-        g_codec.restore_idle();
-        g_codec_speaker.power_up();
-        g_codec_mic.set_suspended(false);
-      }
+      apply_actions(g_audio.force_idle(on));
       return on ? "@ok idle: panel rail down, a key wakes it (epd idle off)"
                 : "@ok awake: rail up, full redraw";
     }
@@ -852,6 +908,16 @@ extern "C" void app_main(void) {
   }
 
   g_config.begin(g_storage);
+  // What this board's audio path can do, before anything asks it to move: a codec
+  // the microphone shares is never closed (closing it resets the chip under a
+  // capture), the amplifier has an enable of its own, and the panel rail is ours.
+  {
+    hgn::PathCaps caps;
+    caps.codec_shared = board.codec.mic == hgp::MicCodec::Es8311 && board.codec.speaker == hgp::SpeakerCodec::Es8311;
+    caps.pa_pin = board.codec.pa >= 0;
+    caps.panel_rail = board.epd.enabled;
+    g_audio = hgn::AudioPath(caps);
+  }
   // Power management: the full gadget app configures it, and the notes build
   // inherited the Kconfig without the call - so the CPU sat at 240 MHz and light
   // sleep never engaged. With the radio off this app idled at 39 mA (meter,
@@ -884,19 +950,17 @@ extern "C" void app_main(void) {
     // Enable automatic power management: allow the codec to power down while the
     // chip light-sleeps, so the i2s APB_FREQ_MAX lock is released and the chip can
     // actually enter light sleep. Only taken when the board allows it.
-    // While the device is idle the codec is already closed and the I2S released,
-    // so these have nothing to free - and reopening it on every wake is exactly
-    // the pop a person hears: a light-sleep cycle closed and reopened the codec
-    // each time, and the network retry on every wake made it worse. Idle stays
-    // shut until a key, which is when the idle path reopens it itself.
-    g_system.on_doze_start = [] {
-      if (g_ui.idle()) return;
-      g_codec_speaker.power_down();
-    };
+    // The light-sleep callbacks are the machine's own transitions now, not a
+    // second opinion beside them: from a resting device they touch nothing (that
+    // reopen was the pop heard once per sleep cycle), and an awake one only loses
+    // what the machine says it may lose.
+    g_system.on_doze_start = [] { apply_actions(g_audio.doze_start()); };
     g_system.on_doze_end = [] {
-      if (g_ui.idle()) return;
-      g_codec_speaker.power_up();
-      g_net.retry_now();
+      const hgn::PathActions act = g_audio.doze_end();
+      apply_actions(act);
+      // The network retry belongs to a device that is about to be looked at, not
+      // to one that rests: an idle wake is not the user coming back.
+      if (act.any()) g_net.retry_now();
     };
   }
   // The clock wants network time: this board has no RTC, so every note recorded
@@ -1034,10 +1098,7 @@ extern "C" void app_main(void) {
     // A finger arriving while the I2S channels are released for sleep: sound
     // first, then the wake. poll_keys() below can start a recording on this very
     // pass, and the microphone reads a channel that is disabled until this runs.
-    if (g_key_while_idle && g_codec.idle_released()) {
-      g_codec.restore_idle();
-      g_codec_mic.set_suspended(false);
-    }
+    if (g_key_while_idle) restore_codec_for_press();
     const uint32_t now = g_system.now_ms();
     // The supply changed: plugging or unplugging the cable moves the PWR sense
     // line, and that edge is not a finger. Lock the keys and say so.
@@ -1060,43 +1121,24 @@ extern "C" void app_main(void) {
     poll_network(now);
     g_runtime.tick(now, g_link == Link::Up);
     poll_keys(now);
-    // Idle, entered on the cell only - a device on the cable is somebody's bench
-    // with a meter on it - and left only for a reason: a key, or work to do. The
-    // first version also woke it merely because the cable was present, which
-    // cancelled `epd idle on` within one loop pass (frames climbed 4 -> 6 in the
-    // 45 s it was supposed to be dark).
-    if (!g_ui.idle()) {
-      if (!power_cable && !g_runtime.busy(now) && now - last_touch_ms > kIdleEnterMs) {
-        ESP_LOGI(TAG, "idle after %u s: panel rail down, a key wakes it",
-                 static_cast<unsigned>((now - last_touch_ms) / 1000));
-        g_ui.idle(true);
-        g_runtime.set_idle(true);
-        // The two enabled I2S channels are the only locks left at rest, and one
-        // held lock is enough to keep ESP-IDF out of light sleep. Audio in flight
-        // (a beep, a recording) keeps them: the next pass tries again. The mic
-        // is suspended first: a shared codec reads while idle by design, and that
-        // read holds the receive channel's lock and spins at the error path once
-        // the channel is released. The DAC is muted for the same reason: the
-        // codec keeps running for the microphones, and a light-sleep transient
-        // through it is audible on the speaker.
-        if (!g_codec_speaker.busy()) {
-          g_codec_speaker.mute_for_idle();
-          g_codec_mic.set_suspended(true);
-          if (!g_codec.release_idle()) g_codec_mic.set_suspended(false);
-        }
-      }
-    } else if (g_runtime.working() || g_key_while_idle) {
+    // What the audio path is doing, one owner: the demand is built from what the
+    // loop knows, and the machine answers with the actions to apply and the rail
+    // transition the glass and the runtime follow. The idle timeout stays here - a
+    // person has stopped reading the screen - and is passed as `asked`.
+    hgn::PathDemand demand;
+    demand.capturing = g_runtime.recording();
+    demand.playing = g_codec_speaker.busy();
+    demand.key_down = key_down_now();
+    demand.busy = g_runtime.busy(now);
+    demand.on_cable = power_cable;
+    demand.asked = !power_cable && !g_runtime.busy(now) && now - last_touch_ms > kIdleEnterMs;
+    if (demand.asked && !g_audio.idle())
+      ESP_LOGI(TAG, "idle after %u s: panel rail down, a key wakes it",
+               static_cast<unsigned>((now - last_touch_ms) / 1000));
+    const bool was_idle = g_audio.idle();
+    apply_actions(g_audio.update(demand));
+    if (was_idle && !g_audio.idle()) {
       ESP_LOGI(TAG, "idle left: %s", g_key_while_idle ? "a key" : "work");
-      if (g_codec.idle_released()) {
-        g_codec.restore_idle();
-        g_codec_speaker.power_up();
-        g_codec_mic.set_suspended(false);
-      }
-      // The trigger is the finger itself, not "a key in the last minute": a
-      // timestamp window undid `epd idle on` for a minute after every boot, and
-      // a console poll must never wake the glass.
-      g_ui.idle(false);
-      g_runtime.set_idle(false);
     }
     g_key_while_idle = false;
     // The screens' heartbeat: the recording counter, the playback position and

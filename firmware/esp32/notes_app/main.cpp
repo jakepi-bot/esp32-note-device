@@ -1251,7 +1251,21 @@ extern "C" void app_main(void) {
       if (FILE* f = std::fopen("/sdcard/hg-power.log", "a")) {
         const std::string st = g_runtime.console("status");
         const bool usb = g_latch.external_power().value_or(false);
-        std::fprintf(f, "%lu usb=%d %s\n", static_cast<unsigned long>(now / 1000), usb ? 1 : 0, st.c_str());
+        // The counters that answer "does it actually sleep": total asleep since
+        // boot, and since the first line the shortest and longest stretch it
+        // managed plus what woke it. A one-second wake leaves shortest_ms at
+        // ~1000 and w_timer climbing every minute; a fixed idle picture has
+        // shortest_ms above the loop's own period and w_timer matching it.
+        static bool begun = false;
+        if (!begun) { hgp::EspSystem::reset_light_sleep_exits(); begun = true; }
+        const auto mix = hgp::EspSystem::light_sleep_wakes();
+        std::fprintf(f,
+                     "%lu usb=%d slept=%lu asleep=%lu shortest=%lu longest=%lu w_timer=%lu w_gpio=%lu %s\n",
+                     static_cast<unsigned long>(now / 1000), usb ? 1 : 0,
+                     static_cast<unsigned long>(hgp::EspSystem::slept_ms_total()),
+                     static_cast<unsigned long>(mix.asleep_ms), static_cast<unsigned long>(mix.shortest_ms),
+                     static_cast<unsigned long>(mix.longest_ms), static_cast<unsigned long>(mix.timer),
+                     static_cast<unsigned long>(mix.gpio), st.c_str());
         std::fclose(f);
       }
     }

@@ -1,5 +1,14 @@
 menu "Hermes Gadget"
 
+    config HG_EPD_ENERGY_LOG
+        bool "Log every e-paper refresh for the energy bench"
+        default n
+        help
+            A marker per refresh plus running totals, for the mAh measurement.
+            It costs a log line per refresh, so it is off by default: the board
+            file that wants it sets CONFIG_HG_EPD_ENERGY_LOG=y, and without this
+            declaration that line fails the sdkconfig/defaults check.
+
     menu "Defaults (overridable from the serial console)"
         config HG_DEFAULT_NAME
             string "Device name"

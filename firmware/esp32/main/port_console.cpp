@@ -124,7 +124,8 @@ void begin() {
   // `pmsleep` lives in the notes handler (notes_app/main.cpp) and was never
   // listed here, so esp_console answered "Unrecognized command" and the one
   // diagnostic that proves whether light sleep works was unreachable.
-  for (const char* name : {"about", "battery", "clock", "power", "pm", "pmsleep", "wakes", "tasks", "timers", "hold", "lwip", "amp", "radio", "sd", "keys", "ui", "wifi-set", "epd"}) {
+  for (const char* name : {"about", "battery", "clock", "power", "pm", "pmsleep", "radio", "sd", "keys", "ui",
+                           "wifi-set", "epd", "powerlog"}) {
     esp_console_cmd_t cmd = {};
     cmd.command = name;
     cmd.help = "Notes app status (see: notes status)";

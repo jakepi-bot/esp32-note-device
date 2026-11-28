@@ -328,9 +328,9 @@ void EpdDisplay::update_once() {
     epd_refresh_count_.fetch_add(1, std::memory_order_relaxed);
     epd_rows_driven_total_.fetch_add(static_cast<uint32_t>(rows), std::memory_order_relaxed);
     epd_drive_ms_total_.fetch_add(static_cast<uint32_t>(now_ms()), std::memory_order_relaxed);
-    epd_last_refresh_rows_ = rows;
-    epd_last_refresh_ms_ = now_ms();
-    epd_last_refresh_full_ = is_full;
+    last_refresh_rows_ = rows;
+    last_refresh_ms_ = now_ms();
+    last_refresh_full_ = is_full;
     ESP_LOGI(TAG, "[EPD] refresh seq=%lu full=%d rows=%d ts=%ld ms rail_up=%d",
              static_cast<unsigned>(epd_refresh_count_.load(std::memory_order_relaxed)), is_full ? 1 : 0,
              rows, static_cast<long>(now_ms()), powered_ ? 1 : 0);

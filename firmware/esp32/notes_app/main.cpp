@@ -661,6 +661,20 @@ std::string console_line(std::string_view line) {
                   static_cast<unsigned>(hgp::EspSystem::slept_ms_total()));
     return out;
   }
+  if (line == "powerlog") {
+    // The battery bench's record, tail first: what the device saw while it was
+    // on the cell, which is the only place the idle duty cycle can be measured.
+    std::string all;
+    if (FILE* f = std::fopen("/sdcard/hg-power.log", "r")) {
+      char buf[240];
+      while (std::fgets(buf, sizeof buf, f) != nullptr) all += buf;
+      std::fclose(f);
+    }
+    if (all.empty()) return "@error no power log on the card";
+    const size_t keep = 1400;
+    if (all.size() > keep) all = all.substr(all.size() - keep);
+    return "@ok power log (tail):\n" + all;
+  }
   if (line == "pm") {
     // Who is keeping the CPU awake. Light sleep that never engages has a holder,
     // and this names it: the battery work needs the holder, not a guess.
@@ -1226,5 +1240,20 @@ extern "C" void app_main(void) {
     // The screens' heartbeat: the recording counter, the playback position and
     // the panel's own redraw request. Nothing here runs on a timer of its own.
     g_ui.tick(now);
+    // The battery bench: one status line a minute on the card. A run on the cell
+    // cannot be watched over the console - the cable is what disables light sleep
+    // and what keeps the port alive - so the device keeps its own record and the
+    // person reads it back with `powerlog` when it is plugged in again.
+    static uint32_t next_power_log = 0;
+    if (next_power_log == 0) next_power_log = now + 60000;
+    if (static_cast<int32_t>(now - next_power_log) >= 0) {
+      next_power_log = now + 60000;
+      if (FILE* f = std::fopen("/sdcard/hg-power.log", "a")) {
+        const std::string st = g_runtime.console("status");
+        const bool usb = g_latch.external_power().value_or(false);
+        std::fprintf(f, "%lu usb=%d %s\n", static_cast<unsigned long>(now / 1000), usb ? 1 : 0, st.c_str());
+        std::fclose(f);
+      }
+    }
   }
 }

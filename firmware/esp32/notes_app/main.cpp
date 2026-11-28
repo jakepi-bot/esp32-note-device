@@ -29,6 +29,7 @@
 #include "esp_pm.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "lwip/timeouts.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -671,7 +672,7 @@ std::string console_line(std::string_view line) {
       std::fclose(f);
     }
     if (all.empty()) return "@error no power log on the card";
-    const size_t keep = 1400;
+    const size_t keep = 24000;
     if (all.size() > keep) all = all.substr(all.size() - keep);
     return "@ok power log (tail):\n" + all;
   }
@@ -773,6 +774,28 @@ std::string console_line(std::string_view line) {
 #else
     return "@error bench builds only";
 #endif
+  }
+  if (line.rfind("peek ", 0) == 0) {
+    // Bench: read the esp_timer struct at the address `timers` printed. In this
+    // IDF the layout is alarm(+0), period:56|flags:8(+8), callback(+16), arg(+20),
+    // so word 4 is the function to name with addr2line.
+    unsigned long addr = 0;
+    unsigned words = 8;
+    const std::string arg(line.substr(5));
+    if (std::sscanf(arg.c_str(), "%lx %u", &addr, &words) < 1) return "@error peek <hexaddr> [words]";
+    if (words > 32) words = 32;
+    const uint32_t* p = reinterpret_cast<const uint32_t*>(addr);
+    for (unsigned i = 0; i < words; ++i) {
+      std::printf("%08lx: %08lx\n", static_cast<unsigned long>(addr + i * 4), static_cast<unsigned long>(p[i]));
+    }
+    return "@ok memory dumped above";
+  }
+  if (line == "wifideinit") {
+    // Bench probe for the 1 s timer that survives `wifi closed`: esp_wifi_stop()
+    // leaves the driver's own timers armed, so tear the driver down and dump again.
+    esp_wifi_stop();
+    const esp_err_t e = esp_wifi_deinit();
+    return std::string("@ok esp_wifi_deinit -> ") + esp_err_to_name(e);
   }
   if (line == "timers") {
     // What alarm is next, by name. A resting device that wakes once a second is

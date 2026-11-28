@@ -125,7 +125,7 @@ void begin() {
   // listed here, so esp_console answered "Unrecognized command" and the one
   // diagnostic that proves whether light sleep works was unreachable.
   for (const char* name : {"about", "battery", "clock", "power", "pm", "pmsleep", "radio", "sd", "keys", "ui",
-                           "wifi-set", "epd", "powerlog"}) {
+                           "wifi-set", "epd", "powerlog", "timers", "wifideinit", "peek"}) {
     esp_console_cmd_t cmd = {};
     cmd.command = name;
     cmd.help = "Notes app status (see: notes status)";

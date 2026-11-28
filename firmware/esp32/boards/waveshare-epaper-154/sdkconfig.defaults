@@ -20,6 +20,7 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 # CONFIG_ESP_CONSOLE_UART_DEFAULT is not set
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_HG_BOARD_WS_EPAPER_154=y
+CONFIG_HG_EPD_ENERGY_LOG=y
 # Battery life: scale the CPU down to 80 MHz when idle (see app_main).
 CONFIG_PM_ENABLE=y
 # Light sleep while dozing (on battery, screen off, idle; see EspSystem::enable_doze).
@@ -68,3 +69,11 @@ CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
 # Wi-Fi and Bluetooth share the antenna: keep the radio schedule fair, or a
 # note uploads over Wi-Fi while the phone waits.
 CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
+# The PHY re-tracks its PLL on a periodic timer, and that timer is armed from the
+# moment the PHY is initialised - wifi_stop and even wifi_deinit leave it running.
+# At its 1000 ms default it was the last thing waking the chip every second on the
+# cell (callback phy_track_pll_timer_callback, found with `timers` + `peek`).
+# A minute is still far faster than crystal drift, and it turns 3600 wakes an hour
+# into 60. Do not disable the tracking outright: that option is behind PHY debug
+# and gives up temperature adaptation.
+CONFIG_ESP_PHY_PLL_TRACK_PERIOD_MS=60000
